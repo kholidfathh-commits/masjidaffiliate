@@ -14,32 +14,34 @@ import { createClient } from '@supabase/supabase-js';
 
 // ============ ROLES & PERMISSIONS ============
 const ROLES = {
-  manajer:    { label: 'Manajer',         color: 'bg-amber-100 text-amber-800 border-amber-300',     icon: Crown,     rank: 3 },
-  leader:     { label: 'Leader',          color: 'bg-blue-100 text-blue-800 border-blue-300',         icon: UserCheck, rank: 2 },
-  operasional:{ label: 'Tim Operasional', color: 'bg-indigo-100 text-indigo-800 border-indigo-300',icon: User,      rank: 1 }
+  owner:      { label: 'Owner',            color: 'bg-violet-100 text-violet-800 border-violet-300',   icon: Crown,     rank: 4 },
+  manajer:    { label: 'Manajer',          color: 'bg-amber-100 text-amber-800 border-amber-300',      icon: Shield,    rank: 3 },
+  leader:     { label: 'Leader',           color: 'bg-blue-100 text-blue-800 border-blue-300',          icon: UserCheck, rank: 2 },
+  operasional:{ label: 'Karyawan',         color: 'bg-indigo-100 text-indigo-800 border-indigo-300',    icon: User,      rank: 1 }
 };
 
 const can = {
-  manageAllUsers: u => u.role === 'manajer',
-  createManajer: u => u.role === 'manajer',
-  createLeader: u => u.role === 'manajer',
-  createOperasional: u => u.role === 'manajer' || u.role === 'leader',
-  editAppSettings: u => u.role === 'manajer',
-  viewAllData: u => u.role === 'manajer',
-  manageAllCreators: u => u.role === 'manajer',
-  assignCreator: u => u.role === 'manajer' || u.role === 'leader',
-  createTasks: u => u.role === 'manajer' || u.role === 'leader',
-  postAnnouncements: u => u.role === 'manajer' || u.role === 'leader',
-  manageSchedule: u => u.role === 'manajer' || u.role === 'leader',
+  manageAllUsers: u => u.role === 'owner' || u.role === 'manajer',
+  createOwner: u => u.role === 'owner',
+  createManajer: u => u.role === 'owner' || u.role === 'manajer',
+  createLeader: u => u.role === 'owner' || u.role === 'manajer',
+  createOperasional: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
+  editAppSettings: u => u.role === 'owner' || u.role === 'manajer',
+  viewAllData: u => u.role === 'owner' || u.role === 'manajer',
+  manageAllCreators: u => u.role === 'owner' || u.role === 'manajer',
+  assignCreator: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
+  createTasks: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
+  postAnnouncements: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
+  manageSchedule: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
   // contextual checks
   canSeeUser: (viewer, target) => {
-    if (viewer.role === 'manajer') return true;
+    if (viewer.role === 'owner' || viewer.role === 'manajer') return true;
     if (viewer.id === target.id) return true;
     if (viewer.role === 'leader' && target.leaderId === viewer.id) return true;
     return false;
   },
   canSeeTask: (viewer, task, allUsers) => {
-    if (viewer.role === 'manajer') return true;
+    if (viewer.role === 'owner' || viewer.role === 'manajer') return true;
     if (task.assigneeId === viewer.id || task.createdById === viewer.id) return true;
     if (viewer.role === 'leader') {
       const assignee = allUsers.find(u => u.id === task.assigneeId);
@@ -48,7 +50,7 @@ const can = {
     return false;
   },
   canSeeCreator: (viewer, creator, allUsers) => {
-    if (viewer.role === 'manajer') return true;
+    if (viewer.role === 'owner' || viewer.role === 'manajer') return true;
     if (creator.managerId === viewer.id) return true;
     if (viewer.role === 'leader') {
       const manager = allUsers.find(u => u.id === creator.managerId);
@@ -213,7 +215,7 @@ const DEFAULT_DAILY_FIELDS = [
   { id: 'liveCount',    label: 'Jumlah Live',          type: 'number',   required: false }
 ];
 
-const DEFAULT_ROLE_LABELS = { manajer: 'Manajer', leader: 'Leader', operasional: 'Tim Operasional' };
+const DEFAULT_ROLE_LABELS = { owner: 'Owner', manajer: 'Manajer', leader: 'Leader', operasional: 'Karyawan' };
 const DEFAULT_JOB_TITLES = ['Creator Manager', 'Admin Live', 'Admin Grup', 'Creator Hunter', 'Content Creator', 'Tim Ads', 'Marketing', 'Editor Video'];
 const DEFAULT_SETTINGS = {
   appName: 'Al-Kahfi Corp',
@@ -243,6 +245,7 @@ export default function App() {
   const [view, setView] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [entered, setEntered] = useState(false);
 
@@ -327,12 +330,18 @@ export default function App() {
       <div className="flex">
         <Sidebar view={view} setView={setView} user={currentUser} settings={settings} onLogout={handleLogout}
           isOpen={sidebarOpen} onToggle={toggleSidebar}
+          mobileOpen={mobileMenuOpen} onCloseMobile={() => setMobileMenuOpen(false)}
           onOpenProfile={() => setShowProfile(true)} />
-        <main className={`flex-1 min-h-screen transition-all duration-200 ${sidebarOpen ? 'ml-64' : 'ml-16'}`}>
+        {/* Backdrop untuk drawer mobile */}
+        {mobileMenuOpen && (
+          <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
+        )}
+        <main className={`flex-1 min-h-screen transition-all duration-200 ml-0 ${sidebarOpen ? 'lg:ml-64' : 'lg:ml-16'}`}>
           <TopBar user={currentUser} onToggleSidebar={toggleSidebar} sidebarOpen={sidebarOpen}
+            onOpenMobileMenu={() => setMobileMenuOpen(true)}
             onOpenProfile={() => setShowProfile(true)}
             setView={setView} allUsers={allUsers} />
-          <div className="p-6 sm:p-8">
+          <div className="p-4 sm:p-6 lg:p-8">
             {view === 'dashboard' && <Dashboard user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'tasks' && <TasksView user={currentUser} allUsers={allUsers} />}
             {view === 'todos' && <TodosView user={currentUser} allUsers={allUsers} />}
@@ -342,6 +351,7 @@ export default function App() {
             {view === 'daily-reports' && <DailyReportsView user={currentUser} allUsers={allUsers} />}
             {view === 'schedule' && <ScheduleView user={currentUser} allUsers={allUsers} />}
             {view === 'calendar' && <CalendarView user={currentUser} allUsers={allUsers} />}
+            {view === 'attendance' && <AttendanceView user={currentUser} allUsers={allUsers} />}
             {view === 'leaderboard' && <LeaderboardView allUsers={allUsers} />}
             {view === 'announcements' && <AnnouncementsView user={currentUser} />}
             {view === 'content-ideas' && <ContentIdeasView user={currentUser} allUsers={allUsers} settings={settings} />}
@@ -539,11 +549,11 @@ function FirstTimeSetup({ settings, onComplete }) {
     const passwordHash = await hashPassword(form.password, salt);
     const newUser = {
       id: uid(), name: form.name.trim(), username: form.username.trim().toLowerCase(),
-      role: 'manajer', leaderId: null, salt, passwordHash,
+      role: 'owner', leaderId: null, salt, passwordHash,
       joinedAt: new Date().toISOString(), createdById: null
     };
     await storage.set('users:list', [newUser]);
-    await logActivity(`bergabung sebagai Manajer (pertama kali)`, newUser.name);
+    await logActivity(`bergabung sebagai Owner (pertama kali)`, newUser.name);
     setBusy(false);
     onComplete(newUser);
   };
@@ -554,8 +564,8 @@ function FirstTimeSetup({ settings, onComplete }) {
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-amber-100 to-amber-50 text-amber-800 rounded-full text-xs font-bold mb-4 border border-amber-200/60 shadow-sm">
           <Crown className="w-3.5 h-3.5" /> SETUP PERTAMA
         </div>
-        <h2 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">Daftarkan Akun Manajer</h2>
-        <p className="text-sm text-slate-500 mt-2 leading-relaxed">Akun pertama otomatis jadi Manajer dengan akses penuh ke seluruh sistem.</p>
+        <h2 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">Daftarkan Akun Owner</h2>
+        <p className="text-sm text-slate-500 mt-2 leading-relaxed">Akun pertama otomatis jadi Owner dengan akses penuh ke seluruh sistem.</p>
       </div>
       <div className="space-y-3.5">
         <Field label="Nama Lengkap">
@@ -586,11 +596,11 @@ function FirstTimeSetup({ settings, onComplete }) {
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2.5 rounded-xl flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />{error}</div>}
         <button onClick={submit} disabled={busy}
           className="w-full bg-gradient-to-r from-[#4F46E5] to-indigo-700 hover:from-[#4F46E5] hover:to-indigo-800 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-indigo-900/20 hover:shadow-xl hover:shadow-indigo-900/30 flex items-center justify-center gap-2 mt-2">
-          <Crown className="w-4 h-4" /> {busy ? 'Memproses...' : 'Daftar & Masuk sebagai Manajer'}
+          <Crown className="w-4 h-4" /> {busy ? 'Memproses...' : 'Daftar & Masuk sebagai Owner'}
         </button>
         <p className="text-[11px] text-center text-slate-500 mt-3 leading-relaxed">
           <Shield className="w-3 h-3 inline -mt-0.5 mr-1 text-indigo-600" />
-          Akses pertama otomatis menjadi Manajer utama. Anda bisa tambahkan Leader & Operasional dari menu "Anggota Tim".
+          Akses pertama otomatis menjadi Owner utama. Anda bisa tambahkan Manajer, Leader & Karyawan dari menu "Anggota Tim".
         </p>
       </div>
     </AuthShell>
@@ -875,7 +885,7 @@ function AuthShell({ settings, children }) {
 }
 
 // ============ SIDEBAR ============
-function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, onOpenProfile }) {
+function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mobileOpen, onCloseMobile, onOpenProfile }) {
   const menuGroups = [
     {
       label: 'Utama',
@@ -888,6 +898,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, on
       items: [
         { id: 'tasks', label: 'Tugas Tim', icon: CheckSquare, show: true },
         { id: 'todos', label: 'To-Do List', icon: KanbanSquare, show: true },
+        { id: 'attendance', label: 'Absensi', icon: MapPin, show: true },
         { id: 'calendar', label: 'Kalender Tim', icon: CalendarDays, show: true },
         { id: 'schedule', label: 'Jadwal Live & Piket', icon: Calendar, show: true }
       ]
@@ -918,14 +929,25 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, on
     }
   ];
   const RoleIcon = ROLES[user.role].icon;
+  // Saat menu dipilih: pindah view + tutup drawer mobile
+  const handleNav = (id) => { setView(id); if (onCloseMobile) onCloseMobile(); };
+  // Di mobile, sidebar selalu lebar penuh (w-64) walau isOpen=false (itu hanya untuk collapse desktop)
+  const mobileWide = mobileOpen;
 
   return (
     <aside style={{ backgroundColor: '#1E1B4B', color: '#FFFFFF' }}
-      className={`fixed left-0 top-0 ${isOpen ? 'w-64' : 'w-16'} h-screen bg-slate-900 text-white flex flex-col transition-all duration-200 border-r border-slate-800/50 z-40`}>
+      className={`fixed left-0 top-0 h-screen flex flex-col transition-all duration-200 border-r border-slate-800/50 z-40
+        w-64 ${isOpen ? 'lg:w-64' : 'lg:w-16'}
+        ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+      {/* Tombol tutup drawer (mobile only) */}
+      <button onClick={onCloseMobile} title="Tutup menu"
+        className="lg:hidden absolute top-3 right-3 z-50 p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition">
+        <X className="w-5 h-5" />
+      </button>
       {/* Brand header */}
       <div style={{ borderBottomColor: 'rgba(30, 41, 59, 0.6)' }}
-        className={`${isOpen ? 'px-5 py-5' : 'p-3'} border-b flex items-center ${isOpen ? 'justify-between gap-2' : 'justify-center'}`}>
-        {isOpen ? (
+        className={`${(isOpen || mobileWide) ? 'px-5 py-5' : 'p-3'} border-b flex items-center ${(isOpen || mobileWide) ? 'justify-between gap-2' : 'justify-center lg:justify-center'}`}>
+        {(isOpen) ? (
           <>
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl flex items-center justify-center text-xl overflow-hidden flex-shrink-0 shadow-lg shadow-indigo-900/50 ring-1 ring-white/10">
@@ -938,15 +960,27 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, on
             </div>
             <button onClick={onToggle} title="Sembunyikan sidebar"
               style={{ color: '#94A3B8' }}
-              className="hover:!text-white p-1 flex-shrink-0 transition">
+              className="hidden lg:flex hover:!text-white p-1 flex-shrink-0 transition">
               <PanelLeftClose className="w-4 h-4" />
             </button>
           </>
         ) : (
-          <button onClick={onToggle} title="Tampilkan sidebar"
-            className="w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl flex items-center justify-center text-xl overflow-hidden hover:opacity-90 transition shadow-lg ring-1 ring-white/10">
-            {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
-          </button>
+          <>
+            {/* Mobile: tampilkan brand penuh; Desktop collapsed: cuma logo */}
+            <div className="flex lg:hidden items-center gap-3 min-w-0">
+              <div className="w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl flex items-center justify-center text-xl overflow-hidden flex-shrink-0 shadow-lg ring-1 ring-white/10">
+                {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
+              </div>
+              <div className="min-w-0">
+                <div style={{ color: '#FFFFFF' }} className="font-display font-bold text-base truncate">{settings.appName}</div>
+                <div style={{ color: '#D6A84F' }} className="text-[9px] uppercase tracking-[0.15em] truncate font-bold">{settings.appSubtitle}</div>
+              </div>
+            </div>
+            <button onClick={onToggle} title="Tampilkan sidebar"
+              className="hidden lg:flex w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl items-center justify-center text-xl overflow-hidden hover:opacity-90 transition shadow-lg ring-1 ring-white/10">
+              {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
+            </button>
+          </>
         )}
       </div>
 
@@ -957,38 +991,38 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, on
           if (visibleItems.length === 0) return null;
           return (
             <div key={gi}>
-              {isOpen && (
-                <div style={{ color: '#94A3B8' }}
-                  className="text-[10px] uppercase tracking-[0.18em] font-bold mb-2 px-3">
-                  {group.label}
-                </div>
-              )}
-              {!isOpen && gi > 0 && <div className="h-px bg-slate-700 mx-2 mb-3"></div>}
+              <div style={{ color: '#94A3B8' }}
+                className={`text-[10px] uppercase tracking-[0.18em] font-bold mb-2 px-3 ${isOpen ? '' : 'lg:hidden'}`}>
+                {group.label}
+              </div>
+              {!isOpen && gi > 0 && <div className="hidden lg:block h-px bg-slate-700 mx-2 mb-3"></div>}
               <div className="space-y-1">
                 {visibleItems.map(item => {
                   const Icon = item.icon;
                   const active = view === item.id;
                   return (
-                    <button key={item.id} onClick={() => setView(item.id)}
+                    <button key={item.id} onClick={() => handleNav(item.id)}
                       title={!isOpen ? item.label : undefined}
                       style={active
                         ? { background: 'linear-gradient(to right, #6366F1, #4F46E5)', color: '#FFFFFF' }
                         : { color: '#CBD5E1' }}
-                      className={`group w-full flex items-center ${isOpen ? 'gap-3 px-3' : 'justify-center px-2'} py-2.5 rounded-xl text-sm font-medium transition-all relative ${
+                      className={`group w-full flex items-center py-2.5 rounded-xl text-sm font-medium transition-all relative ${
+                        isOpen ? 'gap-3 px-3' : 'gap-3 px-3 lg:justify-center lg:gap-0 lg:px-2'
+                      } ${
                         active
                           ? 'shadow-lg shadow-indigo-900/50 ring-1 ring-indigo-400/20'
                           : 'hover:bg-white/10 hover:text-white'
                       }`}>
-                      {active && isOpen && (
+                      {active && (
                         <div style={{ backgroundColor: '#D6A84F', boxShadow: '0 0 8px rgba(214,168,79,0.6)' }}
-                          className="absolute -left-3 top-2 bottom-2 w-1 rounded-r-full"></div>
+                          className={`absolute -left-3 top-2 bottom-2 w-1 rounded-r-full ${isOpen ? '' : 'lg:hidden'}`}></div>
                       )}
                       <Icon style={{ color: active ? '#FFFFFF' : '#94A3B8' }}
                         className="w-[18px] h-[18px] flex-shrink-0 group-hover:!text-white transition" />
-                      {isOpen && <span className="truncate font-medium">{item.label}</span>}
-                      {active && isOpen && (
+                      <span className={`truncate font-medium ${isOpen ? '' : 'lg:hidden'}`}>{item.label}</span>
+                      {active && (
                         <div style={{ backgroundColor: '#D6A84F', boxShadow: '0 0 6px rgba(214,168,79,0.6)' }}
-                          className="ml-auto w-1.5 h-1.5 rounded-full"></div>
+                          className={`ml-auto w-1.5 h-1.5 rounded-full ${isOpen ? '' : 'lg:hidden'}`}></div>
                       )}
                     </button>
                   );
@@ -1001,8 +1035,9 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, on
 
       {/* User profile bottom */}
       <div style={{ borderTopColor: 'rgba(30, 41, 59, 0.6)' }}
-        className={`${isOpen ? 'p-3' : 'p-2'} border-t`}>
-        {isOpen ? (
+        className={`border-t ${isOpen ? 'p-3' : 'p-3 lg:p-2'}`}>
+        {/* Expanded profile (mobile always, desktop when open) */}
+        <div className={isOpen ? 'block' : 'block lg:hidden'}>
           <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.04)' }}
             className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 transition">
             <button onClick={onOpenProfile} title="Profil Saya"
@@ -1024,11 +1059,12 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, on
               <LogOut className="w-4 h-4" />
             </button>
           </div>
-        ) : (
-          <div className="flex flex-col items-center gap-2">
-            <button onClick={onOpenProfile} title={`${user.name} — ${ROLES[user.role].label} (klik untuk profil)`}
-              className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-700 flex items-center justify-center font-bold text-sm overflow-hidden ring-2 ring-amber-400/30 hover:ring-amber-400/70 transition text-white">
-              {user.avatarImage
+        </div>
+        {/* Collapsed profile (desktop collapsed only) */}
+        <div className={isOpen ? 'hidden' : 'hidden lg:flex flex-col items-center gap-2'}>
+          <button onClick={onOpenProfile} title={`${user.name} — ${ROLES[user.role].label} (klik untuk profil)`}
+            className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-700 flex items-center justify-center font-bold text-sm overflow-hidden ring-2 ring-amber-400/30 hover:ring-amber-400/70 transition text-white">
+            {user.avatarImage
                 ? <img src={user.avatarImage} alt="" className="w-full h-full object-cover" />
                 : user.name.charAt(0).toUpperCase()}
             </button>
@@ -1038,13 +1074,12 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, on
               <LogOut className="w-4 h-4" />
             </button>
           </div>
-        )}
       </div>
     </aside>
   );
 }
 
-function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenProfile, setView, allUsers }) {
+function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenProfile, setView, allUsers }) {
   const greeting = useMemo(() => {
     const h = new Date().getHours();
     if (h < 11) return 'Selamat pagi';
@@ -1165,10 +1200,16 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenProfile, setView, al
   const hasResults = searchResults.tasks.length + searchResults.creators.length + searchResults.users.length > 0;
 
   return (
-    <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-8 py-3 flex items-center gap-4">
+    <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2 sm:gap-4">
+      {/* Hamburger mobile: buka drawer */}
+      <button onClick={onOpenMobileMenu} title="Menu"
+        className="lg:hidden text-slate-500 hover:text-slate-900 hover:bg-slate-100 p-2 rounded-lg transition flex-shrink-0">
+        <PanelLeftOpen className="w-5 h-5" />
+      </button>
+      {/* Tombol expand desktop saat sidebar collapsed */}
       {!sidebarOpen && (
         <button onClick={onToggleSidebar} title="Tampilkan sidebar"
-          className="text-slate-500 hover:text-slate-900 hover:bg-slate-100 p-2 rounded-lg transition flex-shrink-0">
+          className="hidden lg:flex text-slate-500 hover:text-slate-900 hover:bg-slate-100 p-2 rounded-lg transition flex-shrink-0">
           <PanelLeftOpen className="w-5 h-5" />
         </button>
       )}
@@ -1386,7 +1427,7 @@ function Dashboard({ user, allUsers, setView }) {
     })();
   }, []);
 
-  const canManageTargets = user.role === 'manajer' || user.role === 'leader';
+  const canManageTargets = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader';
   const handleSaveTargets = async (newList) => {
     await storage.set('targets:all', newList);
     await logActivity(`mengupdate target tim`, user.name);
@@ -1421,7 +1462,7 @@ function Dashboard({ user, allUsers, setView }) {
   const deadlineToday = myTasks.filter(t => t.deadline === today);
   const myReportedToday = dailyReports.some(r => r.authorId === user.id && r.date === today);
   const todayEventsCount = calendarEvents.filter(e => e.date === today && e.status !== 'cancelled').length;
-  const myCreators = visibleCreators.filter(c => c.managerId === user.id || user.role === 'manajer');
+  const myCreators = visibleCreators.filter(c => c.managerId === user.id || (user.role === 'manajer' || user.role === 'owner'));
   const myActiveCreators = myCreators.filter(c => c.status === 'aktif').length;
 
   // Stats with badge status
@@ -2215,11 +2256,11 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
 
   // Visible: Manajer sees all; Leader sees self + operasional under them
   let visible = [];
-  if (user.role === 'manajer') visible = allUsers;
+  if ((user.role === 'manajer' || user.role === 'owner')) visible = allUsers;
   else if (user.role === 'leader') visible = allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
 
   const grouped = {
-    manajer: visible.filter(u => u.role === 'manajer'),
+    manajer: visible.filter(u => (u.role === 'manajer' || u.role === 'owner')),
     leader: visible.filter(u => u.role === 'leader'),
     operasional: visible.filter(u => u.role === 'operasional')
   };
@@ -2271,7 +2312,7 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
 
   return (
     <div className="max-w-6xl">
-      <PageHeader title="Anggota Tim" subtitle={user.role === 'manajer' ? 'Kelola semua Manajer, Leader, dan Tim Operasional' : 'Kelola Tim Operasional di bawah Anda'}
+      <PageHeader title="Anggota Tim" subtitle={(user.role === 'manajer' || user.role === 'owner') ? 'Kelola semua Manajer, Leader, dan Tim Operasional' : 'Kelola Tim Operasional di bawah Anda'}
         action={
           <button onClick={() => { setEditing(null); setShowForm(true); }}
             className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
@@ -2291,7 +2332,7 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
               {grouped[role].map(m => {
                 const leader = m.leaderId ? allUsers.find(u => u.id === m.leaderId) : null;
                 const operasionalCount = m.role === 'leader' ? allUsers.filter(u => u.leaderId === m.id).length : null;
-                const canEdit = user.role === 'manajer' || (user.role === 'leader' && m.leaderId === user.id);
+                const canEdit = (user.role === 'manajer' || user.role === 'owner') || (user.role === 'leader' && m.leaderId === user.id);
                 return (
                   <div key={m.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition">
                     <div className="flex items-start gap-3">
@@ -2339,6 +2380,7 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
   const isEdit = !!editing;
   // Allowed roles based on currentUser
   const allowedRoles = useMemo(() => {
+    if (currentUser.role === 'owner') return ['manajer', 'leader', 'operasional'];
     if (currentUser.role === 'manajer') return ['manajer', 'leader', 'operasional'];
     if (currentUser.role === 'leader') return ['operasional'];
     return [];
@@ -2371,7 +2413,7 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
         return setError('Username sudah dipakai.');
       }
     }
-    if (form.role === 'operasional' && !form.leaderId) return setError('Tim Operasional harus punya Leader.');
+    if (form.role === 'operasional' && !form.leaderId) return setError('Karyawan harus punya Leader.');
     onSave(form);
   };
 
@@ -2555,7 +2597,7 @@ function TasksView({ user, allUsers }) {
   const visibleTasks = tasks.filter(t => can.canSeeTask(user, t, allUsers));
   // Assignable users
   const assignableUsers = useMemo(() => {
-    if (user.role === 'manajer') return allUsers;
+    if ((user.role === 'manajer' || user.role === 'owner')) return allUsers;
     if (user.role === 'leader') return allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
     return [user];
   }, [user, allUsers]);
@@ -2615,12 +2657,12 @@ function TasksView({ user, allUsers }) {
               <tbody>
                 {filtered.map(t => {
                   const days = daysUntil(t.deadline);
-                  const canEdit = user.role === 'manajer' || t.createdById === user.id || t.assigneeId === user.id;
+                  const canEdit = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id || t.assigneeId === user.id;
                   return (
                     <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50">
                       <td className="p-3">
                         <select value={t.status} onChange={e => updateStatus(t, e.target.value)}
-                          disabled={!(user.role === 'manajer' || t.assigneeId === user.id || t.createdById === user.id)}
+                          disabled={!((user.role === 'manajer' || user.role === 'owner') || t.assigneeId === user.id || t.createdById === user.id)}
                           className={`text-xs px-2 py-1 rounded font-semibold border-0 cursor-pointer ${TASK_STATUS[t.status].color}`}>
                           {Object.entries(TASK_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                         </select>
@@ -2662,7 +2704,7 @@ function TasksView({ user, allUsers }) {
                             <button onClick={() => { setEditing(t); setShowForm(true); }} className="text-slate-400 hover:text-blue-600 p-1">
                               <Edit2 className="w-4 h-4" />
                             </button>
-                            {(user.role === 'manajer' || t.createdById === user.id) && (
+                            {((user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id) && (
                               <button onClick={() => handleDelete(t)} className="text-slate-400 hover:text-red-600 p-1">
                                 <Trash2 className="w-4 h-4" />
                               </button>
@@ -2705,11 +2747,11 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
   const canComment =
     task.createdById === user.id ||
     task.assigneeId === user.id ||
-    user.role === 'manajer' ||
+    (user.role === 'manajer' || user.role === 'owner') ||
     (user.role === 'leader' && assigneeUser?.leaderId === user.id);
 
-  const canEdit = user.role === 'manajer' || task.createdById === user.id || task.assigneeId === user.id;
-  const canDelete = user.role === 'manajer' || task.createdById === user.id;
+  const canEdit = (user.role === 'manajer' || user.role === 'owner') || task.createdById === user.id || task.assigneeId === user.id;
+  const canDelete = (user.role === 'manajer' || user.role === 'owner') || task.createdById === user.id;
 
   const submitComment = () => {
     if (!commentText.trim()) return;
@@ -2802,7 +2844,7 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
             <div className="space-y-3 max-h-80 overflow-y-auto scroll-thin mb-3">
               {comments.map(c => {
                 const isMine = c.authorId === user.id;
-                const canDeleteComment = isMine || user.role === 'manajer';
+                const canDeleteComment = isMine || (user.role === 'manajer' || user.role === 'owner');
                 return (
                   <div key={c.id} className={`flex gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0 overflow-hidden">
@@ -2950,7 +2992,7 @@ function CreatorsView({ user, allUsers }) {
 
   const visibleCreators = creators.filter(c => can.canSeeCreator(user, c, allUsers));
   const managers = useMemo(() => {
-    if (user.role === 'manajer') return allUsers.filter(u => u.role === 'operasional' || u.role === 'leader');
+    if ((user.role === 'manajer' || user.role === 'owner')) return allUsers.filter(u => u.role === 'operasional' || u.role === 'leader');
     if (user.role === 'leader') return allUsers.filter(u => u.leaderId === user.id || u.id === user.id);
     return [user];
   }, [user, allUsers]);
@@ -3451,7 +3493,7 @@ function ReportsView({ user, allUsers }) {
 
   // Visibility: Manajer all, Leader = self + own operasional reports, Operasional = self
   const visibleReports = reports.filter(r => {
-    if (user.role === 'manajer') return true;
+    if ((user.role === 'manajer' || user.role === 'owner')) return true;
     if (r.authorId === user.id) return true;
     if (user.role === 'leader') {
       const author = allUsers.find(u => u.id === r.authorId);
@@ -3498,7 +3540,7 @@ function ReportsView({ user, allUsers }) {
                     Minggu {fmtDate(r.weekStart)} – {fmtDate(r.weekEnd)} · {fmtDateTime(r.submittedAt)}
                   </div>
                 </div>
-                {(r.authorId === user.id || user.role === 'manajer') && (
+                {(r.authorId === user.id || (user.role === 'manajer' || user.role === 'owner')) && (
                   <div className="flex gap-1">
                     {r.authorId === user.id && (
                       <button onClick={() => { setEditing(r); setShowForm(true); }} className="text-slate-400 hover:text-blue-600 p-1">
@@ -3632,7 +3674,7 @@ function ScheduleView({ user, allUsers }) {
 
   // Visibility: Operasional sees only their own schedules
   const visible = schedules.filter(s => {
-    if (user.role === 'manajer' || user.role === 'leader') return true;
+    if ((user.role === 'manajer' || user.role === 'owner') || user.role === 'leader') return true;
     return s.adminId === user.id;
   });
   const today = new Date().toISOString().split('T')[0];
@@ -3681,7 +3723,7 @@ function ScheduleView({ user, allUsers }) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map(s => {
-            const canEdit = user.role === 'manajer' || user.role === 'leader' || s.adminId === user.id;
+            const canEdit = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader' || s.adminId === user.id;
             return (
               <div key={s.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition">
                 <div className="flex items-start justify-between mb-2">
@@ -3796,6 +3838,215 @@ function ScheduleForm({ schedule, assignableAdmins, creators, onSave, onClose })
 }
 
 // ============ LEADERBOARD ============
+// ============ ABSENSI (Attendance + Lokasi GPS) ============
+function AttendanceView({ user, allUsers }) {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const [filterUser, setFilterUser] = useState('all');
+
+  const load = async () => {
+    const list = await storage.getList('attendance:all');
+    setRecords(list);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const todayStr = new Date().toDateString();
+  const myToday = records.filter(r => r.userId === user.id && new Date(r.timestamp).toDateString() === todayStr);
+  const lastToday = myToday.length ? myToday[myToday.length - 1] : null;
+  const nextType = (!lastToday || lastToday.type === 'out') ? 'in' : 'out';
+
+  const getLocation = () => new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('Perangkat tidak mendukung GPS/lokasi.'));
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Math.round(pos.coords.accuracy) }),
+      err => {
+        if (err.code === 1) reject(new Error('Izin lokasi ditolak. Aktifkan izin lokasi di browser lalu coba lagi.'));
+        else if (err.code === 2) reject(new Error('Lokasi tidak tersedia. Pastikan GPS/internet aktif.'));
+        else if (err.code === 3) reject(new Error('Waktu habis mengambil lokasi. Coba lagi.'));
+        else reject(new Error('Gagal mengambil lokasi.'));
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  });
+
+  const doAbsen = async (type) => {
+    setError(''); setBusy(true);
+    try {
+      const loc = await getLocation();
+      const rec = {
+        id: uid(),
+        userId: user.id,
+        userName: user.name,
+        userRole: user.role,
+        jobTitle: user.jobTitle || '',
+        type,
+        timestamp: new Date().toISOString(),
+        latitude: loc.lat,
+        longitude: loc.lng,
+        accuracy: loc.acc,
+        note: note.trim()
+      };
+      const list = await storage.getList('attendance:all');
+      list.unshift(rec);
+      await storage.set('attendance:all', list.slice(0, 2000));
+      await logActivity(`absen ${type === 'in' ? 'masuk' : 'pulang'}`, user.name);
+      setNote('');
+      await load();
+    } catch (e) {
+      setError(e.message || 'Gagal absen.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Permission: siapa yang bisa dilihat
+  const visibleRecords = useMemo(() => {
+    let list = records;
+    if (user.role === 'owner' || user.role === 'manajer') {
+      // semua
+    } else if (user.role === 'leader') {
+      const teamIds = new Set(allUsers.filter(u => u.leaderId === user.id).map(u => u.id));
+      teamIds.add(user.id);
+      list = list.filter(r => teamIds.has(r.userId));
+    } else {
+      list = list.filter(r => r.userId === user.id);
+    }
+    if (filterUser !== 'all') list = list.filter(r => r.userId === filterUser);
+    return list;
+  }, [records, user, allUsers, filterUser]);
+
+  const canSeeOthers = user.role === 'owner' || user.role === 'manajer' || user.role === 'leader';
+  const teamForFilter = useMemo(() => {
+    if (user.role === 'owner' || user.role === 'manajer') return allUsers;
+    if (user.role === 'leader') return allUsers.filter(u => u.leaderId === user.id || u.id === user.id);
+    return [user];
+  }, [allUsers, user]);
+
+  const fmtTime = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  const fmtDate = ts => new Date(ts).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+  const mapsLink = (lat, lng) => `https://www.google.com/maps?q=${lat},${lng}`;
+  const osmEmbed = (lat, lng) => {
+    const d = 0.004;
+    return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - d}%2C${lat - d}%2C${lng + d}%2C${lat + d}&layer=mapnik&marker=${lat}%2C${lng}`;
+  };
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat absensi...</div>;
+
+  return (
+    <div>
+      <PageHeader title="Absensi" subtitle="Absen masuk & pulang dengan lokasi GPS otomatis" />
+
+      {/* Kartu absen */}
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5 sm:p-6 mb-6 max-w-2xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="text-sm text-slate-500">{fmtDate(new Date().toISOString())}</div>
+            <div className="mt-1 flex items-center gap-2 flex-wrap">
+              {myToday.length === 0 ? (
+                <span className="text-sm font-semibold text-slate-700">Belum absen hari ini</span>
+              ) : (
+                myToday.map(r => (
+                  <span key={r.id} className={`text-xs px-2.5 py-1 rounded-full font-semibold ${r.type === 'in' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {r.type === 'in' ? 'Masuk' : 'Pulang'} {fmtTime(r.timestamp)}
+                  </span>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <input type="text" value={note} onChange={e => setNote(e.target.value)}
+            placeholder="Catatan (opsional, mis. lokasi: kantor / WFH / lapangan)"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm mb-3" />
+
+          <button onClick={() => doAbsen(nextType)} disabled={busy}
+            style={{ background: nextType === 'in' ? 'linear-gradient(135deg, #4F46E5, #4338CA)' : 'linear-gradient(135deg, #D97706, #B45309)' }}
+            className="w-full text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition disabled:opacity-60">
+            <MapPin className="w-5 h-5" />
+            {busy ? 'Mengambil lokasi...' : (nextType === 'in' ? 'Absen Masuk Sekarang' : 'Absen Pulang Sekarang')}
+          </button>
+          <p className="text-[11px] text-slate-400 mt-2 text-center">
+            Saat ditekan, browser akan minta izin lokasi. Izinkan agar lokasi tersimpan.
+          </p>
+          {error && (
+            <div className="mt-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /> <span>{error}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Filter (untuk leader/manajer/owner) */}
+      {canSeeOthers && (
+        <div className="mb-4 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 font-semibold">Lihat:</span>
+          <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
+            className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="all">Semua anggota</option>
+            {teamForFilter.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {/* Riwayat absensi */}
+      <h3 className="font-display font-bold text-slate-900 mb-3">Riwayat Absensi</h3>
+      {visibleRecords.length === 0 ? (
+        <EmptyState icon={MapPin} text="Belum ada data absensi." />
+      ) : (
+        <div className="space-y-3">
+          {visibleRecords.map(r => (
+            <div key={r.id} className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+              <div className="p-4 flex items-start gap-3">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${r.type === 'in' ? 'bg-emerald-100' : 'bg-amber-100'}`}>
+                  {r.type === 'in'
+                    ? <ArrowRight className="w-5 h-5 text-emerald-600" />
+                    : <ArrowLeft className="w-5 h-5 text-amber-600" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-slate-900 text-sm">{r.userName}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${r.type === 'in' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {r.type === 'in' ? 'MASUK' : 'PULANG'}
+                    </span>
+                    {ROLES[r.userRole] && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{ROLES[r.userRole].label}</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5">{fmtDate(r.timestamp)} · {fmtTime(r.timestamp)}</div>
+                  {r.note && <div className="text-xs text-slate-600 mt-1 italic">"{r.note}"</div>}
+                  <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1 flex-wrap">
+                    <MapPin className="w-3 h-3" />
+                    {r.latitude?.toFixed(5)}, {r.longitude?.toFixed(5)}
+                    {r.accuracy ? <span>· ±{r.accuracy}m</span> : null}
+                    <a href={mapsLink(r.latitude, r.longitude)} target="_blank" rel="noreferrer"
+                      className="text-indigo-600 hover:underline inline-flex items-center gap-0.5 ml-1">
+                      Buka Maps <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+              </div>
+              {/* Peta */}
+              {r.latitude && r.longitude && (
+                <iframe
+                  title={`peta-${r.id}`}
+                  src={osmEmbed(r.latitude, r.longitude)}
+                  className="w-full h-44 border-0 border-t border-slate-100"
+                  loading="lazy"
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LeaderboardView({ allUsers }) {
   const [creators, setCreators] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -3917,7 +4168,7 @@ function AnnouncementsView({ user }) {
             <div key={a.id} className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-sm transition">
               <div className="flex items-start justify-between mb-2 gap-2">
                 <h4 className="font-display font-bold text-slate-900 text-lg">{a.title}</h4>
-                {(a.authorId === user.id || user.role === 'manajer') && (
+                {(a.authorId === user.id || (user.role === 'manajer' || user.role === 'owner')) && (
                   <button onClick={() => handleDelete(a)} className="text-slate-400 hover:text-red-600 p-1">
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -3967,9 +4218,9 @@ function ContentIdeasView({ user, allUsers, settings }) {
   };
   useEffect(() => { load(); }, []);
 
-  const canEditIdea = (idea) => idea.proposedById === user.id || user.role === 'manajer';
-  const canApprove = user.role === 'manajer' || user.role === 'leader';
-  const canExecute = (idea) => idea.assignedToId === user.id || user.role === 'manajer';
+  const canEditIdea = (idea) => idea.proposedById === user.id || (user.role === 'manajer' || user.role === 'owner');
+  const canApprove = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader';
+  const canExecute = (idea) => idea.assignedToId === user.id || (user.role === 'manajer' || user.role === 'owner');
 
   const handleSave = async (data) => {
     let list = await storage.getList('content-ideas:all');
@@ -4379,6 +4630,7 @@ function SettingsView({ user, settings, onSave }) {
       ...form,
       logoImage: logoMode === 'image' ? form.logoImage : null,
       customRoles: {
+        owner: form.customRoles.owner?.trim() || DEFAULT_ROLE_LABELS.owner,
         manajer: form.customRoles.manajer?.trim() || DEFAULT_ROLE_LABELS.manajer,
         leader: form.customRoles.leader?.trim() || DEFAULT_ROLE_LABELS.leader,
         operasional: form.customRoles.operasional?.trim() || DEFAULT_ROLE_LABELS.operasional
@@ -4518,7 +4770,7 @@ function SettingsView({ user, settings, onSave }) {
           </button>
         </div>
         <div className="space-y-3">
-          {['manajer', 'leader', 'operasional'].map(role => {
+          {['owner', 'manajer', 'leader', 'operasional'].map(role => {
             const Icon = ROLES[role].icon;
             return (
               <div key={role} className="flex items-center gap-3">
@@ -4592,7 +4844,8 @@ function SettingsView({ user, settings, onSave }) {
           <div className="flex-1">
             <div className="font-display font-bold text-slate-900 text-lg">{form.appName}</div>
             <div className="text-xs text-slate-500 uppercase tracking-wider">{form.appSubtitle}</div>
-            <div className="flex gap-2 mt-2">
+            <div className="flex gap-2 mt-2 flex-wrap">
+              <span className="text-[10px] px-2 py-0.5 rounded bg-violet-100 text-violet-800">{form.customRoles.owner || DEFAULT_ROLE_LABELS.owner}</span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800">{form.customRoles.manajer || DEFAULT_ROLE_LABELS.manajer}</span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-800">{form.customRoles.leader || DEFAULT_ROLE_LABELS.leader}</span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-100 text-indigo-800">{form.customRoles.operasional || DEFAULT_ROLE_LABELS.operasional}</span>
@@ -4754,7 +5007,7 @@ function TodosView({ user, allUsers }) {
                 grouped[key].map(todo => {
                   const days = daysUntil(todo.dueDate);
                   const isMine = todo.ownerId === user.id;
-                  const canEdit = isMine || user.role === 'manajer' || (user.role === 'leader' && allUsers.find(u => u.id === todo.ownerId)?.leaderId === user.id);
+                  const canEdit = isMine || (user.role === 'manajer' || user.role === 'owner') || (user.role === 'leader' && allUsers.find(u => u.id === todo.ownerId)?.leaderId === user.id);
                   const ownerUser = allUsers.find(u => u.id === todo.ownerId);
                   return (
                     <div key={todo.id}
@@ -4899,7 +5152,7 @@ function DailyReportsView({ user, allUsers }) {
   };
   useEffect(() => { load(); }, []);
 
-  const canManage = user.role === 'manajer' || user.role === 'leader';
+  const canManage = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader';
 
   // Get template assigned to a user (if any)
   const getUserTemplate = (userId) => templates.find(t => t.assignedUserIds?.includes(userId));
@@ -4954,7 +5207,7 @@ function DailyReportsView({ user, allUsers }) {
 
   // Visibility: Manajer all, Leader self+team, Operasional self
   const visibleReports = reports.filter(r => {
-    if (user.role === 'manajer') return true;
+    if ((user.role === 'manajer' || user.role === 'owner')) return true;
     if (r.authorId === user.id) return true;
     if (user.role === 'leader') {
       const author = allUsers.find(u => u.id === r.authorId);
@@ -5410,8 +5663,8 @@ function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
     return initial;
   });
 
-  const canPickTemplate = user.role === 'manajer' || user.role === 'leader' || templates.length > 1;
-  const canPin = user.role === 'manajer' || user.role === 'leader';
+  const canPickTemplate = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader' || templates.length > 1;
+  const canPin = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader';
 
   const setFieldValue = (fieldId, value) => {
     setForm({ ...form, _values: { ...form._values, [fieldId]: value } });
@@ -6074,7 +6327,7 @@ function EventForm({ event, allUsers, onSave, onClose }) {
 }
 
 function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
-  const canEdit = event.createdById === user.id || user.role === 'manajer' || user.role === 'leader';
+  const canEdit = event.createdById === user.id || (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader';
 
   // Generate Google Calendar URL
   const googleCalendarUrl = useMemo(() => {
