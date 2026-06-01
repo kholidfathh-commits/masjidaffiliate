@@ -1119,6 +1119,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
   const [notifications, setNotifications] = useState([]);
   const [lastNotifView, setLastNotifView] = useState(null);
   const [soundOn, setSoundOn] = useState(true);
+  const [toasts, setToasts] = useState([]);
   const searchRef = useRef();
   const soundOnRef = useRef(true);
   const newestTsRef = useRef(null);
@@ -1192,16 +1193,29 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
       if (stopped) return;
       setNotifications(top);
 
-      // Deteksi notif baru → bunyi + notif browser
+      // Deteksi notif baru → pop-up toast + bunyi + notif browser
       const newestTs = top.length ? top[0].time : null;
       if (firstNotifLoadRef.current) {
         firstNotifLoadRef.current = false;
         newestTsRef.current = newestTs;
       } else if (newestTs && newestTs > (newestTsRef.current || '')) {
+        const prevTs = newestTsRef.current || '';
         newestTsRef.current = newestTs;
-        if (soundOnRef.current) playNotifSound();
-        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-          try { new Notification(top[0].title, { body: top[0].subtitle || '' }); } catch (e) {}
+        // Semua notif yang lebih baru dari yang terakhir dilihat (maks 3 toast)
+        const fresh = top.filter(n => (n.time || '') > prevTs).slice(0, 3);
+        if (fresh.length) {
+          if (soundOnRef.current) playNotifSound();
+          fresh.forEach((n, i) => {
+            const toastId = `${n.id}-${Date.now()}-${i}`;
+            setToasts(prev => [...prev, { ...n, toastId }]);
+            // Auto-hilang setelah 6 detik
+            setTimeout(() => {
+              setToasts(prev => prev.filter(t => t.toastId !== toastId));
+            }, 6000);
+          });
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            try { new Notification(fresh[0].title, { body: fresh[0].subtitle || '' }); } catch (e) {}
+          }
         }
       }
     };
@@ -1263,6 +1277,36 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
   const hasResults = searchResults.tasks.length + searchResults.creators.length + searchResults.users.length > 0;
 
   return (
+    <>
+    {/* Pop-up notifikasi melayang (toast) */}
+    {toasts.length > 0 && (
+      <div className="fixed top-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm pointer-events-none">
+        {toasts.map(t => {
+          const Icon = t.type === 'task' ? CheckSquare : t.type === 'comment' ? MessageSquare : Megaphone;
+          const accent = t.type === 'task' ? '#4F46E5' : t.type === 'comment' ? '#9333EA' : '#D97706';
+          const bg = t.type === 'task' ? '#EEF2FF' : t.type === 'comment' ? '#FAF5FF' : '#FFFBEB';
+          return (
+            <button key={t.toastId}
+              onClick={() => { t.action && t.action(); setToasts(prev => prev.filter(x => x.toastId !== t.toastId)); }}
+              className="pointer-events-auto w-full bg-white rounded-2xl shadow-xl shadow-slate-900/20 border border-slate-200 p-3.5 flex items-start gap-3 text-left animate-[slideIn_0.3s_ease] hover:shadow-2xl transition"
+              style={{ borderLeftWidth: '4px', borderLeftColor: accent }}>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: bg }}>
+                <Icon className="w-4.5 h-4.5" style={{ color: accent }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm text-slate-900 truncate">{t.title}</div>
+                {t.subtitle && <div className="text-xs text-slate-500 truncate mt-0.5">{t.subtitle}</div>}
+                <div className="text-[10px] text-slate-400 mt-1">Ketuk untuk buka</div>
+              </div>
+              <span onClick={(e) => { e.stopPropagation(); setToasts(prev => prev.filter(x => x.toastId !== t.toastId)); }}
+                className="text-slate-300 hover:text-slate-600 flex-shrink-0 cursor-pointer">
+                <X className="w-4 h-4" />
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    )}
     <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2 sm:gap-4">
       {/* Hamburger mobile: buka drawer */}
       <button onClick={onOpenMobileMenu} title="Menu"
@@ -1476,6 +1520,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
         </button>
       </div>
     </div>
+    </>
   );
 }
 
@@ -2721,7 +2766,8 @@ function TasksView({ user, allUsers }) {
         </select>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      {/* DESKTOP: tabel */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden hidden md:block">
         {filtered.length === 0 ? (
           <EmptyState icon={CheckSquare} text="Belum ada tugas yang sesuai filter." />
         ) : (
@@ -2801,6 +2847,70 @@ function TasksView({ user, allUsers }) {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      {/* MOBILE & TABLET: kartu */}
+      <div className="md:hidden space-y-3">
+        {filtered.length === 0 ? (
+          <EmptyState icon={CheckSquare} text="Belum ada tugas yang sesuai filter." />
+        ) : (
+          filtered.map(t => {
+            const days = daysUntil(t.deadline);
+            const canEdit = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id || t.assigneeId === user.id;
+            const canChangeStatus = (user.role === 'manajer' || user.role === 'owner') || t.assigneeId === user.id || t.createdById === user.id;
+            return (
+              <div key={t.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <button onClick={() => setViewing(t)} className="text-left flex-1 min-w-0">
+                    <div className="font-semibold text-slate-900 flex items-center gap-2 flex-wrap">
+                      {t.title}
+                      {t.comments && t.comments.length > 0 && (
+                        <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-bold">💬 {t.comments.length}</span>
+                      )}
+                    </div>
+                    {t.description && <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{t.description}</div>}
+                  </button>
+                  <span className={`text-[10px] px-2 py-1 rounded font-semibold flex-shrink-0 ${PRIORITIES[t.priority].color}`}>{PRIORITIES[t.priority].label}</span>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-slate-600 mb-3 flex-wrap">
+                  <span className="inline-flex items-center gap-1"><User className="w-3.5 h-3.5 text-slate-400" /> {t.assigneeName}</span>
+                  {t.deadline && (
+                    <span className={`inline-flex items-center gap-1 ${days < 0 && t.status !== 'done' ? 'text-red-600 font-semibold' : days <= 1 && t.status !== 'done' ? 'text-amber-700' : ''}`}>
+                      <Clock className="w-3.5 h-3.5 text-slate-400" /> {fmtDate(t.deadline)}
+                      {t.status !== 'done' && days !== null && (
+                        <span>· {days < 0 ? `Telat ${Math.abs(days)}h` : days === 0 ? 'Hari ini' : `${days}h lagi`}</span>
+                      )}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100">
+                  <select value={t.status} onChange={e => updateStatus(t, e.target.value)}
+                    disabled={!canChangeStatus}
+                    className={`text-xs px-2.5 py-1.5 rounded-lg font-semibold border-0 cursor-pointer ${TASK_STATUS[t.status].color}`}>
+                    {Object.entries(TASK_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setViewing(t)} title="Detail & komentar" className="text-slate-400 hover:text-indigo-600 p-1.5">
+                      <MessageSquare className="w-4 h-4" />
+                    </button>
+                    {canEdit && (
+                      <button onClick={() => { setEditing(t); setShowForm(true); }} className="text-slate-400 hover:text-blue-600 p-1.5">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                    )}
+                    {canEdit && ((user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id) && (
+                      <button onClick={() => handleDelete(t)} className="text-slate-400 hover:text-red-600 p-1.5">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
 
