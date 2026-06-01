@@ -133,6 +133,29 @@ function genSalt() {
 
 // ============ HELPERS ============
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+// Suara notifikasi "ding" pakai Web Audio (tanpa file mp3)
+let _notifAudioCtx = null;
+function playNotifSound() {
+  try {
+    if (!_notifAudioCtx) _notifAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _notifAudioCtx;
+    if (ctx.state === 'suspended') ctx.resume();
+    const now = ctx.currentTime;
+    [880, 1320].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const t = now + i * 0.16;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.28, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(t); osc.stop(t + 0.34);
+    });
+  } catch (e) { /* browser belum izinkan audio */ }
+}
 const fmtDate = d => d ? new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
 const fmtDateTime = d => d ? new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-';
 const fmtNumber = n => new Intl.NumberFormat('id-ID').format(n || 0);
@@ -1095,18 +1118,40 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
   const [showQuickAction, setShowQuickAction] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [lastNotifView, setLastNotifView] = useState(null);
+  const [soundOn, setSoundOn] = useState(true);
   const searchRef = useRef();
+  const soundOnRef = useRef(true);
+  const newestTsRef = useRef(null);
+  const firstNotifLoadRef = useRef(true);
 
-  // Load notifications from various sources
+  // Sinkron ref dengan state suara
+  useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
+  // Load preferensi suara
   useEffect(() => {
     (async () => {
+      const pref = await storage.get('ui:notif-sound', false);
+      if (pref !== null && typeof pref === 'boolean') setSoundOn(pref);
+    })();
+  }, []);
+  const toggleSound = async () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    await storage.set('ui:notif-sound', next, false);
+    if (next) playNotifSound(); // tes bunyi saat diaktifkan
+  };
+
+  // Load notifications + polling (near-realtime) + suara saat ada notif baru
+  useEffect(() => {
+    let stopped = false;
+    const loadNotifs = async () => {
       const tasks = await storage.getList('tasks:all');
       const announcements = await storage.getList('announcements:all');
       const lastView = await storage.get('ui:last-notif-view', false);
+      if (stopped) return;
       setLastNotifView(lastView?.value || new Date(Date.now() - 7 * 86400000).toISOString());
 
       const notifs = [];
-      // Tasks assigned to me (last 7 days)
+      // Tasks assigned to me
       tasks.filter(t => t.assigneeId === user.id && t.createdById !== user.id)
         .slice(0, 10).forEach(t => {
           notifs.push({
@@ -1132,7 +1177,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
             }
           });
         });
-      // Recent announcements
+      // Recent announcements (untuk semua)
       announcements.slice(0, 5).forEach(a => {
         notifs.push({
           id: `ann-${a.id}`, type: 'announcement',
@@ -1143,8 +1188,26 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
         });
       });
       notifs.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
-      setNotifications(notifs.slice(0, 15));
-    })();
+      const top = notifs.slice(0, 15);
+      if (stopped) return;
+      setNotifications(top);
+
+      // Deteksi notif baru → bunyi + notif browser
+      const newestTs = top.length ? top[0].time : null;
+      if (firstNotifLoadRef.current) {
+        firstNotifLoadRef.current = false;
+        newestTsRef.current = newestTs;
+      } else if (newestTs && newestTs > (newestTsRef.current || '')) {
+        newestTsRef.current = newestTs;
+        if (soundOnRef.current) playNotifSound();
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+          try { new Notification(top[0].title, { body: top[0].subtitle || '' }); } catch (e) {}
+        }
+      }
+    };
+    loadNotifs();
+    const iv = setInterval(loadNotifs, 12000);
+    return () => { stopped = true; clearInterval(iv); };
   }, [user.id]);
 
   // Global search
@@ -1333,7 +1396,15 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
 
         {/* Notifications */}
         <div className="relative">
-          <button onClick={() => { setShowNotifDropdown(!showNotifDropdown); setShowQuickAction(false); if (!showNotifDropdown) markNotifSeen(); }}
+          <button onClick={() => {
+              setShowNotifDropdown(!showNotifDropdown); setShowQuickAction(false);
+              if (!showNotifDropdown) markNotifSeen();
+              // Aktifkan audio context (browser butuh interaksi user) + minta izin notif
+              if (_notifAudioCtx && _notifAudioCtx.state === 'suspended') _notifAudioCtx.resume();
+              if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission().catch(() => {});
+              }
+            }}
             className="relative text-slate-500 hover:text-slate-900 hover:bg-slate-100 p-2 rounded-xl transition">
             <Bell className="w-5 h-5" />
             {unreadCount > 0 && (
@@ -1346,9 +1417,17 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
             <>
               <div className="fixed inset-0 z-40" onClick={() => setShowNotifDropdown(false)}></div>
               <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-xl shadow-slate-900/10 border border-slate-200 max-h-96 overflow-y-auto scroll-thin z-50">
-                <div className="px-4 py-3 border-b border-slate-100 sticky top-0 bg-white">
-                  <div className="font-display font-bold text-slate-900">Notifikasi</div>
-                  <div className="text-[10px] text-slate-500">{notifications.length} item</div>
+                <div className="px-4 py-3 border-b border-slate-100 sticky top-0 bg-white flex items-center justify-between gap-2">
+                  <div>
+                    <div className="font-display font-bold text-slate-900">Notifikasi</div>
+                    <div className="text-[10px] text-slate-500">{notifications.length} item</div>
+                  </div>
+                  <button onClick={toggleSound}
+                    title={soundOn ? 'Suara notif: AKTIF (klik untuk matikan)' : 'Suara notif: MATI (klik untuk aktifkan)'}
+                    className={`flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition ${soundOn ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-400'}`}>
+                    {soundOn ? <Bell className="w-3.5 h-3.5" /> : <Bell className="w-3.5 h-3.5" />}
+                    {soundOn ? 'Suara ON' : 'Suara OFF'}
+                  </button>
                 </div>
                 {notifications.length === 0 ? (
                   <div className="p-6 text-center text-sm text-slate-400">
@@ -2522,7 +2601,11 @@ function TasksView({ user, allUsers }) {
   const [filter, setFilter] = useState({ status: 'all', assignee: 'all', search: '' });
 
   const load = async () => setTasks(await storage.getList('tasks:all'));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 10000); // auto-refresh tiap 10 detik
+    return () => clearInterval(iv);
+  }, []);
 
   // Sync viewing task with latest data
   useEffect(() => {
@@ -4136,7 +4219,11 @@ function AnnouncementsView({ user }) {
   const [form, setForm] = useState({ title: '', content: '' });
 
   const load = async () => setItems(await storage.getList('announcements:all'));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 12000);
+    return () => clearInterval(iv);
+  }, []);
 
   const handleSave = async () => {
     if (!form.title.trim() || !form.content.trim()) return;
