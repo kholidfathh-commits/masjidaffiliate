@@ -36,3 +36,32 @@ body {
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 transparent;
 }
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Animasi klik global biar aplikasi terasa hidup */
+button:not(:disabled), [role="button"], a {
+  transition: transform 0.1s cubic-bezier(0.34,1.56,0.64,1), opacity 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+button:not(:disabled):active {
+  transform: scale(0.95);
+}
+/* Card hover lift halus */
+.lift-on-hover { transition: transform 0.18s ease, box-shadow 0.18s ease; }
+.lift-on-hover:hover { transform: translateY(-2px); box-shadow: 0 12px 28px -10px rgba(79,70,229,0.25); }
+
+/* Fade-in saat elemen muncul */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fadeInUp 0.35s ease both; }
+
+/* Ripple pulse untuk badge/notif */
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
