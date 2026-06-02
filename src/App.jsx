@@ -8,7 +8,8 @@ import {
   Lightbulb, ImagePlus, FileDown, RotateCcw, ExternalLink, Send,
   KanbanSquare, CalendarDays, ClipboardList, PanelLeftClose, PanelLeftOpen,
   GripVertical, MapPin, ArrowRight, ArrowLeft, BarChart3, Pin, MessageSquare,
-  Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle
+  Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle,
+  Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -224,7 +225,10 @@ const FIELD_TYPES = {
   textarea: { label: 'Teks Panjang',   icon: '📄' },
   number:   { label: 'Angka',          icon: '🔢' },
   date:     { label: 'Tanggal',        icon: '📅' },
+  time:     { label: 'Jam/Waktu',      icon: '🕐' },
   select:   { label: 'Pilihan Dropdown', icon: '☑️' },
+  radio:    { label: 'Pilihan Ganda',  icon: '🔘' },
+  checkbox: { label: 'Kotak Centang (multi)', icon: '✅' },
   rating:   { label: 'Rating 1-5',     icon: '⭐' },
   url:      { label: 'Link URL',       icon: '🔗' }
 };
@@ -260,7 +264,7 @@ const DIVISION_FEATURES = {
   internal:  ['gmv'],
   mcn:       ['creators', 'creator-management', 'gmv'],
   tap:       ['sellers', 'gmv'],
-  media:     [],
+  media:     ['media-tasks'],
   event:     [],
   mabit:     [],
   keuangan:  ['gmv']
@@ -271,6 +275,23 @@ function canAccessFeature(user, feature) {
   const div = user.division || 'internal';
   return (DIVISION_FEATURES[div] || []).includes(feature);
 }
+
+// ====== GMV TRACKING ======
+// 3 divisi penghasil GMV — target wajib bisnis
+const GMV_DIVISIONS = {
+  mcn:      { label: 'MCN', short: 'MCN', color: '#10B981', bg: 'from-emerald-500 to-emerald-700', updater: 'Leader MCN' },
+  tap:      { label: 'TAP', short: 'TAP', color: '#F97316', bg: 'from-orange-500 to-orange-700', updater: 'Leader TAP' },
+  internal: { label: 'Affiliator Internal', short: 'Internal', color: '#3B82F6', bg: 'from-blue-500 to-blue-700', updater: 'Tim Affiliator' }
+};
+// Siapa boleh input GMV divisi tertentu
+function canInputGmv(user, division) {
+  if (user.role === 'owner' || user.role === 'manajer') return true;
+  return (user.division || '') === division; // leader/anggota divisi tsb update divisinya sendiri
+}
+const monthKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const dayKey = (d = new Date()) => {
+  const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+};
 const DEFAULT_SETTINGS = {
   appName: 'Al-Kahfi Corp',
   appSubtitle: 'MCN TAP · Masjid Affiliate',
@@ -395,13 +416,14 @@ export default function App() {
             onOpenMobileMenu={() => setMobileMenuOpen(true)}
             onOpenProfile={() => setShowProfile(true)}
             setView={setView} allUsers={allUsers} />
-          <div className="p-4 sm:p-6 lg:p-8">
+          <div className="p-4 sm:p-6 lg:p-8 animate-fade-in" key={view}>
             {view === 'dashboard' && <Dashboard user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'tasks' && <TasksView user={currentUser} allUsers={allUsers} />}
             {view === 'todos' && <TodosView user={currentUser} allUsers={allUsers} />}
             {view === 'creators' && <CreatorsView user={currentUser} allUsers={allUsers} />}
             {view === 'creator-management' && <CreatorManagementView user={currentUser} allUsers={allUsers} />}
             {view === 'sellers' && <SellersView user={currentUser} allUsers={allUsers} />}
+            {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
             {view === 'reports' && <ReportsView user={currentUser} allUsers={allUsers} />}
             {view === 'daily-reports' && <DailyReportsView user={currentUser} allUsers={allUsers} />}
             {view === 'schedule' && <ScheduleView user={currentUser} allUsers={allUsers} />}
@@ -410,6 +432,7 @@ export default function App() {
             {view === 'leaderboard' && <LeaderboardView allUsers={allUsers} />}
             {view === 'announcements' && <AnnouncementsView user={currentUser} />}
             {view === 'content-ideas' && <ContentIdeasView user={currentUser} allUsers={allUsers} settings={settings} />}
+            {view === 'media-tasks' && <MediaTasksView user={currentUser} allUsers={allUsers} />}
             {view === 'users' && <UsersView user={currentUser} allUsers={allUsers} settings={settings} onRefresh={refreshAll} />}
             {view === 'settings' && <SettingsView user={currentUser} settings={settings} onSave={async s => { await storage.set('app:settings', s); await refreshAll(); }} />}
           </div>
@@ -954,8 +977,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'tasks', label: 'Tugas Tim', icon: CheckSquare, show: true },
         { id: 'todos', label: 'To-Do List', icon: KanbanSquare, show: true },
         { id: 'attendance', label: 'Absensi', icon: MapPin, show: true },
-        { id: 'calendar', label: 'Kalender Tim', icon: CalendarDays, show: true },
-        { id: 'schedule', label: 'Jadwal Live & Piket', icon: Calendar, show: true }
+        { id: 'calendar', label: 'Kalender Tim', icon: CalendarDays, show: true }
       ]
     },
     {
@@ -964,12 +986,14 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'creators', label: 'Database Creator', icon: Users, show: canAccessFeature(user, 'creators') },
         { id: 'creator-management', label: 'Pengelolaan Creator', icon: Network, show: canAccessFeature(user, 'creator-management') },
         { id: 'sellers', label: 'Database Seller', icon: Briefcase, show: canAccessFeature(user, 'sellers') },
-        { id: 'content-ideas', label: 'Bank Ide Konten', icon: Lightbulb, show: true }
+        { id: 'content-ideas', label: 'Bank Ide Konten', icon: Lightbulb, show: true },
+        { id: 'media-tasks', label: 'Eksekusi Konten', icon: Clapperboard, show: canAccessFeature(user, 'media-tasks') }
       ]
     },
     {
       label: 'Laporan & Analitik',
       items: [
+        { id: 'gmv', label: 'Target & GMV', icon: BarChart3, show: canAccessFeature(user, 'gmv') },
         { id: 'reports', label: 'Laporan Mingguan', icon: FileText, show: true },
         { id: 'daily-reports', label: 'Laporan Harian', icon: ClipboardList, show: true },
         { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, show: true }
@@ -1567,6 +1591,8 @@ function Dashboard({ user, allUsers, setView }) {
   const [dailyReports, setDailyReports] = useState([]);
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [targets, setTargets] = useState([]);
+  const [gmvEntries, setGmvEntries] = useState([]);
+  const [gmvTargets, setGmvTargets] = useState({});
   const [showTargetsManager, setShowTargetsManager] = useState(false);
 
   const loadTargets = async () => setTargets(await storage.getList('targets:all'));
@@ -1580,6 +1606,8 @@ function Dashboard({ user, allUsers, setView }) {
       setSchedules(await storage.getList('schedule:all'));
       setDailyReports(await storage.getList('daily-reports:all'));
       setCalendarEvents(await storage.getList('calendar:all'));
+      setGmvEntries(await storage.getList('gmv:daily'));
+      setGmvTargets((await storage.get('gmv:targets')) || {});
       await loadTargets();
     })();
   }, []);
@@ -1788,6 +1816,11 @@ function Dashboard({ user, allUsers, setView }) {
         canManage={canManageTargets}
         onManage={() => setShowTargetsManager(true)} />
 
+      {/* GMV Summary Widget */}
+      {canAccessFeature(user, 'gmv') && (
+        <DashboardGmvWidget entries={gmvEntries} targets={gmvTargets} onOpen={() => setView('gmv')} />
+      )}
+
       {/* Stats grid - compact with badges */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s, i) => {
@@ -1992,6 +2025,69 @@ function Dashboard({ user, allUsers, setView }) {
 }
 
 // ============ TARGET WIDGET (Dashboard) ============
+function DashboardGmvWidget({ entries, targets, onOpen }) {
+  const mk = monthKey();
+  const monthTargets = targets[mk] || {};
+  const totals = { mcn: 0, tap: 0, internal: 0 };
+  entries.forEach(e => { if (e.date && e.date.startsWith(mk) && totals[e.division] !== undefined) totals[e.division] += Number(e.gmv) || 0; });
+  const change = {};
+  Object.keys(GMV_DIVISIONS).forEach(div => {
+    const series = gmvDailySeries(entries, div, mk).filter(s => s.value > 0);
+    const today = series[series.length - 1]?.value || 0;
+    const prev = series[series.length - 2]?.value || 0;
+    const pct = prev > 0 ? Math.round(((today - prev) / prev) * 100) : (today > 0 ? 100 : 0);
+    change[div] = { today, prev, pct, diff: today - prev };
+  });
+  const grand = totals.mcn + totals.tap + totals.internal;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center"><BarChart3 className="w-5 h-5 text-indigo-600" /></div>
+          <div>
+            <h3 className="font-display font-bold text-slate-900">Target & GMV Bulan Ini</h3>
+            <p className="text-[11px] text-slate-500">Total gabungan: <b className="text-indigo-700">{fmtRupiah(grand)}</b></p>
+          </div>
+        </div>
+        <button onClick={onOpen} className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1">
+          Detail <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {Object.entries(GMV_DIVISIONS).map(([div, cfg]) => {
+          const total = totals[div];
+          const target = Number(monthTargets[div]) || 0;
+          const pct = target > 0 ? Math.min(Math.round((total / target) * 100), 999) : 0;
+          const ch = change[div];
+          return (
+            <button key={div} onClick={onOpen} className="text-left rounded-xl border border-slate-100 p-3 hover:border-slate-300 hover:bg-slate-50 transition">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700">{cfg.short}</span>
+                {(ch.today > 0 || ch.prev > 0) && (
+                  <span className={`text-[10px] font-bold inline-flex items-center gap-0.5 ${ch.diff >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {ch.diff >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                    {ch.diff >= 0 ? '+' : ''}{ch.pct}%
+                  </span>
+                )}
+              </div>
+              <div className="font-display font-bold text-base text-slate-900 mt-1 leading-tight">{fmtRupiah(total)}</div>
+              {target > 0 ? (
+                <>
+                  <div className="h-1 bg-slate-100 rounded-full mt-1.5 overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: cfg.color }} />
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1">{pct}% dari target</div>
+                </>
+              ) : <div className="text-[10px] text-slate-300 mt-1">target belum diset</div>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function TargetWidget({ targets, canManage, onManage }) {
   const active = targets.filter(t => t.status === 'active');
   const achieved = targets.filter(t => t.status === 'achieved');
@@ -3248,12 +3344,13 @@ function CreatorsView({ user, allUsers }) {
     <div className="max-w-7xl">
       <PageHeader title="Database Creator" subtitle="Catat dan kelola semua creator affiliate"
         action={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <DownloadTemplateButton />
+            <ExportCreatorsButton creators={filtered} />
             <ImportCsvButton onImported={load} user={user} managers={managers} />
             <button onClick={() => { setEditing(null); setShowForm(true); }}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-              <Plus className="w-4 h-4" /> Creator Baru
+              <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Creator Baru</span><span className="sm:hidden">Baru</span>
             </button>
           </div>
         } />
@@ -3594,7 +3691,6 @@ function ImportCsvButton({ onImported, user, managers }) {
     if (lines.length < 2) { setImporting(false); return alert('CSV kosong atau format salah.'); }
     const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
     const rows = lines.slice(1).map(line => {
-      // Simple CSV parser (handles quoted)
       const cells = [];
       let cur = '', inQuote = false;
       for (let i = 0; i < line.length; i++) {
@@ -3609,21 +3705,30 @@ function ImportCsvButton({ onImported, user, managers }) {
       return row;
     });
 
+    // Parse angka Rupiah Indonesia: "Rp27.006.784.021" -> 27006784021
+    const parseRp = (v) => Number(String(v || '').replace(/[^\d]/g, '')) || 0;
+
     const list = await storage.getList('creators:all');
-    let added = 0, updated = 0;
+    let added = 0, updated = 0, skipped = 0;
     rows.forEach(row => {
-      const name = row.name || row.nama || row.creator || row['creator name'];
-      if (!name) return;
-      const tiktok = row.tiktok || row['tiktok handle'] || row.handle || '';
+      // Dukung header template sederhana DAN export TikTok Partner Center
+      const name = row.name || row.nama || row.creator || row['creator name'] || row['nama pengguna kreator'] || row['nama kreator'];
+      // Lewati baris ringkasan/total dari export TikTok
+      if (!name || ['ringkasan', 'summary', 'total', '-'].includes(name.toLowerCase().trim())) { skipped++; return; }
+      const tiktok = row.tiktok || row['tiktok handle'] || row.handle || row['username'] || (row['nama pengguna kreator'] ? '@' + row['nama pengguna kreator'] : '');
+      // GMV: utamakan "GMV Afiliasi" dari TikTok, fallback ke kolom sederhana
+      const gmv = parseRp(row['gmv afiliasi'] || row.gmv || row['total gmv'] || '0');
+      const gmvLive = parseRp(row['gmv live afiliasi'] || '0');
+      const gmvVideo = parseRp(row['gmv video afiliasi'] || '0');
+      const orders = parseRp(row['pesanan dari afiliasi'] || row.orders || row.order || row['total orders'] || '0');
+      const category = row.category || row.kategori || row['kategori level 1'] || row['kategori level 2'] || '';
       const existing = list.find(c =>
         c.name.toLowerCase() === name.toLowerCase() ||
         (tiktok && c.tiktokHandle && c.tiktokHandle.toLowerCase() === tiktok.toLowerCase())
       );
       const data = {
-        totalGmv: Number((row.gmv || row['total gmv'] || '0').replace(/[^\d.-]/g, '')) || 0,
-        totalOrders: Number((row.orders || row.order || row['total orders'] || '0').replace(/[^\d.-]/g, '')) || 0,
-        category: row.category || row.kategori || '',
-        tiktokHandle: tiktok
+        totalGmv: gmv, totalOrders: orders, category, tiktokHandle: tiktok,
+        gmvLive, gmvVideo
       };
       if (existing) {
         Object.assign(existing, data, { updatedAt: new Date().toISOString() });
@@ -3669,11 +3774,13 @@ function ImportCsvButton({ onImported, user, managers }) {
 // ============ DOWNLOAD TEMPLATE CSV ============
 function DownloadTemplateButton() {
   const handleDownload = () => {
+    // Header jelas + contoh. Import juga otomatis mengenali file export TikTok Partner Center.
     const headers = 'name,tiktok,category,gmv,orders';
     const samples = [
-      '"Contoh Creator A","@creatorA","Beauty",1500000,12',
-      '"Contoh Creator B","@creatorB","Fashion",750000,8',
-      '"Contoh Creator C","@creatorC","Food",2300000,25'
+      '"Nama Creator (wajib)","@username","Kategori",GMV_angka,jumlah_order',
+      '"Fadila Teja","@fadilatejapratamaa","Menswear",6090340648,60691',
+      '"Apin","@apin.ketiduran","Electronics",1208650547,12696',
+      '"Contoh Beauty","@beautycreator","Beauty",1500000,12'
     ];
     const csv = [headers, ...samples].join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -3687,9 +3794,45 @@ function DownloadTemplateButton() {
     URL.revokeObjectURL(url);
   };
   return (
-    <button onClick={handleDownload} title="Download template CSV untuk import creator"
+    <button onClick={handleDownload} title="Download template CSV. Import juga bisa langsung dari file export TikTok Partner Center."
       className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
       <FileDown className="w-4 h-4" /> Template CSV
+    </button>
+  );
+}
+
+// ============ EXPORT DATA CREATOR (rapi) ============
+function ExportCreatorsButton({ creators }) {
+  const handleExport = () => {
+    if (!creators || creators.length === 0) { alert('Belum ada data creator untuk diexport.'); return; }
+    const rows = [['Nama', 'TikTok', 'Kategori', 'Status', 'Manager', 'GMV Total', 'GMV LIVE', 'GMV Video', 'Total Order', 'Catatan']];
+    creators.forEach(c => {
+      rows.push([
+        c.name || '',
+        c.tiktokHandle || '',
+        c.category || '',
+        c.status || 'aktif',
+        c.managerName || '-',
+        c.totalGmv || 0,
+        c.gmvLive || 0,
+        c.gmvVideo || 0,
+        c.totalOrders || 0,
+        (c.notes || '').replace(/"/g, "'")
+      ]);
+    });
+    const csv = rows.map(r => r.map(x => `"${x}"`).join(',')).join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Data-Creator-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <button onClick={handleExport} title="Download data creator yang sudah rapi (buka di Excel)"
+      className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+      <Download className="w-4 h-4" /> Export Data
     </button>
   );
 }
@@ -4072,7 +4215,520 @@ function ScheduleForm({ schedule, assignableAdmins, creators, onSave, onClose })
   );
 }
 
+// ============ TARGET & GMV TRACKING ============
+function gmvDailySeries(entries, division, mKey) {
+  const [y, m] = mKey.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const isCurrent = mKey === monthKey();
+  const lastDay = isCurrent ? new Date().getDate() : daysInMonth;
+  const series = [];
+  for (let d = 1; d <= lastDay; d++) {
+    const dk = `${mKey}-${String(d).padStart(2, '0')}`;
+    const e = entries.find(x => x.date === dk && x.division === division);
+    series.push({ day: d, date: dk, value: e ? Number(e.gmv) || 0 : 0 });
+  }
+  return series;
+}
+
+function MiniBarChart({ series, color }) {
+  if (!series.length) return null;
+  const max = Math.max(...series.map(s => s.value), 1);
+  const W = 100, H = 36, gap = 1.5;
+  const bw = (W - gap * (series.length - 1)) / series.length;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-12">
+      {series.map((s, i) => {
+        const h = s.value > 0 ? Math.max((s.value / max) * (H - 2), 1.5) : 0;
+        return (
+          <rect key={i} x={i * (bw + gap)} y={H - h} width={bw} height={h}
+            rx="0.5" fill={color} opacity={s.value > 0 ? 0.85 : 0.15}>
+            <title>{`Tgl ${s.day}: ${fmtRupiah(s.value)}`}</title>
+          </rect>
+        );
+      })}
+    </svg>
+  );
+}
+
+function GmvView({ user, allUsers }) {
+  const [entries, setEntries] = useState([]);
+  const [targets, setTargets] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [mKey, setMKey] = useState(monthKey());
+  const [showInput, setShowInput] = useState(false);
+  const [showTarget, setShowTarget] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const load = async () => {
+    setEntries(await storage.getList('gmv:daily'));
+    setTargets((await storage.get('gmv:targets')) || {});
+    setLoading(false);
+  };
+  useEffect(() => { load(); const iv = setInterval(load, 12000); return () => clearInterval(iv); }, []);
+
+  const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
+  const monthTargets = targets[mKey] || {};
+
+  // Total bulan ini per divisi
+  const monthTotals = useMemo(() => {
+    const t = { mcn: 0, tap: 0, internal: 0 };
+    entries.forEach(e => { if (e.date && e.date.startsWith(mKey) && t[e.division] !== undefined) t[e.division] += Number(e.gmv) || 0; });
+    return t;
+  }, [entries, mKey]);
+
+  // Perubahan harian (hari ini vs kemarin) per divisi — traffic naik/turun
+  const dailyChange = useMemo(() => {
+    const res = {};
+    Object.keys(GMV_DIVISIONS).forEach(div => {
+      const series = gmvDailySeries(entries, div, monthKey()).filter(s => s.value > 0);
+      const today = series[series.length - 1]?.value || 0;
+      const prev = series[series.length - 2]?.value || 0;
+      const diff = today - prev;
+      const pct = prev > 0 ? Math.round((diff / prev) * 100) : (today > 0 ? 100 : 0);
+      res[div] = { today, prev, diff, pct };
+    });
+    return res;
+  }, [entries]);
+
+  const monthLabel = (() => {
+    const [y, m] = mKey.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+  })();
+  const shiftMonth = (delta) => {
+    const [y, m] = mKey.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    setMKey(monthKey(d));
+  };
+
+  const saveEntry = async (data) => {
+    let list = await storage.getList('gmv:daily');
+    const existing = list.find(e => e.date === data.date && e.division === data.division && (!editing || e.id !== editing.id));
+    if (editing) {
+      list = list.map(e => e.id === editing.id ? { ...e, ...data, updatedAt: new Date().toISOString() } : e);
+    } else if (existing) {
+      // Upsert: kalau sudah ada entry tanggal+divisi itu, timpa
+      list = list.map(e => e.id === existing.id ? { ...e, ...data, inputById: user.id, inputByName: user.name, updatedAt: new Date().toISOString() } : e);
+    } else {
+      list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
+    }
+    await storage.set('gmv:daily', list);
+    await logActivity(`update GMV ${GMV_DIVISIONS[data.division].label} ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
+    setShowInput(false); setEditing(null); load();
+  };
+  const deleteEntry = async (e) => {
+    if (!confirm(`Hapus data GMV ${GMV_DIVISIONS[e.division]?.label} tanggal ${e.date}?`)) return;
+    await storage.set('gmv:daily', (await storage.getList('gmv:daily')).filter(x => x.id !== e.id));
+    load();
+  };
+  const saveTargets = async (vals) => {
+    const all = (await storage.get('gmv:targets')) || {};
+    all[mKey] = vals;
+    await storage.set('gmv:targets', all);
+    await logActivity(`set target GMV ${monthLabel}`, user.name);
+    setShowTarget(false); load();
+  };
+
+  // Entri bulan ini (untuk tabel), terbaru dulu
+  const monthEntries = entries.filter(e => e.date && e.date.startsWith(mKey))
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  const canInputAny = isOwnerMgr || Object.keys(GMV_DIVISIONS).some(d => canInputGmv(user, d));
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat data GMV...</div>;
+
+  return (
+    <div className="max-w-6xl">
+      <PageHeader title="Target & GMV" subtitle="Target wajib bisnis — di-update harian oleh tiap divisi"
+        action={
+          <div className="flex gap-2 flex-wrap">
+            {isOwnerMgr && (
+              <button onClick={() => setShowTarget(true)}
+                className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+                <Target className="w-4 h-4" /> Set Target
+              </button>
+            )}
+            {canInputAny && (
+              <button onClick={() => { setEditing(null); setShowInput(true); }}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+                <Plus className="w-4 h-4" /> Update GMV Hari Ini
+              </button>
+            )}
+          </div>
+        } />
+
+      {/* Month navigator */}
+      <div className="flex items-center gap-2 mb-5">
+        <button onClick={() => shiftMonth(-1)} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center"><ArrowLeft className="w-4 h-4" /></button>
+        <div className="font-display font-bold text-slate-900 text-lg min-w-[160px] text-center">{monthLabel}</div>
+        <button onClick={() => shiftMonth(1)} disabled={mKey >= monthKey()}
+          className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 flex items-center justify-center"><ArrowRight className="w-4 h-4" /></button>
+        {mKey !== monthKey() && <button onClick={() => setMKey(monthKey())} className="text-xs text-indigo-600 font-semibold hover:underline ml-1">Bulan ini</button>}
+      </div>
+
+      {/* 3 Hero cards per divisi */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {Object.entries(GMV_DIVISIONS).map(([div, cfg]) => {
+          const total = monthTotals[div];
+          const target = Number(monthTargets[div]) || 0;
+          const pct = target > 0 ? Math.min(Math.round((total / target) * 100), 999) : 0;
+          const ch = dailyChange[div];
+          const isCurrentMonth = mKey === monthKey();
+          return (
+            <div key={div} className="rounded-2xl p-5 text-white shadow-lg lift-on-hover"
+              style={{ background: `linear-gradient(135deg, ${cfg.color}, ${cfg.color}dd)` }}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider opacity-90">GMV {cfg.label}</span>
+                <BarChart3 className="w-4 h-4 opacity-80" />
+              </div>
+              <div className="font-display font-bold text-2xl mt-2 leading-tight">{fmtRupiah(total)}</div>
+              {target > 0 ? (
+                <>
+                  <div className="text-[11px] opacity-90 mt-1">Target: {fmtRupiah(target)} · {pct}%</div>
+                  <div className="h-1.5 bg-white/30 rounded-full mt-1.5 overflow-hidden">
+                    <div className="h-full bg-white rounded-full transition-all" style={{ width: `${Math.min(pct, 100)}%` }} />
+                  </div>
+                </>
+              ) : (
+                <div className="text-[11px] opacity-80 mt-1">Target belum diset</div>
+              )}
+              {isCurrentMonth && ch && (ch.today > 0 || ch.prev > 0) && (
+                <div className="mt-2.5 inline-flex items-center gap-1 text-xs font-semibold bg-white/20 rounded-full px-2 py-0.5">
+                  {ch.diff >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                  {ch.diff >= 0 ? '+' : ''}{ch.pct}% vs kemarin
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Total gabungan */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-6 flex items-center justify-between">
+        <div>
+          <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Total GMV Gabungan · {monthLabel}</div>
+          <div className="font-display font-bold text-2xl text-indigo-700 mt-0.5">{fmtRupiah(monthTotals.mcn + monthTotals.tap + monthTotals.internal)}</div>
+        </div>
+        <Award className="w-10 h-10 text-amber-400" />
+      </div>
+
+      {/* Traffic per divisi */}
+      <h3 className="font-display font-bold text-slate-900 mb-3 flex items-center gap-2"><Activity className="w-5 h-5 text-indigo-600" /> Traffic Harian per Divisi</h3>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {Object.entries(GMV_DIVISIONS).map(([div, cfg]) => {
+          const series = gmvDailySeries(entries, div, mKey);
+          const ch = dailyChange[div];
+          const isCurrentMonth = mKey === monthKey();
+          const filled = series.filter(s => s.value > 0).length;
+          return (
+            <div key={div} className="bg-white rounded-2xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-bold text-slate-800">{cfg.label}</span>
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: cfg.color }} />
+              </div>
+              <MiniBarChart series={series} color={cfg.color} />
+              <div className="flex items-center justify-between mt-2 text-xs">
+                <span className="text-slate-500">{filled} hari terisi</span>
+                {isCurrentMonth && ch && (ch.today > 0 || ch.prev > 0) ? (
+                  <span className={`font-bold inline-flex items-center gap-0.5 ${ch.diff >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {ch.diff >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                    {ch.diff >= 0 ? '+' : ''}{ch.pct}%
+                  </span>
+                ) : <span className="text-slate-300">—</span>}
+              </div>
+              {isCurrentMonth && ch && ch.today > 0 && (
+                <div className="text-[11px] text-slate-400 mt-1">Hari ini: {fmtRupiah(ch.today)}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Tabel entri */}
+      <h3 className="font-display font-bold text-slate-900 mb-3">Riwayat Input · {monthLabel}</h3>
+      {monthEntries.length === 0 ? (
+        <EmptyState icon={BarChart3} text="Belum ada data GMV bulan ini. Klik 'Update GMV Hari Ini' untuk mulai." />
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          {/* Mobile cards */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {monthEntries.map(e => (
+              <div key={e.id} className="p-3">
+                <div className="flex items-center justify-between">
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${DIVISIONS[e.division]?.color || 'bg-slate-100'}`}>{GMV_DIVISIONS[e.division]?.label || e.division}</span>
+                  <span className="text-xs text-slate-500">{new Date(e.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span>
+                </div>
+                <div className="font-bold text-slate-900 mt-1">{fmtRupiah(e.gmv)}</div>
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-[11px] text-slate-400">{e.inputByName}{e.orders ? ` · ${fmtNumber(e.orders)} order` : ''}</span>
+                  {(isOwnerMgr || e.inputById === user.id) && (
+                    <div className="flex gap-1">
+                      <button onClick={() => { setEditing(e); setShowInput(true); }} className="text-slate-400 hover:text-blue-600 p-1"><Edit2 className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => deleteEntry(e)} className="text-slate-400 hover:text-red-600 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Desktop table */}
+          <table className="w-full hidden md:table">
+            <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+              <tr>
+                <th className="text-left p-3 font-semibold">Tanggal</th>
+                <th className="text-left p-3 font-semibold">Divisi</th>
+                <th className="text-right p-3 font-semibold">GMV</th>
+                <th className="text-right p-3 font-semibold">Order</th>
+                <th className="text-left p-3 font-semibold">Input oleh</th>
+                <th className="p-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {monthEntries.map(e => (
+                <tr key={e.id} className="hover:bg-slate-50">
+                  <td className="p-3 text-sm text-slate-700">{new Date(e.date).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
+                  <td className="p-3"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${DIVISIONS[e.division]?.color || 'bg-slate-100'}`}>{GMV_DIVISIONS[e.division]?.label || e.division}</span></td>
+                  <td className="p-3 text-sm text-right font-bold tabular-nums text-slate-800">{fmtRupiah(e.gmv)}</td>
+                  <td className="p-3 text-sm text-right tabular-nums text-slate-500">{e.orders ? fmtNumber(e.orders) : '-'}</td>
+                  <td className="p-3 text-sm text-slate-500">{e.inputByName}</td>
+                  <td className="p-3 text-right">
+                    {(isOwnerMgr || e.inputById === user.id) && (
+                      <div className="flex gap-1 justify-end">
+                        <button onClick={() => { setEditing(e); setShowInput(true); }} className="text-slate-400 hover:text-blue-600 p-1"><Edit2 className="w-4 h-4" /></button>
+                        <button onClick={() => deleteEntry(e)} className="text-slate-400 hover:text-red-600 p-1"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showInput && <GmvInputModal user={user} editing={editing} onSave={saveEntry} onClose={() => { setShowInput(false); setEditing(null); }} />}
+      {showTarget && <GmvTargetModal monthLabel={monthLabel} current={monthTargets} onSave={saveTargets} onClose={() => setShowTarget(false)} />}
+    </div>
+  );
+}
+
+function GmvInputModal({ user, editing, onSave, onClose }) {
+  const allowedDivs = Object.keys(GMV_DIVISIONS).filter(d => canInputGmv(user, d));
+  const [form, setForm] = useState({
+    division: editing?.division || allowedDivs[0] || 'mcn',
+    date: editing?.date || dayKey(),
+    gmv: editing?.gmv || '',
+    orders: editing?.orders || '',
+    note: editing?.note || ''
+  });
+  const [error, setError] = useState('');
+
+  const submit = () => {
+    setError('');
+    if (!form.division) return setError('Pilih divisi.');
+    if (!form.date) return setError('Pilih tanggal.');
+    const gmv = Number(String(form.gmv).replace(/[^\d]/g, ''));
+    if (!gmv || gmv <= 0) return setError('GMV harus diisi (angka).');
+    onSave({ division: form.division, date: form.date, gmv, orders: Number(String(form.orders).replace(/[^\d]/g, '')) || 0, note: form.note.trim() });
+  };
+
+  return (
+    <Modal title={editing ? 'Edit Data GMV' : 'Update GMV Harian'} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Divisi *">
+          <select value={form.division} onChange={e => setForm({ ...form, division: e.target.value })}
+            disabled={allowedDivs.length <= 1 && !editing}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100">
+            {(editing ? Object.keys(GMV_DIVISIONS) : allowedDivs).map(d => <option key={d} value={d}>{GMV_DIVISIONS[d].label}</option>)}
+          </select>
+          {allowedDivs.length <= 1 && !editing && <div className="text-[11px] text-slate-500 mt-1">Anda hanya bisa input GMV divisi {GMV_DIVISIONS[allowedDivs[0]]?.label}.</div>}
+        </Field>
+        <Field label="Tanggal *">
+          <input type="date" value={form.date} max={dayKey()} onChange={e => setForm({ ...form, date: e.target.value })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </Field>
+        <Field label="GMV (Rp) *">
+          <input type="text" inputMode="numeric" value={form.gmv}
+            onChange={e => setForm({ ...form, gmv: e.target.value.replace(/[^\d]/g, '') })}
+            placeholder="mis. 15000000"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          {form.gmv && <div className="text-xs text-emerald-600 mt-1 font-semibold">{fmtRupiah(Number(form.gmv))}</div>}
+        </Field>
+        <Field label="Jumlah Order (opsional)">
+          <input type="text" inputMode="numeric" value={form.orders}
+            onChange={e => setForm({ ...form, orders: e.target.value.replace(/[^\d]/g, '') })}
+            placeholder="mis. 120"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </Field>
+        <Field label="Catatan (opsional)">
+          <input type="text" value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}
+            placeholder="mis. live bareng creator X"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </Field>
+        <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-3 py-2">💡 Kalau tanggal & divisi sudah pernah diinput, data lama akan otomatis diperbarui (tidak dobel).</div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
+        <FormActions onCancel={onClose} onSave={submit} saveLabel={editing ? 'Update' : 'Simpan'} />
+      </div>
+    </Modal>
+  );
+}
+
+function GmvTargetModal({ monthLabel, current, onSave, onClose }) {
+  const [vals, setVals] = useState({
+    mcn: current.mcn || '', tap: current.tap || '', internal: current.internal || ''
+  });
+  return (
+    <Modal title={`Set Target GMV · ${monthLabel}`} onClose={onClose}>
+      <div className="space-y-3">
+        <div className="text-sm text-slate-500">Target bulanan per divisi. Progress otomatis dihitung dari input GMV harian.</div>
+        {Object.entries(GMV_DIVISIONS).map(([div, cfg]) => (
+          <Field key={div} label={`Target ${cfg.label} (Rp)`}>
+            <input type="text" inputMode="numeric" value={vals[div]}
+              onChange={e => setVals({ ...vals, [div]: e.target.value.replace(/[^\d]/g, '') })}
+              placeholder="mis. 500000000"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            {vals[div] && <div className="text-xs text-emerald-600 mt-1 font-semibold">{fmtRupiah(Number(vals[div]))}</div>}
+          </Field>
+        ))}
+        <FormActions onCancel={onClose} onSave={() => onSave({
+          mcn: Number(vals.mcn) || 0, tap: Number(vals.tap) || 0, internal: Number(vals.internal) || 0
+        })} saveLabel="Simpan Target" />
+      </div>
+    </Modal>
+  );
+}
+
 // ============ LEADERBOARD ============
+// ============ EKSEKUSI KONTEN (Media & Creative) ============
+function MediaTasksView({ user, allUsers }) {
+  const [ideas, setIdeas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('antrian');
+
+  const load = async () => { setIdeas(await storage.getList('content-ideas:all')); setLoading(false); };
+  useEffect(() => { load(); const iv = setInterval(load, 10000); return () => clearInterval(iv); }, []);
+
+  const FORMATS = {
+    reel: { label: 'Reel/Video', icon: '🎬' }, foto: { label: 'Foto/Carousel', icon: '📸' },
+    live: { label: 'Live', icon: '🔴' }, story: { label: 'Story', icon: '⚡' }, lainnya: { label: 'Lainnya', icon: '📝' }
+  };
+  // Ide yang sudah di-approve & belum tayang = antrian kerja Media Creative
+  const antrian = ideas.filter(i => i.status === 'approved' || i.status === 'in_progress');
+  const selesai = ideas.filter(i => i.status === 'published');
+  const list = tab === 'antrian' ? antrian : selesai;
+
+  // Tandai mulai dikerjakan
+  const markProgress = async (idea) => {
+    const all = (await storage.getList('content-ideas:all')).map(i =>
+      i.id === idea.id ? { ...i, status: 'in_progress', startedAt: new Date().toISOString() } : i);
+    await storage.set('content-ideas:all', all);
+    await logActivity(`mulai garap konten "${idea.title}"`, user.name); load();
+  };
+  // Centang selesai → status published
+  const markDone = async (idea) => {
+    const all = (await storage.getList('content-ideas:all')).map(i =>
+      i.id === idea.id ? { ...i, status: 'published', publishedAt: new Date().toISOString(), doneByName: user.name } : i);
+    await storage.set('content-ideas:all', all);
+    await logActivity(`menyelesaikan konten "${idea.title}"`, user.name); load();
+  };
+  // Balikkan ke antrian (kalau salah centang)
+  const undoDone = async (idea) => {
+    const all = (await storage.getList('content-ideas:all')).map(i =>
+      i.id === idea.id ? { ...i, status: 'in_progress' } : i);
+    await storage.set('content-ideas:all', all); load();
+  };
+
+  const fmtDate = ts => ts ? new Date(ts).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '-';
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat...</div>;
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="Eksekusi Konten" subtitle="Antrian konten yang sudah di-approve — siap digarap tim Media & Creative" />
+
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="bg-gradient-to-br from-amber-50 to-white rounded-2xl border border-amber-200 p-4">
+          <div className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Perlu Dikerjakan</div>
+          <div className="font-display font-bold text-3xl text-amber-700 mt-1">{antrian.length}</div>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-50 to-white rounded-2xl border border-emerald-200 p-4">
+          <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">Sudah Selesai</div>
+          <div className="font-display font-bold text-3xl text-emerald-700 mt-1">{selesai.length}</div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-slate-200 p-1 inline-flex mb-4">
+        <button onClick={() => setTab('antrian')}
+          className={`px-4 py-2 rounded text-sm font-semibold transition ${tab === 'antrian' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+          📋 Antrian Kerja ({antrian.length})
+        </button>
+        <button onClick={() => setTab('selesai')}
+          className={`px-4 py-2 rounded text-sm font-semibold transition ${tab === 'selesai' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+          ✅ Selesai ({selesai.length})
+        </button>
+      </div>
+
+      {list.length === 0 ? (
+        <EmptyState icon={Clapperboard} text={tab === 'antrian'
+          ? 'Belum ada konten untuk dikerjakan. Ide yang di-approve di Bank Ide Konten otomatis muncul di sini.'
+          : 'Belum ada konten yang diselesaikan.'} />
+      ) : (
+        <div className="space-y-3">
+          {list.map(idea => (
+            <div key={idea.id} className={`bg-white rounded-2xl border shadow-sm p-4 ${idea.status === 'in_progress' ? 'border-blue-200' : 'border-slate-200'}`}>
+              <div className="flex items-start gap-3">
+                <button
+                  onClick={() => tab === 'selesai' ? undoDone(idea) : markDone(idea)}
+                  title={tab === 'selesai' ? 'Batalkan selesai' : 'Tandai selesai'}
+                  className={`mt-0.5 w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition ${
+                    tab === 'selesai' ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 hover:border-emerald-500 hover:bg-emerald-50'
+                  }`}>
+                  {tab === 'selesai' && <Check className="w-4 h-4" />}
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-lg">{FORMATS[idea.format]?.icon || '📝'}</span>
+                    <span className={`font-semibold text-slate-900 ${tab === 'selesai' ? 'line-through text-slate-400' : ''}`}>{idea.title}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">{FORMATS[idea.format]?.label || 'Konten'}</span>
+                    {idea.status === 'in_progress' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">SEDANG DIGARAP</span>}
+                  </div>
+                  {idea.description && <p className="text-sm text-slate-600 mt-1">{idea.description}</p>}
+                  <div className="flex items-center gap-3 mt-2 text-xs text-slate-500 flex-wrap">
+                    {idea.assignedToName && <span>👤 PIC: <b className="text-slate-700">{idea.assignedToName}</b></span>}
+                    {idea.targetDate && <span>🎯 Target: {fmtDate(idea.targetDate)}</span>}
+                    <span>💡 Dari: {idea.proposedByName}</span>
+                  </div>
+                  {idea.assignNotes && (
+                    <div className="mt-2 text-xs bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-amber-800">
+                      📌 Brief: {idea.assignNotes}
+                    </div>
+                  )}
+                  {tab === 'antrian' && (
+                    <div className="flex gap-2 mt-3">
+                      {idea.status === 'approved' && (
+                        <button onClick={() => markProgress(idea)}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition">
+                          ▶ Mulai Garap
+                        </button>
+                      )}
+                      <button onClick={() => markDone(idea)}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5" /> Tandai Selesai
+                      </button>
+                    </div>
+                  )}
+                  {tab === 'selesai' && idea.doneByName && (
+                    <div className="text-[11px] text-emerald-600 mt-2">✅ Diselesaikan oleh {idea.doneByName}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ DATABASE SELLER (TAP) ============
 function SellersView({ user, allUsers }) {
   const [sellers, setSellers] = useState([]);
@@ -4488,18 +5144,14 @@ function AttendanceView({ user, allUsers }) {
 }
 
 function LeaderboardView({ allUsers }) {
-  const [creators, setCreators] = useState([]);
   const [tasks, setTasks] = useState([]);
-  const [tab, setTab] = useState('creators');
 
   useEffect(() => {
     (async () => {
-      setCreators(await storage.getList('creators:all'));
       setTasks(await storage.getList('tasks:all'));
     })();
   }, []);
 
-  const topCreators = [...creators].sort((a, b) => (b.totalGmv || 0) - (a.totalGmv || 0)).slice(0, 10);
   const teamStats = allUsers.map(m => {
     const myTasks = tasks.filter(t => t.assigneeId === m.id);
     const done = myTasks.filter(t => t.status === 'done').length;
@@ -4508,63 +5160,32 @@ function LeaderboardView({ allUsers }) {
 
   return (
     <div className="max-w-5xl">
-      <PageHeader title="Leaderboard" subtitle="Kompetisi sehat — siapa yang paling produktif" />
-      <div className="bg-white rounded-lg border border-slate-200 p-1 inline-flex mb-4">
-        <button onClick={() => setTab('creators')}
-          className={`px-4 py-2 rounded text-sm font-semibold transition ${tab === 'creators' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
-          🏆 Top Creator
-        </button>
-        <button onClick={() => setTab('team')}
-          className={`px-4 py-2 rounded text-sm font-semibold transition ${tab === 'team' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
-          👥 Top Anggota Tim
-        </button>
-      </div>
-      {tab === 'creators' && (
-        <div className="space-y-2">
-          {topCreators.length === 0 ? <EmptyState icon={Trophy} text="Belum ada data creator." /> :
-            topCreators.map((c, i) => (
-              <div key={c.id} className={`bg-white rounded-xl border p-4 flex items-center gap-4 ${i < 3 ? 'border-amber-200 bg-gradient-to-r from-amber-50/30 to-transparent' : 'border-slate-200'}`}>
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center font-display font-bold text-lg ${
-                  i === 0 ? 'bg-gradient-to-br from-amber-400 to-yellow-600 text-white' :
-                  i === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-white' :
-                  i === 2 ? 'bg-gradient-to-br from-orange-400 to-orange-600 text-white' :
-                  'bg-slate-100 text-slate-600'
-                }`}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}</div>
-                <div className="flex-1">
-                  <div className="font-semibold text-slate-900">{c.name}</div>
-                  <div className="text-xs text-slate-500">{c.category || 'Tanpa kategori'} · Manager: {c.managerName || '-'}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-display font-bold text-lg text-indigo-700">{fmtRupiah(c.totalGmv)}</div>
-                  <div className="text-xs text-slate-500">{fmtNumber(c.totalOrders)} order</div>
-                </div>
-              </div>
-            ))
-          }
-        </div>
-      )}
-      {tab === 'team' && (
-        <div className="space-y-2">
-          {teamStats.map((m, i) => (
-            <div key={m.id} className={`bg-white rounded-xl border p-4 flex items-center gap-4 ${i < 3 && m.done > 0 ? 'border-indigo-200 bg-gradient-to-r from-indigo-50/30 to-transparent' : 'border-slate-200'}`}>
-              <div className={`w-12 h-12 rounded-full flex items-center justify-center font-display font-bold text-lg ${
-                m.done > 0 && i === 0 ? 'bg-gradient-to-br from-amber-400 to-yellow-600 text-white' :
-                m.done > 0 && i === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-white' :
-                m.done > 0 && i === 2 ? 'bg-gradient-to-br from-orange-400 to-orange-600 text-white' :
-                'bg-slate-100 text-slate-600'
-              }`}>{m.done > 0 && i === 0 ? '🥇' : m.done > 0 && i === 1 ? '🥈' : m.done > 0 && i === 2 ? '🥉' : `#${i + 1}`}</div>
-              <div className="flex-1">
-                <div className="font-semibold text-slate-900">{m.name}</div>
-                <span className={`text-[10px] inline-block px-2 py-0.5 rounded mt-0.5 ${ROLES[m.role]?.color}`}>{ROLES[m.role]?.label}</span>
-              </div>
-              <div className="text-right">
-                <div className="font-display font-bold text-lg text-indigo-700">{m.done}</div>
-                <div className="text-xs text-slate-500">tugas selesai · {m.rate}% rate</div>
+      <PageHeader title="Leaderboard" subtitle="Kompetisi sehat — siapa anggota tim paling produktif" />
+      <div className="space-y-2">
+        {teamStats.map((m, i) => (
+          <div key={m.id} className={`bg-white rounded-xl border p-4 flex items-center gap-4 ${i < 3 && m.done > 0 ? 'border-indigo-200 bg-gradient-to-r from-indigo-50/30 to-transparent' : 'border-slate-200'}`}>
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center font-display font-bold text-lg ${
+              m.done > 0 && i === 0 ? 'bg-gradient-to-br from-amber-400 to-yellow-600 text-white' :
+              m.done > 0 && i === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-white' :
+              m.done > 0 && i === 2 ? 'bg-gradient-to-br from-orange-400 to-orange-600 text-white' :
+              'bg-slate-100 text-slate-600'
+            }`}>{m.done > 0 && i === 0 ? '🥇' : m.done > 0 && i === 1 ? '🥈' : m.done > 0 && i === 2 ? '🥉' : `#${i + 1}`}</div>
+            <div className="flex-1">
+              <div className="font-semibold text-slate-900">{m.name}</div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className={`text-[10px] inline-block px-2 py-0.5 rounded ${ROLES[m.role]?.color}`}>{ROLES[m.role]?.label}</span>
+                {m.division && DIVISIONS[m.division] && (
+                  <span className={`text-[10px] inline-block px-2 py-0.5 rounded ${DIVISIONS[m.division].color}`}>{DIVISIONS[m.division].label}</span>
+                )}
               </div>
             </div>
-          ))}
-        </div>
-      )}
+            <div className="text-right">
+              <div className="font-display font-bold text-lg text-indigo-700">{m.done}</div>
+              <div className="text-xs text-slate-500">tugas selesai · {m.rate}% rate</div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -6012,7 +6633,9 @@ function DownloadRangeModal({ filterableAuthors, reportsCount, onDownload, onClo
 // Helper: render saved field value based on type
 function DynamicFieldDisplay({ field }) {
   if (field.value === undefined || field.value === null || field.value === '' || field.value === 0) return null;
+  if (Array.isArray(field.value) && field.value.length === 0) return null;
   let display = field.value;
+  if (Array.isArray(field.value)) display = field.value.join(', ');
   if (field.type === 'number') display = fmtNumber(field.value);
   if (field.type === 'rating') {
     return (
@@ -6076,6 +6699,36 @@ function DynamicFieldInput({ field, value, onChange }) {
           <option value="">- Pilih -</option>
           {(field.options || []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
         </select>
+      )}
+      {field.type === 'radio' && (
+        <div className="space-y-1.5">
+          {(field.options || []).map(opt => (
+            <label key={opt} className="flex items-center gap-2.5 px-3 py-2 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition">
+              <input type="radio" name={field.id} checked={value === opt} onChange={() => onChange(opt)}
+                className="w-4 h-4 accent-indigo-600" />
+              <span className="text-sm text-slate-700">{opt}</span>
+            </label>
+          ))}
+        </div>
+      )}
+      {field.type === 'checkbox' && (
+        <div className="space-y-1.5">
+          {(field.options || []).map(opt => {
+            const arr = Array.isArray(value) ? value : [];
+            const checked = arr.includes(opt);
+            return (
+              <label key={opt} className="flex items-center gap-2.5 px-3 py-2 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition">
+                <input type="checkbox" checked={checked}
+                  onChange={() => onChange(checked ? arr.filter(x => x !== opt) : [...arr, opt])}
+                  className="w-4 h-4 accent-indigo-600 rounded" />
+                <span className="text-sm text-slate-700">{opt}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+      {field.type === 'time' && (
+        <input type="time" value={value ?? ''} onChange={e => onChange(e.target.value)} className={common} />
       )}
       {field.type === 'rating' && (
         <div className="flex gap-1">
@@ -6373,8 +7026,8 @@ function TemplateBuilderModal({ template, allUsers, existingTemplates, onSave, o
     if (form.fields.length === 0) return setError('Minimal harus ada 1 field.');
     const emptyLabels = form.fields.filter(f => !f.label.trim());
     if (emptyLabels.length > 0) return setError('Semua field harus punya label.');
-    const selectNoOpts = form.fields.filter(f => f.type === 'select' && (!f.options || f.options.length === 0));
-    if (selectNoOpts.length > 0) return setError(`Field dropdown harus punya minimal 1 pilihan: ${selectNoOpts.map(f => f.label).join(', ')}`);
+    const selectNoOpts = form.fields.filter(f => (f.type === 'select' || f.type === 'radio' || f.type === 'checkbox') && (!f.options || f.options.length === 0));
+    if (selectNoOpts.length > 0) return setError(`Field pilihan harus punya minimal 1 opsi: ${selectNoOpts.map(f => f.label).join(', ')}`);
     // Check duplicate assignment with other templates
     const alreadyAssigned = form.assignedUserIds.filter(uid =>
       existingTemplates.some(t => t.id !== template?.id && t.assignedUserIds?.includes(uid))
@@ -6503,7 +7156,7 @@ function FieldBuilder({ field, idx, total, onChange, onRemove, onMoveUp, onMoveD
                 className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm mt-0.5" />
             </div>
           </div>
-          {field.type === 'select' && (
+          {(field.type === 'select' || field.type === 'radio' || field.type === 'checkbox') && (
             <div>
               <label className="text-[10px] uppercase font-semibold text-slate-500">Pilihan (satu per baris)</label>
               <textarea value={(field.options || []).join('\n')}
@@ -6767,6 +7420,18 @@ function EventForm({ event, allUsers, onSave, onClose }) {
             className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
         </Field>
         <Field label="Peserta (opsional)">
+          <div className="flex items-center gap-2 mb-2">
+            <button type="button"
+              onClick={() => setForm({ ...form, attendeeIds: allUsers.map(u => u.id) })}
+              className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition">
+              ✓ Centang Semua Tim
+            </button>
+            <button type="button"
+              onClick={() => setForm({ ...form, attendeeIds: [] })}
+              className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition">
+              Hapus Semua
+            </button>
+          </div>
           <div className="max-h-40 overflow-y-auto scroll-thin border border-slate-200 rounded-lg p-2 space-y-1">
             {allUsers.map(u => (
               <label key={u.id} className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded cursor-pointer">
@@ -6778,7 +7443,7 @@ function EventForm({ event, allUsers, onSave, onClose }) {
               </label>
             ))}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">{form.attendeeIds.length} peserta dipilih</div>
+          <div className="text-[11px] text-slate-500 mt-1">{form.attendeeIds.length} dari {allUsers.length} anggota dipilih</div>
         </Field>
         <FormActions onCancel={onClose} onSave={submit} disabled={!form.title.trim() || !form.date || !form.time} />
       </div>
