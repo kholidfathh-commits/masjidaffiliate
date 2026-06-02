@@ -292,6 +292,43 @@ const monthKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() +
 const dayKey = (d = new Date()) => {
   const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
 };
+
+// ====== KPI POIN ======
+const DEFAULT_KPI_CONFIG = {
+  targetScore: 85,      // target bulanan, >= ini = Mumtaz
+  workdays: 26,         // target hari kerja per bulan
+  taskVolumeTarget: 20, // target jumlah tugas selesai (untuk poin bonus produktivitas)
+  weights: { attendance: 30, tasks: 30, reports: 25, bonus: 15 }
+};
+// Hitung KPI seorang user untuk bulan mKey
+function computeKpi(userId, { tasks, attendance, reports }, mKey, cfg) {
+  const c = cfg || DEFAULT_KPI_CONFIG;
+  const w = c.weights || DEFAULT_KPI_CONFIG.weights;
+  // Kehadiran: jumlah hari unik check-in 'in' bulan ini
+  const attDays = new Set(attendance.filter(a => a.userId === userId && a.type === 'in' && (a.timestamp || '').slice(0, 7) === mKey)
+    .map(a => (a.timestamp || '').slice(0, 10))).size;
+  const attScore = Math.min(attDays / (c.workdays || 26), 1) * w.attendance;
+  // Tugas: selesai vs miss (overdue belum selesai)
+  const now = new Date();
+  const myTasks = tasks.filter(t => t.assigneeId === userId);
+  const done = myTasks.filter(t => t.status === 'done' && (t.completedAt || '').slice(0, 7) === mKey).length;
+  const missed = myTasks.filter(t => t.status !== 'done' && t.deadline && new Date(t.deadline) < now && (t.deadline || '').slice(0, 7) === mKey).length;
+  const rate = (done + missed) > 0 ? done / (done + missed) : 1;
+  const taskScore = rate * w.tasks;
+  // Laporan harian: jumlah hari unik lapor bulan ini
+  const repDays = new Set(reports.filter(r => r.authorId === userId && (r.date || '').slice(0, 7) === mKey).map(r => r.date)).size;
+  const repScore = Math.min(repDays / (c.workdays || 26), 1) * w.reports;
+  // Bonus produktivitas: volume tugas selesai
+  const bonusScore = Math.min(done / (c.taskVolumeTarget || 20), 1) * w.bonus;
+  const total = Math.round(attScore + taskScore + repScore + bonusScore);
+  return {
+    total,
+    attendance: { days: attDays, score: Math.round(attScore) },
+    tasks: { done, missed, rate: Math.round(rate * 100), score: Math.round(taskScore) },
+    reports: { days: repDays, score: Math.round(repScore) },
+    bonus: { done, score: Math.round(bonusScore) }
+  };
+}
 const DEFAULT_SETTINGS = {
   appName: 'Al-Kahfi Corp',
   appSubtitle: 'MCN TAP · Masjid Affiliate',
@@ -424,6 +461,8 @@ export default function App() {
             {view === 'creator-management' && <CreatorManagementView user={currentUser} allUsers={allUsers} />}
             {view === 'sellers' && <SellersView user={currentUser} allUsers={allUsers} />}
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
+            {view === 'kpi' && <KpiView user={currentUser} allUsers={allUsers} />}
+            {view === 'problems' && <ProblemsView user={currentUser} allUsers={allUsers} />}
             {view === 'reports' && <ReportsView user={currentUser} allUsers={allUsers} />}
             {view === 'daily-reports' && <DailyReportsView user={currentUser} allUsers={allUsers} />}
             {view === 'schedule' && <ScheduleView user={currentUser} allUsers={allUsers} />}
@@ -977,7 +1016,8 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'tasks', label: 'Tugas Tim', icon: CheckSquare, show: true },
         { id: 'todos', label: 'To-Do List', icon: KanbanSquare, show: true },
         { id: 'attendance', label: 'Absensi', icon: MapPin, show: true },
-        { id: 'calendar', label: 'Kalender Tim', icon: CalendarDays, show: true }
+        { id: 'calendar', label: 'Kalender Tim', icon: CalendarDays, show: true },
+        { id: 'problems', label: 'Masalah & Solusi', icon: AlertCircle, show: true }
       ]
     },
     {
@@ -994,6 +1034,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       label: 'Laporan & Analitik',
       items: [
         { id: 'gmv', label: 'Target & GMV', icon: BarChart3, show: canAccessFeature(user, 'gmv') },
+        { id: 'kpi', label: 'KPI Tim', icon: Award, show: true },
         { id: 'reports', label: 'Laporan Mingguan', icon: FileText, show: true },
         { id: 'daily-reports', label: 'Laporan Harian', icon: ClipboardList, show: true },
         { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, show: true }
@@ -1593,6 +1634,9 @@ function Dashboard({ user, allUsers, setView }) {
   const [targets, setTargets] = useState([]);
   const [gmvEntries, setGmvEntries] = useState([]);
   const [gmvTargets, setGmvTargets] = useState({});
+  const [attendanceRecs, setAttendanceRecs] = useState([]);
+  const [problems, setProblems] = useState([]);
+  const [kpiConfig, setKpiConfig] = useState(DEFAULT_KPI_CONFIG);
   const [showTargetsManager, setShowTargetsManager] = useState(false);
 
   const loadTargets = async () => setTargets(await storage.getList('targets:all'));
@@ -1608,6 +1652,9 @@ function Dashboard({ user, allUsers, setView }) {
       setCalendarEvents(await storage.getList('calendar:all'));
       setGmvEntries(await storage.getList('gmv:daily'));
       setGmvTargets((await storage.get('gmv:targets')) || {});
+      setAttendanceRecs(await storage.getList('attendance:all'));
+      setProblems(await storage.getList('problems:all'));
+      setKpiConfig((await storage.get('kpi:config')) || DEFAULT_KPI_CONFIG);
       await loadTargets();
     })();
   }, []);
@@ -1821,6 +1868,14 @@ function Dashboard({ user, allUsers, setView }) {
         <DashboardGmvWidget entries={gmvEntries} targets={gmvTargets} onOpen={() => setView('gmv')} />
       )}
 
+      {/* KPI Saya + Masalah Aktif */}
+      <DashboardKpiProblemRow
+        kpi={computeKpi(user.id, { tasks, attendance: attendanceRecs, reports: dailyReports }, monthKey(), kpiConfig)}
+        target={kpiConfig.targetScore || 85}
+        openProblems={problems.filter(p => p.status !== 'resolved')}
+        canHandle={user.role === 'owner' || user.role === 'manajer' || user.role === 'leader'}
+        onKpi={() => setView('kpi')} onProblems={() => setView('problems')} />
+
       {/* Stats grid - compact with badges */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s, i) => {
@@ -2025,6 +2080,45 @@ function Dashboard({ user, allUsers, setView }) {
 }
 
 // ============ TARGET WIDGET (Dashboard) ============
+function DashboardKpiProblemRow({ kpi, target, openProblems, canHandle, onKpi, onProblems }) {
+  const isMumtaz = kpi.total >= target;
+  const ringColor = kpi.total >= target ? '#10B981' : kpi.total >= target * 0.7 ? '#F59E0B' : '#EF4444';
+  const kritis = openProblems.filter(p => p.urgency === 'kritis').length;
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* KPI Saya */}
+      <button onClick={onKpi} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex items-center gap-4 text-left hover:border-slate-300 transition lift-on-hover">
+        <div className="relative w-16 h-16 flex-shrink-0">
+          <svg viewBox="0 0 36 36" className="w-16 h-16 -rotate-90">
+            <circle cx="18" cy="18" r="15.5" fill="none" stroke="#E2E8F0" strokeWidth="3" />
+            <circle cx="18" cy="18" r="15.5" fill="none" stroke={ringColor} strokeWidth="3" strokeDasharray={`${Math.min(kpi.total, 100) / 100 * 97.4} 97.4`} strokeLinecap="round" />
+          </svg>
+          <div className="absolute inset-0 flex items-center justify-center font-display font-bold text-xl" style={{ color: ringColor }}>{kpi.total}</div>
+        </div>
+        <div className="flex-1">
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">KPI Saya Bulan Ini</div>
+          <div className="font-display font-bold text-slate-900 mt-0.5">{isMumtaz ? '⭐ Mumtaz!' : `Target ${target}`}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Hadir {kpi.attendance.days} hr · {kpi.tasks.done} tugas · {kpi.reports.days} laporan</div>
+        </div>
+        <ArrowRight className="w-4 h-4 text-slate-300" />
+      </button>
+
+      {/* Masalah Aktif */}
+      <button onClick={onProblems} className={`rounded-2xl border shadow-sm p-5 flex items-center gap-4 text-left transition lift-on-hover ${openProblems.length > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
+        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${openProblems.length > 0 ? 'bg-red-100' : 'bg-emerald-100'}`}>
+          {openProblems.length > 0 ? <AlertCircle className="w-7 h-7 text-red-600" /> : <CheckCircle2 className="w-7 h-7 text-emerald-600" />}
+        </div>
+        <div className="flex-1">
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Masalah Aktif (Andon)</div>
+          <div className="font-display font-bold text-2xl text-slate-900 mt-0.5">{openProblems.length}{kritis > 0 && <span className="text-sm font-bold text-red-600 ml-2">{kritis} kritis!</span>}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">{openProblems.length > 0 ? (canHandle ? 'Perlu ditangani' : 'Sedang ditangani tim') : 'Semua aman 🎉'}</div>
+        </div>
+        <ArrowRight className="w-4 h-4 text-slate-300" />
+      </button>
+    </div>
+  );
+}
+
 function DashboardGmvWidget({ entries, targets, onOpen }) {
   const mk = monthKey();
   const monthTargets = targets[mk] || {};
@@ -4592,6 +4686,512 @@ function GmvTargetModal({ monthLabel, current, onSave, onClose }) {
         <FormActions onCancel={onClose} onSave={() => onSave({
           mcn: Number(vals.mcn) || 0, tap: Number(vals.tap) || 0, internal: Number(vals.internal) || 0
         })} saveLabel="Simpan Target" />
+      </div>
+    </Modal>
+  );
+}
+
+// ============ KPI TIM ============
+function KpiView({ user, allUsers }) {
+  const [tasks, setTasks] = useState([]);
+  const [attendance, setAttendance] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [cfg, setCfg] = useState(DEFAULT_KPI_CONFIG);
+  const [loading, setLoading] = useState(true);
+  const [mKey, setMKey] = useState(monthKey());
+  const [showConfig, setShowConfig] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+
+  const load = async () => {
+    setTasks(await storage.getList('tasks:all'));
+    setAttendance(await storage.getList('attendance:all'));
+    setReports(await storage.getList('daily-reports:all'));
+    setCfg((await storage.get('kpi:config')) || DEFAULT_KPI_CONFIG);
+    setLoading(false);
+  };
+  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
+
+  const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
+
+  // Siapa yang boleh dilihat
+  const visibleUsers = useMemo(() => {
+    if (isOwnerMgr) return allUsers;
+    if (user.role === 'leader') return allUsers.filter(u => u.leaderId === user.id || u.id === user.id);
+    return allUsers.filter(u => u.id === user.id);
+  }, [allUsers, user, isOwnerMgr]);
+
+  const scored = useMemo(() => visibleUsers.map(u => ({
+    user: u, kpi: computeKpi(u.id, { tasks, attendance, reports }, mKey, cfg)
+  })).sort((a, b) => b.kpi.total - a.kpi.total), [visibleUsers, tasks, attendance, reports, mKey, cfg]);
+
+  const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
+  const shiftMonth = (delta) => { const [y, m] = mKey.split('-').map(Number); setMKey(monthKey(new Date(y, m - 1 + delta, 1))); };
+  const target = cfg.targetScore || 85;
+  const mumtazCount = scored.filter(s => s.kpi.total >= target).length;
+
+  const saveCfg = async (newCfg) => {
+    await storage.set('kpi:config', newCfg);
+    await logActivity('mengubah pengaturan KPI', user.name);
+    setShowConfig(false); load();
+  };
+
+  const scoreColor = (t) => t >= target ? 'text-emerald-600' : t >= target * 0.7 ? 'text-amber-600' : 'text-red-500';
+  const ringColor = (t) => t >= target ? '#10B981' : t >= target * 0.7 ? '#F59E0B' : '#EF4444';
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat KPI...</div>;
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="KPI Tim" subtitle={`Poin kinerja bulanan · target ${target} = Mumtaz`}
+        action={isOwnerMgr ? (
+          <button onClick={() => setShowConfig(true)}
+            className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            <Settings className="w-4 h-4" /> Atur KPI
+          </button>
+        ) : null} />
+
+      {/* Month nav + summary */}
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
+        <div className="flex items-center gap-2">
+          <button onClick={() => shiftMonth(-1)} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center"><ArrowLeft className="w-4 h-4" /></button>
+          <div className="font-display font-bold text-slate-900 text-lg min-w-[150px] text-center">{monthLabel}</div>
+          <button onClick={() => shiftMonth(1)} disabled={mKey >= monthKey()} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 flex items-center justify-center"><ArrowRight className="w-4 h-4" /></button>
+        </div>
+        <div className="text-sm text-slate-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">
+          <b className="text-emerald-700">{mumtazCount}</b> dari {scored.length} orang <b>Mumtaz</b> (≥{target})
+        </div>
+      </div>
+
+      {/* How KPI calculated */}
+      <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 mb-4 text-xs text-slate-600">
+        💡 KPI dihitung otomatis dari: <b>Kehadiran</b> ({cfg.weights.attendance} poin) · <b>Tugas Selesai</b> ({cfg.weights.tasks} poin) · <b>Laporan Harian</b> ({cfg.weights.reports} poin) · <b>Bonus Produktivitas</b> ({cfg.weights.bonus} poin). Target hari kerja: {cfg.workdays}/bulan.
+      </div>
+
+      <div className="space-y-2">
+        {scored.map((s, i) => {
+          const k = s.kpi;
+          const isMumtaz = k.total >= target;
+          const open = expanded === s.user.id;
+          return (
+            <div key={s.user.id} className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${isMumtaz ? 'border-emerald-200' : 'border-slate-200'}`}>
+              <button onClick={() => setExpanded(open ? null : s.user.id)} className="w-full p-4 flex items-center gap-4 text-left hover:bg-slate-50/50">
+                <div className="text-sm font-bold text-slate-400 w-6 text-center">#{i + 1}</div>
+                {/* Ring score */}
+                <div className="relative w-14 h-14 flex-shrink-0">
+                  <svg viewBox="0 0 36 36" className="w-14 h-14 -rotate-90">
+                    <circle cx="18" cy="18" r="15.5" fill="none" stroke="#E2E8F0" strokeWidth="3" />
+                    <circle cx="18" cy="18" r="15.5" fill="none" stroke={ringColor(k.total)} strokeWidth="3"
+                      strokeDasharray={`${Math.min(k.total, 100) / 100 * 97.4} 97.4`} strokeLinecap="round" />
+                  </svg>
+                  <div className={`absolute inset-0 flex items-center justify-center font-display font-bold text-lg ${scoreColor(k.total)}`}>{k.total}</div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-slate-900 truncate">{s.user.name}</div>
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    <span className={`text-[10px] px-2 py-0.5 rounded ${ROLES[s.user.role]?.color}`}>{ROLES[s.user.role]?.label}</span>
+                    {s.user.division && DIVISIONS[s.user.division] && <span className={`text-[10px] px-2 py-0.5 rounded ${DIVISIONS[s.user.division].color}`}>{DIVISIONS[s.user.division].label}</span>}
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  {isMumtaz
+                    ? <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-full inline-flex items-center gap-1">⭐ Mumtaz</span>
+                    : <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full">Perlu ditingkatkan</span>}
+                  <ChevronDown className={`w-4 h-4 text-slate-400 inline-block ml-2 transition-transform ${open ? 'rotate-180' : ''}`} />
+                </div>
+              </button>
+              {open && (
+                <div className="px-4 pb-4 pt-1 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <KpiBreakdownItem label="Kehadiran" value={`${k.attendance.days}/${cfg.workdays} hari`} score={k.attendance.score} max={cfg.weights.attendance} color="#10B981" />
+                  <KpiBreakdownItem label="Tugas Selesai" value={`${k.tasks.done} selesai · ${k.tasks.rate}%`} score={k.tasks.score} max={cfg.weights.tasks} color="#3B82F6" sub={k.tasks.missed > 0 ? `${k.tasks.missed} miss` : ''} />
+                  <KpiBreakdownItem label="Laporan Harian" value={`${k.reports.days}/${cfg.workdays} hari`} score={k.reports.score} max={cfg.weights.reports} color="#8B5CF6" />
+                  <KpiBreakdownItem label="Bonus Produktif" value={`${k.bonus.done} tugas`} score={k.bonus.score} max={cfg.weights.bonus} color="#F59E0B" />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {showConfig && <KpiConfigModal cfg={cfg} onSave={saveCfg} onClose={() => setShowConfig(false)} />}
+    </div>
+  );
+}
+
+function KpiBreakdownItem({ label, value, score, max, color, sub }) {
+  const pct = max > 0 ? Math.round((score / max) * 100) : 0;
+  return (
+    <div className="bg-slate-50 rounded-xl p-3">
+      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{label}</div>
+      <div className="font-display font-bold text-lg text-slate-900 mt-0.5">{score}<span className="text-xs text-slate-400 font-sans">/{max}</span></div>
+      <div className="h-1 bg-slate-200 rounded-full mt-1 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} /></div>
+      <div className="text-[11px] text-slate-500 mt-1">{value}</div>
+      {sub && <div className="text-[10px] text-red-500 font-semibold mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+function KpiConfigModal({ cfg, onSave, onClose }) {
+  const [form, setForm] = useState({
+    targetScore: cfg.targetScore, workdays: cfg.workdays, taskVolumeTarget: cfg.taskVolumeTarget,
+    weights: { ...cfg.weights }
+  });
+  const [error, setError] = useState('');
+  const totalWeight = form.weights.attendance + form.weights.tasks + form.weights.reports + form.weights.bonus;
+  const submit = () => {
+    setError('');
+    if (totalWeight !== 100) return setError(`Total bobot harus 100 (sekarang ${totalWeight}).`);
+    onSave({
+      targetScore: Number(form.targetScore) || 85, workdays: Number(form.workdays) || 26,
+      taskVolumeTarget: Number(form.taskVolumeTarget) || 20,
+      weights: {
+        attendance: Number(form.weights.attendance) || 0, tasks: Number(form.weights.tasks) || 0,
+        reports: Number(form.weights.reports) || 0, bonus: Number(form.weights.bonus) || 0
+      }
+    });
+  };
+  const setW = (k, v) => setForm({ ...form, weights: { ...form.weights, [k]: Number(v.replace(/[^\d]/g, '')) || 0 } });
+  return (
+    <Modal title="Pengaturan KPI" onClose={onClose}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Target Mumtaz"><input type="text" inputMode="numeric" value={form.targetScore} onChange={e => setForm({ ...form, targetScore: e.target.value.replace(/[^\d]/g, '') })} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
+          <Field label="Hari Kerja/bln"><input type="text" inputMode="numeric" value={form.workdays} onChange={e => setForm({ ...form, workdays: e.target.value.replace(/[^\d]/g, '') })} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
+          <Field label="Target Tugas"><input type="text" inputMode="numeric" value={form.taskVolumeTarget} onChange={e => setForm({ ...form, taskVolumeTarget: e.target.value.replace(/[^\d]/g, '') })} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
+        </div>
+        <div className="border-t border-slate-100 pt-3">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Bobot Poin</label>
+            <span className={`text-xs font-bold ${totalWeight === 100 ? 'text-emerald-600' : 'text-red-500'}`}>Total: {totalWeight}/100</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Kehadiran"><input type="text" inputMode="numeric" value={form.weights.attendance} onChange={e => setW('attendance', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
+            <Field label="Tugas Selesai"><input type="text" inputMode="numeric" value={form.weights.tasks} onChange={e => setW('tasks', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
+            <Field label="Laporan Harian"><input type="text" inputMode="numeric" value={form.weights.reports} onChange={e => setW('reports', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
+            <Field label="Bonus Produktif"><input type="text" inputMode="numeric" value={form.weights.bonus} onChange={e => setW('bonus', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
+          </div>
+        </div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
+        <FormActions onCancel={onClose} onSave={submit} saveLabel="Simpan Pengaturan" />
+      </div>
+    </Modal>
+  );
+}
+
+// ============ MASALAH & SOLUSI (Andon + 5-Why) ============
+const URGENCY = {
+  kritis: { label: 'Kritis', color: 'bg-red-100 text-red-700', dot: '#EF4444', rank: 4 },
+  tinggi: { label: 'Tinggi', color: 'bg-orange-100 text-orange-700', dot: '#F97316', rank: 3 },
+  sedang: { label: 'Sedang', color: 'bg-amber-100 text-amber-700', dot: '#F59E0B', rank: 2 },
+  rendah: { label: 'Rendah', color: 'bg-slate-100 text-slate-600', dot: '#94A3B8', rank: 1 }
+};
+const PROBLEM_STATUS = {
+  open: { label: 'Terbuka', color: 'bg-red-50 text-red-600' },
+  investigating: { label: 'Ditangani', color: 'bg-blue-50 text-blue-600' },
+  resolved: { label: 'Selesai', color: 'bg-emerald-50 text-emerald-600' }
+};
+
+function ProblemsView({ user, allUsers }) {
+  const [problems, setProblems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [resolving, setResolving] = useState(null);
+  const [viewing, setViewing] = useState(null);
+  const [filter, setFilter] = useState({ status: 'aktif', urgency: 'all', division: 'all' });
+
+  const load = async () => { setProblems(await storage.getList('problems:all')); setLoading(false); };
+  useEffect(() => { load(); const iv = setInterval(load, 10000); return () => clearInterval(iv); }, []);
+
+  const canHandle = user.role === 'owner' || user.role === 'manajer' || user.role === 'leader';
+
+  const saveProblem = async (data) => {
+    const list = await storage.getList('problems:all');
+    list.unshift({
+      id: uid(), ...data, status: 'open',
+      reportedById: user.id, reportedByName: user.name,
+      createdAt: new Date().toISOString()
+    });
+    await storage.set('problems:all', list);
+    await logActivity(`🚨 lapor masalah: "${data.title}" (${URGENCY[data.urgency].label})`, user.name);
+    setShowForm(false); load();
+  };
+  const setStatus = async (p, status) => {
+    const list = (await storage.getList('problems:all')).map(x => x.id === p.id ? { ...x, status } : x);
+    await storage.set('problems:all', list); load();
+  };
+  const resolveProblem = async (rootCause) => {
+    const list = (await storage.getList('problems:all')).map(x => x.id === resolving.id ? {
+      ...x, status: 'resolved', rootCause,
+      resolvedById: user.id, resolvedByName: user.name, resolvedAt: new Date().toISOString()
+    } : x);
+    await storage.set('problems:all', list);
+    await logActivity(`✅ menyelesaikan masalah "${resolving.title}"`, user.name);
+    setResolving(null); load();
+  };
+  const deleteProblem = async (p) => {
+    if (!confirm('Hapus laporan masalah ini?')) return;
+    await storage.set('problems:all', (await storage.getList('problems:all')).filter(x => x.id !== p.id));
+    load();
+  };
+
+  const filtered = problems.filter(p => {
+    if (filter.status === 'aktif' && p.status === 'resolved') return false;
+    if (filter.status === 'resolved' && p.status !== 'resolved') return false;
+    if (filter.urgency !== 'all' && p.urgency !== filter.urgency) return false;
+    if (filter.division !== 'all' && p.division !== filter.division) return false;
+    return true;
+  }).sort((a, b) => (URGENCY[b.urgency].rank - URGENCY[a.urgency].rank) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  const stats = {
+    open: problems.filter(p => p.status === 'open').length,
+    investigating: problems.filter(p => p.status === 'investigating').length,
+    kritis: problems.filter(p => p.status !== 'resolved' && p.urgency === 'kritis').length,
+    resolved: problems.filter(p => p.status === 'resolved').length
+  };
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat...</div>;
+
+  return (
+    <div className="max-w-4xl">
+      <PageHeader title="Masalah & Solusi" subtitle="Andon: laporkan kendala langsung. Selesaikan sampai ke akar (5-Why)."
+        action={
+          <button onClick={() => setShowForm(true)}
+            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" /> Lapor Masalah
+          </button>
+        } />
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-3"><div className="text-xs font-semibold text-red-600 uppercase">Terbuka</div><div className="font-display font-bold text-3xl text-red-700 mt-0.5">{stats.open}</div></div>
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3"><div className="text-xs font-semibold text-blue-600 uppercase">Ditangani</div><div className="font-display font-bold text-3xl text-blue-700 mt-0.5">{stats.investigating}</div></div>
+        <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3"><div className="text-xs font-semibold text-orange-600 uppercase">Kritis Aktif</div><div className="font-display font-bold text-3xl text-orange-700 mt-0.5">{stats.kritis}</div></div>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3"><div className="text-xs font-semibold text-emerald-600 uppercase">Selesai</div><div className="font-display font-bold text-3xl text-emerald-700 mt-0.5">{stats.resolved}</div></div>
+      </div>
+
+      {/* Filter */}
+      <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4 flex items-center gap-2 flex-wrap">
+        <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
+          {[['aktif', 'Aktif'], ['resolved', 'Selesai'], ['all', 'Semua']].map(([v, l]) => (
+            <button key={v} onClick={() => setFilter({ ...filter, status: v })}
+              className={`px-3 py-1.5 rounded-md text-sm font-semibold transition ${filter.status === v ? 'bg-white shadow text-indigo-700' : 'text-slate-500'}`}>{l}</button>
+          ))}
+        </div>
+        <select value={filter.urgency} onChange={e => setFilter({ ...filter, urgency: e.target.value })} className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+          <option value="all">Semua urgensi</option>
+          {Object.entries(URGENCY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <select value={filter.division} onChange={e => setFilter({ ...filter, division: e.target.value })} className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+          <option value="all">Semua divisi</option>
+          {Object.entries(DIVISIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState icon={AlertCircle} text="Tidak ada masalah pada filter ini. 🎉" />
+      ) : (
+        <div className="space-y-3">
+          {filtered.map(p => (
+            <div key={p.id} className={`bg-white rounded-2xl border shadow-sm p-4 ${p.urgency === 'kritis' && p.status !== 'resolved' ? 'border-red-300' : 'border-slate-200'}`}>
+              <div className="flex items-start gap-3">
+                <span className="mt-1 w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: URGENCY[p.urgency].dot }} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-slate-900">{p.title}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${URGENCY[p.urgency].color}`}>{URGENCY[p.urgency].label}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${PROBLEM_STATUS[p.status].color}`}>{PROBLEM_STATUS[p.status].label}</span>
+                    {p.division && DIVISIONS[p.division] && <span className={`text-[10px] px-2 py-0.5 rounded-full ${DIVISIONS[p.division].color}`}>{DIVISIONS[p.division].label}</span>}
+                  </div>
+                  {p.description && <p className="text-sm text-slate-600 mt-1">{p.description}</p>}
+                  <div className="text-[11px] text-slate-400 mt-1.5">Dilapor: {p.reportedByName} · {new Date(p.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{p.relatedType && p.relatedType !== 'umum' ? ` · terkait: ${p.relatedType}` : ''}</div>
+
+                  {p.status === 'resolved' && p.rootCause && (
+                    <button onClick={() => setViewing(p)} className="mt-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg inline-flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Lihat Analisa Akar Masalah
+                    </button>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex gap-2 mt-2 flex-wrap">
+                    {canHandle && p.status === 'open' && (
+                      <button onClick={() => setStatus(p, 'investigating')} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200">▶ Tangani</button>
+                    )}
+                    {canHandle && p.status !== 'resolved' && (
+                      <button onClick={() => setResolving(p)} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 inline-flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5" /> Selesaikan + Analisa Akar
+                      </button>
+                    )}
+                    {(user.role === 'owner' || user.role === 'manajer' || p.reportedById === user.id) && (
+                      <button onClick={() => deleteProblem(p)} className="text-xs font-semibold px-3 py-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 inline-flex items-center gap-1">
+                        <Trash2 className="w-3.5 h-3.5" /> Hapus
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showForm && <ProblemFormModal user={user} onSave={saveProblem} onClose={() => setShowForm(false)} />}
+      {resolving && <RootCauseModal problem={resolving} onSave={resolveProblem} onClose={() => setResolving(null)} />}
+      {viewing && <RootCauseViewModal problem={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+function ProblemFormModal({ user, onSave, onClose }) {
+  const [form, setForm] = useState({
+    title: '', description: '', urgency: 'sedang',
+    division: user.division || 'internal', relatedType: 'umum'
+  });
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (!form.title.trim()) return setError('Judul masalah wajib diisi.');
+    onSave({ ...form, title: form.title.trim(), description: form.description.trim() });
+  };
+  return (
+    <Modal title="🚨 Lapor Masalah (Andon)" onClose={onClose}>
+      <div className="space-y-3">
+        <div className="text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">Prinsip TPS: begitu ada kendala, langsung "tarik tali" — laporkan supaya cepat ditangani sebelum membesar.</div>
+        <Field label="Masalahnya apa? *">
+          <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+            placeholder="mis. GMV TAP turun drastis 3 hari berturut"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </Field>
+        <Field label="Detail / kronologi">
+          <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={3}
+            placeholder="Jelaskan situasinya..."
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Urgensi *">
+            <select value={form.urgency} onChange={e => setForm({ ...form, urgency: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              {Object.entries(URGENCY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Divisi terkait">
+            <select value={form.division} onChange={e => setForm({ ...form, division: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              {Object.entries(DIVISIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Terkait dengan">
+          <select value={form.relatedType} onChange={e => setForm({ ...form, relatedType: e.target.value })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="umum">Umum</option>
+            <option value="tugas">Tugas</option>
+            <option value="target GMV">Target GMV</option>
+            <option value="creator">Creator</option>
+            <option value="seller">Seller</option>
+            <option value="konten">Konten</option>
+            <option value="live">Live</option>
+            <option value="tim">Tim / SDM</option>
+          </select>
+        </Field>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
+        <FormActions onCancel={onClose} onSave={submit} saveLabel="Kirim Laporan" />
+      </div>
+    </Modal>
+  );
+}
+
+function RootCauseModal({ problem, onSave, onClose }) {
+  const [form, setForm] = useState({
+    why1: '', why2: '', why3: '', why4: '', why5: '', root: '', corrective: '', preventive: ''
+  });
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (!form.why1.trim()) return setError('Minimal isi "Kenapa?" pertama.');
+    if (!form.root.trim()) return setError('Akar masalah wajib diisi.');
+    if (!form.corrective.trim()) return setError('Tindakan perbaikan wajib diisi.');
+    onSave(form);
+  };
+  const whyFields = [
+    ['why1', 'Kenapa ini terjadi?'],
+    ['why2', 'Kenapa itu bisa terjadi?'],
+    ['why3', 'Kenapa lagi?'],
+    ['why4', 'Lalu kenapa?'],
+    ['why5', 'Kenapa (akar)?']
+  ];
+  return (
+    <Modal title="Analisa Akar Masalah (5-Why)" onClose={onClose} wide>
+      <div className="space-y-3">
+        <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+          <div className="text-xs font-semibold text-slate-500 uppercase">Masalah</div>
+          <div className="font-semibold text-slate-900 text-sm">{problem.title}</div>
+        </div>
+        <div className="text-xs text-slate-500">Tanya "kenapa?" berulang sampai ketemu akar sebenarnya — jangan berhenti di gejala. Isi minimal sampai ketemu akar (tidak harus 5).</div>
+        {whyFields.map(([k, label], i) => (
+          <div key={k} className="flex gap-2 items-start">
+            <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-1">{i + 1}</div>
+            <div className="flex-1">
+              <label className="text-[11px] font-semibold text-slate-500">{label}</label>
+              <input type="text" value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+          </div>
+        ))}
+        <Field label="🎯 Akar Masalah Sebenarnya *">
+          <textarea value={form.root} onChange={e => setForm({ ...form, root: e.target.value })} rows={2}
+            placeholder="Kesimpulan: akar masalahnya adalah..."
+            className="w-full px-3 py-2 border-2 border-indigo-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-indigo-50/30" />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="🔧 Tindakan Perbaikan (sekarang) *">
+            <textarea value={form.corrective} onChange={e => setForm({ ...form, corrective: e.target.value })} rows={2}
+              placeholder="Yang dilakukan untuk memperbaiki"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </Field>
+          <Field label="🛡️ Tindakan Pencegahan (ke depan)">
+            <textarea value={form.preventive} onChange={e => setForm({ ...form, preventive: e.target.value })} rows={2}
+              placeholder="Supaya tidak terulang (mis. bikin SOP)"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </Field>
+        </div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
+        <FormActions onCancel={onClose} onSave={submit} saveLabel="Tandai Selesai" />
+      </div>
+    </Modal>
+  );
+}
+
+function RootCauseViewModal({ problem, onClose }) {
+  const rc = problem.rootCause || {};
+  const whys = [rc.why1, rc.why2, rc.why3, rc.why4, rc.why5].filter(Boolean);
+  return (
+    <Modal title="Analisa Akar Masalah" onClose={onClose} wide>
+      <div className="space-y-3">
+        <div className="bg-slate-50 rounded-lg px-3 py-2">
+          <div className="font-semibold text-slate-900">{problem.title}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Diselesaikan {problem.resolvedByName} · {problem.resolvedAt ? new Date(problem.resolvedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}</div>
+        </div>
+        <div>
+          <div className="text-xs font-semibold text-slate-500 uppercase mb-1">Rantai 5-Why</div>
+          <div className="space-y-1">
+            {whys.map((w, i) => (
+              <div key={i} className="flex gap-2 items-start text-sm">
+                <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
+                <span className="text-slate-700">{w}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+          <div className="text-xs font-bold text-indigo-700 uppercase">🎯 Akar Masalah</div>
+          <div className="text-sm text-slate-800 mt-1">{rc.root}</div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <div className="text-xs font-bold text-amber-700 uppercase">🔧 Perbaikan</div>
+            <div className="text-sm text-slate-800 mt-1">{rc.corrective || '-'}</div>
+          </div>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+            <div className="text-xs font-bold text-emerald-700 uppercase">🛡️ Pencegahan</div>
+            <div className="text-sm text-slate-800 mt-1">{rc.preventive || '-'}</div>
+          </div>
+        </div>
       </div>
     </Modal>
   );
