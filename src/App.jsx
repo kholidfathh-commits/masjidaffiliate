@@ -1866,11 +1866,6 @@ function Dashboard({ user, allUsers, setView }) {
         </div>
       </div>
 
-      {/* Target Tim Widget */}
-      <TargetWidget targets={targets.filter(t => t.status !== 'archived')}
-        canManage={canManageTargets}
-        onManage={() => setShowTargetsManager(true)} />
-
       {/* GMV Summary Widget */}
       {canAccessFeature(user, 'gmv') && (
         <DashboardGmvWidget entries={gmvEntries} targets={gmvTargets} onOpen={() => setView('gmv')} />
@@ -3477,6 +3472,39 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
   );
 }
 
+function SearchableSelect({ value, onChange, options, placeholder = 'Ketik untuk cari / pilih...' }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const selected = options.find(o => o.value === value);
+  const q = query.toLowerCase();
+  const filtered = q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
+  return (
+    <div className="relative">
+      <input type="text"
+        value={open ? query : (selected ? selected.label : '')}
+        onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); }}
+        onFocus={() => { setOpen(true); setQuery(''); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+      <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      {open && (
+        <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-52 overflow-y-auto scroll-thin">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-slate-400">Tidak ditemukan</div>
+          ) : filtered.map(o => (
+            <button key={o.value} type="button"
+              onMouseDown={(e) => { e.preventDefault(); onChange(o.value); setOpen(false); setQuery(''); }}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 ${o.value === value ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-slate-700'}`}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TaskForm({ task, user, assignableUsers, onSave, onClose }) {
   const [form, setForm] = useState({
     title: task?.title || '',
@@ -3500,10 +3528,11 @@ function TaskForm({ task, user, assignableUsers, onSave, onClose }) {
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="PIC *">
-            <select value={form.assigneeId} onChange={e => setForm({ ...form, assigneeId: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
-              {assignableUsers.map(m => <option key={m.id} value={m.id}>{m.name}{m.jobTitle ? ` · ${m.jobTitle}` : ""} — {ROLES[m.role].label}</option>)}
-            </select>
+            <SearchableSelect
+              value={form.assigneeId}
+              onChange={(v) => setForm({ ...form, assigneeId: v })}
+              options={assignableUsers.map(m => ({ value: m.id, label: `${m.name}${m.jobTitle ? ' · ' + m.jobTitle : ''} — ${ROLES[m.role].label}` }))}
+              placeholder="Ketik nama untuk cari..." />
           </Field>
           <Field label="Deadline">
             <input type="date" value={form.deadline} onChange={e => setForm({ ...form, deadline: e.target.value })}
@@ -3771,8 +3800,8 @@ function CreatorManagementView({ user, allUsers }) {
     load();
   };
 
-  // Managers that can be PIC (operasional or leader)
-  const managers = allUsers.filter(u => u.role === 'operasional' || u.role === 'leader');
+  // Dashboard ini khusus MCN: hanya tampilkan anggota divisi MCN (leader/operasional)
+  const managers = allUsers.filter(u => (u.role === 'operasional' || u.role === 'leader') && (u.division || '') === 'mcn');
   // Filter managers based on user role
   const visibleManagers = managers.filter(m => can.canSeeUser(user, m));
 
@@ -5073,11 +5102,11 @@ function AccountFormModal({ editing, internalUsers, onSave, onClose }) {
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
         </Field>
         <Field label="PIC (penanggung jawab)">
-          <select value={form.picId} onChange={e => setForm({ ...form, picId: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="">— Belum ditentukan —</option>
-            {internalUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+          <SearchableSelect
+            value={form.picId}
+            onChange={(v) => setForm({ ...form, picId: v })}
+            options={[{ value: '', label: '— Belum ditentukan —' }, ...internalUsers.map(u => ({ value: u.id, label: u.name }))]}
+            placeholder="Ketik nama PIC..." />
           <div className="text-[11px] text-slate-500 mt-1">PIC bisa update GMV akun ini tiap hari. Owner/Manajer/Leader juga bisa.</div>
         </Field>
         <label className="flex items-center gap-2 text-sm">
@@ -6081,6 +6110,15 @@ function AttendanceView({ user, allUsers }) {
   };
 
   const fmtTime = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
+  // Hapus absensi: owner/manajer hapus semua, lainnya hanya miliknya
+  const canDeleteRec = (r) => user.role === 'owner' || user.role === 'manajer' || r.userId === user.id;
+  const deleteRecord = async (r) => {
+    if (!confirm(`Hapus absensi ${r.userName} (${r.type === 'in' ? 'masuk' : 'pulang'}) ${new Date(r.timestamp).toLocaleString('id-ID')}?`)) return;
+    await storage.set('attendance:all', (await storage.getList('attendance:all')).filter(x => x.id !== r.id));
+    await logActivity(`menghapus 1 data absensi`, user.name);
+    await load();
+  };
   const fmtDate = ts => new Date(ts).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
   const mapsLink = (lat, lng) => `https://www.google.com/maps?q=${lat},${lng}`;
   const osmEmbed = (lat, lng) => {
@@ -6180,6 +6218,12 @@ function AttendanceView({ user, allUsers }) {
                     </span>
                     {r.division && DIVISIONS[r.division] && (
                       <span className={`text-[10px] px-2 py-0.5 rounded-full ${DIVISIONS[r.division].color}`}>{DIVISIONS[r.division].label}</span>
+                    )}
+                    {canDeleteRec(r) && (
+                      <button onClick={() => deleteRecord(r)} title="Hapus absensi ini"
+                        className="ml-auto text-slate-300 hover:text-red-600 p-1 flex-shrink-0">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     )}
                   </div>
                   <div className="text-xs text-slate-500 mt-0.5">{fmtDate(r.timestamp)} · {fmtTime(r.timestamp)}</div>
