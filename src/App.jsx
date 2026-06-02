@@ -260,8 +260,8 @@ const DIVISIONS = {
 // Fitur apa yang relevan untuk tiap divisi (selain menu umum yang dipakai semua).
 // Owner & Manajer selalu lihat semua. Divisi 'manajemen' juga lihat semua.
 const DIVISION_FEATURES = {
-  manajemen: ['creators', 'creator-management', 'sellers', 'gmv'],
-  internal:  ['gmv'],
+  manajemen: ['creators', 'creator-management', 'sellers', 'gmv', 'affiliate-accounts'],
+  internal:  ['gmv', 'affiliate-accounts'],
   mcn:       ['creators', 'creator-management', 'gmv'],
   tap:       ['sellers', 'gmv'],
   media:     ['media-tasks'],
@@ -292,6 +292,8 @@ const monthKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() +
 const dayKey = (d = new Date()) => {
   const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
 };
+const daysInMonth = (mKey) => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m, 0).getDate(); };
+const DEFAULT_AFFILIATE_GOAL = 1000000000; // target Affiliator Internal default 1 Miliar/bulan
 
 // ====== KPI POIN ======
 const DEFAULT_KPI_CONFIG = {
@@ -461,6 +463,7 @@ export default function App() {
             {view === 'creator-management' && <CreatorManagementView user={currentUser} allUsers={allUsers} />}
             {view === 'sellers' && <SellersView user={currentUser} allUsers={allUsers} />}
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
+            {view === 'affiliate-accounts' && <AffiliateAccountsView user={currentUser} allUsers={allUsers} />}
             {view === 'kpi' && <KpiView user={currentUser} allUsers={allUsers} />}
             {view === 'problems' && <ProblemsView user={currentUser} allUsers={allUsers} />}
             {view === 'reports' && <ReportsView user={currentUser} allUsers={allUsers} />}
@@ -1034,6 +1037,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       label: 'Laporan & Analitik',
       items: [
         { id: 'gmv', label: 'Target & GMV', icon: BarChart3, show: canAccessFeature(user, 'gmv') },
+        { id: 'affiliate-accounts', label: 'Akun Affiliator', icon: Target, show: canAccessFeature(user, 'affiliate-accounts') },
         { id: 'kpi', label: 'KPI Tim', icon: Award, show: true },
         { id: 'reports', label: 'Laporan Mingguan', icon: FileText, show: true },
         { id: 'daily-reports', label: 'Laporan Harian', icon: ClipboardList, show: true },
@@ -1637,6 +1641,8 @@ function Dashboard({ user, allUsers, setView }) {
   const [attendanceRecs, setAttendanceRecs] = useState([]);
   const [problems, setProblems] = useState([]);
   const [kpiConfig, setKpiConfig] = useState(DEFAULT_KPI_CONFIG);
+  const [affAccounts, setAffAccounts] = useState([]);
+  const [affEntries, setAffEntries] = useState([]);
   const [showTargetsManager, setShowTargetsManager] = useState(false);
 
   const loadTargets = async () => setTargets(await storage.getList('targets:all'));
@@ -1655,6 +1661,8 @@ function Dashboard({ user, allUsers, setView }) {
       setAttendanceRecs(await storage.getList('attendance:all'));
       setProblems(await storage.getList('problems:all'));
       setKpiConfig((await storage.get('kpi:config')) || DEFAULT_KPI_CONFIG);
+      setAffAccounts(await storage.getList('affiliate-accounts:all'));
+      setAffEntries(await storage.getList('affiliate-gmv:daily'));
       await loadTargets();
     })();
   }, []);
@@ -1876,6 +1884,11 @@ function Dashboard({ user, allUsers, setView }) {
         canHandle={user.role === 'owner' || user.role === 'manajer' || user.role === 'leader'}
         onKpi={() => setView('kpi')} onProblems={() => setView('problems')} />
 
+      {/* Evaluasi otomatis */}
+      <DashboardEvalWidget user={user} tasks={tasks} attendance={attendanceRecs} reports={dailyReports}
+        gmvEntries={gmvEntries} gmvTargets={gmvTargets} affAccounts={affAccounts} affEntries={affEntries}
+        problems={problems} kpiConfig={kpiConfig} allUsers={allUsers} onNavigate={setView} />
+
       {/* Stats grid - compact with badges */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s, i) => {
@@ -2080,6 +2093,139 @@ function Dashboard({ user, allUsers, setView }) {
 }
 
 // ============ TARGET WIDGET (Dashboard) ============
+// Evaluasi otomatis (rule-based) — baca data, hasilkan insight prioritas
+function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, problems, kpiConfig, allUsers }) {
+  const out = [];
+  const mk = monthKey();
+  const today = dayKey();
+  const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
+
+  // 1) Masalah kritis
+  const kritis = problems.filter(p => p.status !== 'resolved' && p.urgency === 'kritis');
+  if (kritis.length > 0) out.push({ level: 'danger', text: `${kritis.length} masalah kritis belum selesai: "${kritis[0].title}"${kritis.length > 1 ? ' dll' : ''}.`, action: { label: 'Tangani', view: 'problems' } });
+
+  // 2) GMV divisi turun (untuk owner/manajer)
+  if (isOwnerMgr) {
+    Object.entries(GMV_DIVISIONS).forEach(([div, cfg]) => {
+      const series = gmvDailySeries(gmvEntries, div, mk).filter(s => s.value > 0);
+      if (series.length >= 2) {
+        const t = series[series.length - 1].value, y = series[series.length - 2].value;
+        if (y > 0 && t < y) {
+          const drop = Math.round(((y - t) / y) * 100);
+          if (drop >= 15) out.push({ level: 'warning', text: `GMV ${cfg.label} turun ${drop}% vs kemarin (${fmtRupiah(t)}).`, action: { label: 'Cek', view: 'gmv' } });
+        } else if (t > y) {
+          const up = Math.round(((t - y) / y) * 100);
+          if (up >= 20) out.push({ level: 'good', text: `GMV ${cfg.label} naik ${up}% vs kemarin — pertahankan! 🎉`, action: { label: 'Lihat', view: 'gmv' } });
+        }
+      }
+      // Target bulanan jauh tertinggal
+      const target = Number((gmvTargets[mk] || {})[div]) || 0;
+      if (target > 0) {
+        const total = gmvEntries.filter(e => e.division === div && (e.date || '').startsWith(mk)).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
+        const dim = daysInMonth(mk), dayNow = new Date().getDate();
+        const expected = target * (dayNow / dim);
+        if (total < expected * 0.7) out.push({ level: 'warning', text: `GMV ${cfg.label} baru ${Math.round(total / target * 100)}% dari target bulan ini — perlu dikejar.`, action: { label: 'Detail', view: 'gmv' } });
+      }
+    });
+  }
+
+  // 3) Akun affiliator di bawah target harian hari ini
+  if (isOwnerMgr || user.role === 'leader' || (user.division || '') === 'internal') {
+    const dim = daysInMonth(mk);
+    const behind = [];
+    affAccounts.filter(a => a.active !== false).forEach(a => {
+      const target = Number(a.targets?.[mk]) || 0;
+      if (target <= 0) return;
+      const dailyTarget = target / dim;
+      const todayVal = affEntries.filter(e => e.accountId === a.id && e.date === today).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
+      if (todayVal < dailyTarget) behind.push(a.name);
+    });
+    if (behind.length > 0) out.push({ level: 'warning', text: `${behind.length} akun affiliator di bawah target harian hari ini: ${behind.slice(0, 3).join(', ')}${behind.length > 3 ? ' dll' : ''}.`, action: { label: 'Cek Akun', view: 'affiliate-accounts' } });
+  }
+
+  // 4) Akun tanpa target (untuk leader/owner) — breakdown belum lengkap
+  if (isOwnerMgr || user.role === 'leader') {
+    const noTarget = affAccounts.filter(a => a.active !== false && !(Number(a.targets?.[mk]) > 0));
+    if (noTarget.length > 0) out.push({ level: 'info', text: `${noTarget.length} akun belum diset target bulan ini. Lengkapi breakdown 1 M.`, action: { label: 'Set Target', view: 'affiliate-accounts' } });
+  }
+
+  // 5) Belum lapor harian (untuk owner/manajer/leader: tim; lainnya: diri sendiri)
+  const scopeUsers = isOwnerMgr ? allUsers : (user.role === 'leader' ? allUsers.filter(u => u.leaderId === user.id || u.id === user.id) : [user]);
+  const reportedToday = new Set(reports.filter(r => r.date === today).map(r => r.authorId));
+  const notReported = scopeUsers.filter(u => !reportedToday.has(u.id));
+  if (isOwnerMgr || user.role === 'leader') {
+    if (notReported.length > 0 && new Date().getHours() >= 12) out.push({ level: 'info', text: `${notReported.length} dari ${scopeUsers.length} anggota belum lapor harian.`, action: { label: 'Lihat', view: 'daily-reports' } });
+  } else {
+    if (!reportedToday.has(user.id) && new Date().getHours() >= 12) out.push({ level: 'warning', text: `Anda belum mengisi laporan harian hari ini.`, action: { label: 'Lapor', view: 'daily-reports' } });
+  }
+
+  // 6) KPI pribadi
+  const myKpi = computeKpi(user.id, { tasks, attendance, reports }, mk, kpiConfig);
+  const target = kpiConfig.targetScore || 85;
+  if (myKpi.total < target) {
+    const weak = [];
+    if (myKpi.attendance.score < kpiConfig.weights.attendance * 0.7) weak.push('kehadiran');
+    if (myKpi.tasks.score < kpiConfig.weights.tasks * 0.7) weak.push('tugas');
+    if (myKpi.reports.score < kpiConfig.weights.reports * 0.7) weak.push('laporan harian');
+    out.push({ level: 'info', text: `KPI Anda ${myKpi.total} (target ${target}).${weak.length ? ' Tingkatkan: ' + weak.join(', ') + '.' : ''}`, action: { label: 'Lihat KPI', view: 'kpi' } });
+  } else {
+    out.push({ level: 'good', text: `KPI Anda ${myKpi.total} — Mumtaz! Pertahankan. ⭐`, action: { label: 'Lihat', view: 'kpi' } });
+  }
+
+  // 7) Tugas overdue pribadi
+  const myOverdue = tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline && new Date(t.deadline) < new Date());
+  if (myOverdue.length > 0) out.push({ level: 'danger', text: `${myOverdue.length} tugas Anda sudah lewat deadline.`, action: { label: 'Kerjakan', view: 'tasks' } });
+
+  // Urutkan: danger > warning > info > good, ambil maksimal 6
+  const rank = { danger: 0, warning: 1, info: 2, good: 3 };
+  out.sort((a, b) => rank[a.level] - rank[b.level]);
+  return out.slice(0, 6);
+}
+
+function DashboardEvalWidget(props) {
+  const insights = useMemo(() => generateInsights(props), [props]);
+  const { onNavigate } = props;
+  const styles = {
+    danger: { dot: '#EF4444', bg: 'bg-red-50', border: 'border-red-100', text: 'text-red-700' },
+    warning: { dot: '#F59E0B', bg: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700' },
+    info: { dot: '#3B82F6', bg: 'bg-blue-50', border: 'border-blue-100', text: 'text-blue-700' },
+    good: { dot: '#10B981', bg: 'bg-emerald-50', border: 'border-emerald-100', text: 'text-emerald-700' }
+  };
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#6366F1,#8B5CF6)' }}>
+          <Sparkles className="w-5 h-5 text-white" />
+        </div>
+        <div>
+          <h3 className="font-display font-bold text-slate-900">Evaluasi Hari Ini</h3>
+          <p className="text-[11px] text-slate-500">Analisa otomatis dari data tim</p>
+        </div>
+      </div>
+      {insights.length === 0 ? (
+        <div className="text-sm text-slate-500 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">🎉 Semua aman & on-track. Tidak ada yang perlu perhatian khusus hari ini.</div>
+      ) : (
+        <div className="space-y-2">
+          {insights.map((ins, i) => {
+            const s = styles[ins.level];
+            return (
+              <div key={i} className={`flex items-start gap-3 ${s.bg} border ${s.border} rounded-xl px-3 py-2.5`}>
+                <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: s.dot }} />
+                <span className="text-sm text-slate-700 flex-1">{ins.text}</span>
+                {ins.action && (
+                  <button onClick={() => onNavigate(ins.action.view)} className={`text-xs font-bold ${s.text} hover:underline flex-shrink-0 whitespace-nowrap`}>
+                    {ins.action.label} →
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DashboardKpiProblemRow({ kpi, target, openProblems, canHandle, onKpi, onProblems }) {
   const isMumtaz = kpi.total >= target;
   const ringColor = kpi.total >= target ? '#10B981' : kpi.total >= target * 0.7 ? '#F59E0B' : '#EF4444';
@@ -4686,6 +4832,334 @@ function GmvTargetModal({ monthLabel, current, onSave, onClose }) {
         <FormActions onCancel={onClose} onSave={() => onSave({
           mcn: Number(vals.mcn) || 0, tap: Number(vals.tap) || 0, internal: Number(vals.internal) || 0
         })} saveLabel="Simpan Target" />
+      </div>
+    </Modal>
+  );
+}
+
+// ============ AKUN AFFILIATOR (target per akun) ============
+function acctDailySeries(entries, accountId, mKey) {
+  const dim = daysInMonth(mKey);
+  const isCurrent = mKey === monthKey();
+  const lastDay = isCurrent ? new Date().getDate() : dim;
+  const series = [];
+  for (let d = 1; d <= lastDay; d++) {
+    const dk = `${mKey}-${String(d).padStart(2, '0')}`;
+    const e = entries.find(x => x.accountId === accountId && x.date === dk);
+    series.push({ day: d, date: dk, value: e ? Number(e.gmv) || 0 : 0 });
+  }
+  return series;
+}
+
+function AffiliateAccountsView({ user, allUsers }) {
+  const [accounts, setAccounts] = useState([]);
+  const [entries, setEntries] = useState([]);
+  const [goal, setGoal] = useState(DEFAULT_AFFILIATE_GOAL);
+  const [loading, setLoading] = useState(true);
+  const [mKey, setMKey] = useState(monthKey());
+  const [showAcct, setShowAcct] = useState(false);
+  const [editingAcct, setEditingAcct] = useState(null);
+  const [inputAcct, setInputAcct] = useState(null);
+  const [targetAcct, setTargetAcct] = useState(null);
+  const [showGoal, setShowGoal] = useState(false);
+
+  const load = async () => {
+    setAccounts(await storage.getList('affiliate-accounts:all'));
+    setEntries(await storage.getList('affiliate-gmv:daily'));
+    const g = await storage.get('affiliate:goal');
+    setGoal(g && g[mKey] ? g[mKey] : DEFAULT_AFFILIATE_GOAL);
+    setLoading(false);
+  };
+  useEffect(() => { load(); const iv = setInterval(load, 12000); return () => clearInterval(iv); }, [mKey]);
+
+  const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
+  const canManage = isOwnerMgr || user.role === 'leader'; // Siti = leader
+  const canInput = (acct) => isOwnerMgr || user.role === 'leader' || acct.picId === user.id || (user.division || '') === 'internal';
+
+  const dim = daysInMonth(mKey);
+  const today = dayKey();
+  const isCurrentMonth = mKey === monthKey();
+
+  // Total per akun bulan ini
+  const acctTotal = (accId) => entries.filter(e => e.accountId === accId && (e.date || '').startsWith(mKey)).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
+  const acctToday = (accId) => entries.filter(e => e.accountId === accId && e.date === today).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
+
+  const totalTarget = accounts.reduce((s, a) => s + (Number(a.targets?.[mKey]) || 0), 0);
+  const totalActual = accounts.reduce((s, a) => s + acctTotal(a.id), 0);
+
+  const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
+  const shiftMonth = (delta) => { const [y, m] = mKey.split('-').map(Number); setMKey(monthKey(new Date(y, m - 1 + delta, 1))); };
+
+  const saveAcct = async (data) => {
+    let list = await storage.getList('affiliate-accounts:all');
+    if (editingAcct) {
+      list = list.map(a => a.id === editingAcct.id ? { ...a, ...data } : a);
+    } else {
+      list.push({ id: uid(), ...data, targets: {}, createdAt: new Date().toISOString() });
+      await logActivity(`menambah akun affiliator "${data.name}"`, user.name);
+    }
+    await storage.set('affiliate-accounts:all', list);
+    setShowAcct(false); setEditingAcct(null); load();
+  };
+  const deleteAcct = async (a) => {
+    if (!confirm(`Hapus akun "${a.name}"? Data GMV-nya juga akan hilang.`)) return;
+    await storage.set('affiliate-accounts:all', (await storage.getList('affiliate-accounts:all')).filter(x => x.id !== a.id));
+    await storage.set('affiliate-gmv:daily', (await storage.getList('affiliate-gmv:daily')).filter(x => x.accountId !== a.id));
+    load();
+  };
+  const saveTarget = async (accId, value) => {
+    const list = (await storage.getList('affiliate-accounts:all')).map(a =>
+      a.id === accId ? { ...a, targets: { ...(a.targets || {}), [mKey]: value } } : a);
+    await storage.set('affiliate-accounts:all', list);
+    await logActivity(`set target akun ${monthLabel}`, user.name);
+    setTargetAcct(null); load();
+  };
+  const saveEntry = async (data) => {
+    let list = await storage.getList('affiliate-gmv:daily');
+    const existing = list.find(e => e.accountId === data.accountId && e.date === data.date);
+    if (existing) {
+      list = list.map(e => e.id === existing.id ? { ...e, ...data, inputById: user.id, inputByName: user.name, updatedAt: new Date().toISOString() } : e);
+    } else {
+      list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
+    }
+    await storage.set('affiliate-gmv:daily', list);
+    await logActivity(`update GMV akun ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
+    setInputAcct(null); load();
+  };
+  const saveGoal = async (value) => {
+    const g = (await storage.get('affiliate:goal')) || {};
+    g[mKey] = value;
+    await storage.set('affiliate:goal', g);
+    setShowGoal(false); load();
+  };
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat akun affiliator...</div>;
+
+  const goalPct = goal > 0 ? Math.round((totalActual / goal) * 100) : 0;
+  const targetCoverage = goal > 0 ? Math.round((totalTarget / goal) * 100) : 0;
+
+  return (
+    <div className="max-w-6xl">
+      <PageHeader title="Akun Affiliator Internal" subtitle="Target 1 M dipecah per akun → per hari. Update tiap hari, langsung kelihatan capai/tidak."
+        action={
+          <div className="flex gap-2 flex-wrap">
+            {canManage && <button onClick={() => setShowGoal(true)} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2"><Target className="w-4 h-4" /> Goal Bulanan</button>}
+            {canManage && <button onClick={() => { setEditingAcct(null); setShowAcct(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2"><Plus className="w-4 h-4" /> Tambah Akun</button>}
+          </div>
+        } />
+
+      {/* Month nav */}
+      <div className="flex items-center gap-2 mb-5">
+        <button onClick={() => shiftMonth(-1)} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center"><ArrowLeft className="w-4 h-4" /></button>
+        <div className="font-display font-bold text-slate-900 text-lg min-w-[150px] text-center">{monthLabel}</div>
+        <button onClick={() => shiftMonth(1)} disabled={mKey >= monthKey()} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 flex items-center justify-center"><ArrowRight className="w-4 h-4" /></button>
+        {mKey !== monthKey() && <button onClick={() => setMKey(monthKey())} className="text-xs text-indigo-600 font-semibold hover:underline ml-1">Bulan ini</button>}
+      </div>
+
+      {/* Goal summary */}
+      <div className="rounded-2xl p-5 text-white shadow-lg mb-6" style={{ background: 'linear-gradient(135deg, #3B82F6, #1D4ED8)' }}>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider opacity-90">Goal Affiliator Internal · {monthLabel}</div>
+            <div className="font-display font-bold text-3xl mt-1">{fmtRupiah(totalActual)}</div>
+            <div className="text-sm opacity-90 mt-0.5">dari goal {fmtRupiah(goal)} · <b>{goalPct}%</b></div>
+          </div>
+          <div className="text-right">
+            <div className="text-xs opacity-90">Total target {accounts.length} akun</div>
+            <div className="font-display font-bold text-xl">{fmtRupiah(totalTarget)}</div>
+            <div className={`text-[11px] mt-0.5 ${targetCoverage >= 100 ? 'opacity-90' : 'text-amber-200'}`}>
+              {targetCoverage >= 100 ? '✓ Breakdown menutupi goal' : `⚠ Breakdown baru ${targetCoverage}% dari goal`}
+            </div>
+          </div>
+        </div>
+        <div className="h-2 bg-white/30 rounded-full mt-3 overflow-hidden"><div className="h-full bg-white rounded-full transition-all" style={{ width: `${Math.min(goalPct, 100)}%` }} /></div>
+      </div>
+
+      {accounts.length === 0 ? (
+        <EmptyState icon={Target} text={canManage ? 'Belum ada akun. Klik "Tambah Akun" untuk mulai breakdown target (mis. alkahfihome).' : 'Belum ada akun affiliator.'} />
+      ) : (
+        <div className="space-y-3">
+          {accounts.map(a => {
+            const target = Number(a.targets?.[mKey]) || 0;
+            const actual = acctTotal(a.id);
+            const pct = target > 0 ? Math.round((actual / target) * 100) : 0;
+            const dailyTarget = target > 0 ? Math.round(target / dim) : 0;
+            const todayVal = acctToday(a.id);
+            const hitToday = dailyTarget > 0 && todayVal >= dailyTarget;
+            const series = acctDailySeries(entries, a.id, mKey);
+            const pic = allUsers.find(u => u.id === a.picId);
+            return (
+              <div key={a.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-display font-bold text-slate-900 text-lg">{a.name}</span>
+                      {!a.active && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-semibold">Nonaktif</span>}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">PIC: {pic?.name || '—'}</div>
+                  </div>
+                  <div className="flex gap-1">
+                    {canInput(a) && <button onClick={() => setInputAcct(a)} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Update Hari Ini</button>}
+                    {canManage && <button onClick={() => setTargetAcct(a)} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200">Set Target</button>}
+                    {canManage && <button onClick={() => { setEditingAcct(a); setShowAcct(true); }} className="text-slate-400 hover:text-blue-600 p-1.5"><Edit2 className="w-4 h-4" /></button>}
+                    {isOwnerMgr && <button onClick={() => deleteAcct(a)} className="text-slate-400 hover:text-red-600 p-1.5"><Trash2 className="w-4 h-4" /></button>}
+                  </div>
+                </div>
+
+                {/* Metrics */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+                  <div className="bg-slate-50 rounded-xl p-2.5">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase">Target Bulan</div>
+                    <div className="font-bold text-slate-900 text-sm mt-0.5">{target > 0 ? fmtRupiah(target) : '—'}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl p-2.5">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase">Tercapai</div>
+                    <div className="font-bold text-emerald-700 text-sm mt-0.5">{fmtRupiah(actual)}</div>
+                    {target > 0 && <div className="text-[10px] text-slate-400">{pct}%</div>}
+                  </div>
+                  <div className="bg-slate-50 rounded-xl p-2.5">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase">Target/Hari</div>
+                    <div className="font-bold text-slate-900 text-sm mt-0.5">{dailyTarget > 0 ? fmtRupiah(dailyTarget) : '—'}</div>
+                  </div>
+                  <div className={`rounded-xl p-2.5 ${isCurrentMonth ? (hitToday ? 'bg-emerald-50' : (dailyTarget > 0 ? 'bg-red-50' : 'bg-slate-50')) : 'bg-slate-50'}`}>
+                    <div className="text-[10px] font-bold text-slate-500 uppercase">Hari Ini</div>
+                    <div className={`font-bold text-sm mt-0.5 ${isCurrentMonth && dailyTarget > 0 ? (hitToday ? 'text-emerald-700' : 'text-red-600') : 'text-slate-900'}`}>{fmtRupiah(todayVal)}</div>
+                    {isCurrentMonth && dailyTarget > 0 && <div className={`text-[10px] font-semibold ${hitToday ? 'text-emerald-600' : 'text-red-500'}`}>{hitToday ? '✓ Tercapai' : 'Belum capai'}</div>}
+                  </div>
+                </div>
+
+                {/* Progress bar bulan */}
+                {target > 0 && (
+                  <div className="h-1.5 bg-slate-100 rounded-full mt-3 overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(pct, 100)}%`, background: pct >= 100 ? '#10B981' : pct >= 70 ? '#3B82F6' : '#F59E0B' }} />
+                  </div>
+                )}
+
+                {/* Traffic harian */}
+                <div className="mt-3">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Traffic Harian</div>
+                  <MiniBarChart series={series} color="#3B82F6" />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showAcct && <AccountFormModal editing={editingAcct} internalUsers={allUsers.filter(u => (u.division || '') === 'internal' || u.role === 'leader')} onSave={saveAcct} onClose={() => { setShowAcct(false); setEditingAcct(null); }} />}
+      {inputAcct && <AccountGmvInputModal account={inputAcct} onSave={saveEntry} onClose={() => setInputAcct(null)} />}
+      {targetAcct && <AccountTargetModal account={targetAcct} monthLabel={monthLabel} current={Number(targetAcct.targets?.[mKey]) || 0} dim={dim} onSave={(v) => saveTarget(targetAcct.id, v)} onClose={() => setTargetAcct(null)} />}
+      {showGoal && <GoalModal monthLabel={monthLabel} current={goal} onSave={saveGoal} onClose={() => setShowGoal(false)} />}
+    </div>
+  );
+}
+
+function AccountFormModal({ editing, internalUsers, onSave, onClose }) {
+  const [form, setForm] = useState({
+    name: editing?.name || '', picId: editing?.picId || '', active: editing?.active !== false
+  });
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (!form.name.trim()) return setError('Nama akun wajib diisi.');
+    const pic = internalUsers.find(u => u.id === form.picId);
+    onSave({ name: form.name.trim(), picId: form.picId, picName: pic?.name || '', active: form.active });
+  };
+  return (
+    <Modal title={editing ? `Edit ${editing.name}` : 'Akun Affiliator Baru'} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Nama Akun *">
+          <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+            placeholder="mis. alkahfihome"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </Field>
+        <Field label="PIC (penanggung jawab)">
+          <select value={form.picId} onChange={e => setForm({ ...form, picId: e.target.value })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">— Belum ditentukan —</option>
+            {internalUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+          <div className="text-[11px] text-slate-500 mt-1">PIC bisa update GMV akun ini tiap hari. Owner/Manajer/Leader juga bisa.</div>
+        </Field>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} />
+          <span>Akun aktif</span>
+        </label>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
+        <FormActions onCancel={onClose} onSave={submit} saveLabel={editing ? 'Update' : 'Simpan'} />
+      </div>
+    </Modal>
+  );
+}
+
+function AccountGmvInputModal({ account, onSave, onClose }) {
+  const [form, setForm] = useState({ date: dayKey(), gmv: '', orders: '', note: '' });
+  const [error, setError] = useState('');
+  const submit = () => {
+    const gmv = Number(String(form.gmv).replace(/[^\d]/g, ''));
+    if (!gmv || gmv <= 0) return setError('GMV harus diisi.');
+    onSave({ accountId: account.id, accountName: account.name, date: form.date, gmv, orders: Number(String(form.orders).replace(/[^\d]/g, '')) || 0, note: form.note.trim() });
+  };
+  return (
+    <Modal title={`Update GMV — ${account.name}`} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Tanggal *">
+          <input type="date" value={form.date} max={dayKey()} onChange={e => setForm({ ...form, date: e.target.value })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </Field>
+        <Field label="GMV Hari Ini (Rp) *">
+          <input type="text" inputMode="numeric" value={form.gmv} onChange={e => setForm({ ...form, gmv: e.target.value.replace(/[^\d]/g, '') })}
+            placeholder="mis. 25000000"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          {form.gmv && <div className="text-xs text-emerald-600 mt-1 font-semibold">{fmtRupiah(Number(form.gmv))}</div>}
+        </Field>
+        <Field label="Jumlah Order (opsional)">
+          <input type="text" inputMode="numeric" value={form.orders} onChange={e => setForm({ ...form, orders: e.target.value.replace(/[^\d]/g, '') })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </Field>
+        <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-3 py-2">💡 Kalau tanggal ini sudah diisi, data lama otomatis diperbarui.</div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
+        <FormActions onCancel={onClose} onSave={submit} saveLabel="Simpan" />
+      </div>
+    </Modal>
+  );
+}
+
+function AccountTargetModal({ account, monthLabel, current, dim, onSave, onClose }) {
+  const [val, setVal] = useState(current || '');
+  const num = Number(String(val).replace(/[^\d]/g, '')) || 0;
+  return (
+    <Modal title={`Target ${account.name} · ${monthLabel}`} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Target GMV Bulan Ini (Rp)">
+          <input type="text" inputMode="numeric" value={val} onChange={e => setVal(e.target.value.replace(/[^\d]/g, ''))}
+            placeholder="mis. 800000000"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          {num > 0 && <div className="text-xs text-emerald-600 mt-1 font-semibold">{fmtRupiah(num)}</div>}
+        </Field>
+        {num > 0 && (
+          <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-sm text-slate-700">
+            Berarti target harian akun ini: <b className="text-blue-700">{fmtRupiah(Math.round(num / dim))}</b> ({dim} hari)
+          </div>
+        )}
+        <FormActions onCancel={onClose} onSave={() => onSave(num)} saveLabel="Simpan Target" />
+      </div>
+    </Modal>
+  );
+}
+
+function GoalModal({ monthLabel, current, onSave, onClose }) {
+  const [val, setVal] = useState(current || DEFAULT_AFFILIATE_GOAL);
+  const num = Number(String(val).replace(/[^\d]/g, '')) || 0;
+  return (
+    <Modal title={`Goal Affiliator · ${monthLabel}`} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Goal Total Affiliator Internal Bulan Ini (Rp)">
+          <input type="text" inputMode="numeric" value={val} onChange={e => setVal(e.target.value.replace(/[^\d]/g, ''))}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          {num > 0 && <div className="text-xs text-emerald-600 mt-1 font-semibold">{fmtRupiah(num)}</div>}
+        </Field>
+        <div className="text-[11px] text-slate-500">Default 1 Miliar. Total target semua akun idealnya menutupi goal ini.</div>
+        <FormActions onCancel={onClose} onSave={() => onSave(num)} saveLabel="Simpan Goal" />
       </div>
     </Modal>
   );
