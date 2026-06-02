@@ -239,7 +239,38 @@ const DEFAULT_DAILY_FIELDS = [
 ];
 
 const DEFAULT_ROLE_LABELS = { owner: 'Owner', manajer: 'Manajer', leader: 'Leader', operasional: 'Karyawan' };
-const DEFAULT_JOB_TITLES = ['Creator Manager', 'Admin Live', 'Admin Grup', 'Creator Hunter', 'Content Creator', 'Tim Ads', 'Marketing', 'Editor Video'];
+const DEFAULT_JOB_TITLES = ['Creator Manager', 'Admin Live', 'Admin Grup', 'Creator Hunter', 'Content Creator', 'Tim Ads', 'Marketing', 'Editor Video', 'Affiliator', 'Admin Campaign', 'Dokumentasi', 'Live Streaming'];
+
+// Divisi tim Masjid Affiliate (sesuai struktur Al-Kahfi Corp)
+const DIVISIONS = {
+  manajemen: { label: 'Manajemen', color: 'bg-violet-100 text-violet-800' },
+  internal:  { label: 'Affiliator Internal', color: 'bg-blue-100 text-blue-800' },
+  mcn:       { label: 'MCN', color: 'bg-emerald-100 text-emerald-800' },
+  tap:       { label: 'TAP', color: 'bg-orange-100 text-orange-800' },
+  media:     { label: 'Media & Creative', color: 'bg-pink-100 text-pink-800' },
+  event:     { label: 'Event', color: 'bg-amber-100 text-amber-800' },
+  mabit:     { label: 'Mabit Scholar', color: 'bg-teal-100 text-teal-800' },
+  keuangan:  { label: 'Keuangan', color: 'bg-slate-100 text-slate-700' }
+};
+
+// Fitur apa yang relevan untuk tiap divisi (selain menu umum yang dipakai semua).
+// Owner & Manajer selalu lihat semua. Divisi 'manajemen' juga lihat semua.
+const DIVISION_FEATURES = {
+  manajemen: ['creators', 'creator-management', 'sellers', 'gmv'],
+  internal:  ['gmv'],
+  mcn:       ['creators', 'creator-management', 'gmv'],
+  tap:       ['sellers', 'gmv'],
+  media:     [],
+  event:     [],
+  mabit:     [],
+  keuangan:  ['gmv']
+};
+// Cek apakah user boleh lihat fitur khusus tertentu (berdasarkan role + divisi)
+function canAccessFeature(user, feature) {
+  if (user.role === 'owner' || user.role === 'manajer') return true;
+  const div = user.division || 'internal';
+  return (DIVISION_FEATURES[div] || []).includes(feature);
+}
 const DEFAULT_SETTINGS = {
   appName: 'Al-Kahfi Corp',
   appSubtitle: 'MCN TAP · Masjid Affiliate',
@@ -370,6 +401,7 @@ export default function App() {
             {view === 'todos' && <TodosView user={currentUser} allUsers={allUsers} />}
             {view === 'creators' && <CreatorsView user={currentUser} allUsers={allUsers} />}
             {view === 'creator-management' && <CreatorManagementView user={currentUser} allUsers={allUsers} />}
+            {view === 'sellers' && <SellersView user={currentUser} allUsers={allUsers} />}
             {view === 'reports' && <ReportsView user={currentUser} allUsers={allUsers} />}
             {view === 'daily-reports' && <DailyReportsView user={currentUser} allUsers={allUsers} />}
             {view === 'schedule' && <ScheduleView user={currentUser} allUsers={allUsers} />}
@@ -927,10 +959,11 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       ]
     },
     {
-      label: 'Creator',
+      label: 'Creator & Seller',
       items: [
-        { id: 'creators', label: 'Database Creator', icon: Users, show: true },
-        { id: 'creator-management', label: 'Pengelolaan Creator', icon: Network, show: true },
+        { id: 'creators', label: 'Database Creator', icon: Users, show: canAccessFeature(user, 'creators') },
+        { id: 'creator-management', label: 'Pengelolaan Creator', icon: Network, show: canAccessFeature(user, 'creator-management') },
+        { id: 'sellers', label: 'Database Seller', icon: Briefcase, show: canAccessFeature(user, 'sellers') },
         { id: 'content-ideas', label: 'Bank Ide Konten', icon: Lightbulb, show: true }
       ]
     },
@@ -2401,6 +2434,7 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
         id: uid(), name: data.name, username: data.username.toLowerCase(),
         role: data.role, leaderId: data.role === 'operasional' ? data.leaderId : null,
         jobTitle: data.jobTitle?.trim() || '',
+        division: data.division || 'internal',
         phone: data.phone || '', salt, passwordHash,
         joinedAt: new Date().toISOString(), createdById: user.id
       };
@@ -2516,6 +2550,7 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
     role: editing?.role || allowedRoles[0] || 'operasional',
     leaderId: editing?.leaderId || (currentUser.role === 'leader' ? currentUser.id : ''),
     jobTitle: editing?.jobTitle || '',
+    division: editing?.division || 'internal',
     phone: editing?.phone || '',
     password: '', confirmPassword: ''
   });
@@ -2570,7 +2605,14 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
             </select>
           </Field>
         )}
-        <Field label="Posisi / Divisi">
+        <Field label="Divisi / Tim *">
+          <select value={form.division} onChange={e => setForm({ ...form, division: e.target.value })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+            {Object.entries(DIVISIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+          <div className="text-[11px] text-slate-500 mt-1">💡 Menu yang muncul untuk anggota ini menyesuaikan divisinya. Mis. Internal & TAP tidak melihat menu Creator.</div>
+        </Field>
+        <Field label="Posisi / Jabatan">
           <input type="text" value={form.jobTitle} onChange={e => setForm({ ...form, jobTitle: e.target.value })}
             list="user-job-titles" placeholder="Pilih dari daftar atau ketik sendiri (mis. Creator Manager, Tim Ads)"
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
@@ -4031,6 +4073,151 @@ function ScheduleForm({ schedule, assignableAdmins, creators, onSave, onClose })
 }
 
 // ============ LEADERBOARD ============
+// ============ DATABASE SELLER (TAP) ============
+function SellersView({ user, allUsers }) {
+  const [sellers, setSellers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [search, setSearch] = useState('');
+  const [form, setForm] = useState({ name: '', shopName: '', phone: '', category: '', status: 'aktif', commission: '', note: '' });
+
+  const load = async () => { setSellers(await storage.getList('sellers:all')); setLoading(false); };
+  useEffect(() => { load(); const iv = setInterval(load, 12000); return () => clearInterval(iv); }, []);
+
+  const openNew = () => { setEditing(null); setForm({ name: '', shopName: '', phone: '', category: '', status: 'aktif', commission: '', note: '' }); setShowForm(true); };
+  const openEdit = (s) => { setEditing(s); setForm({ name: s.name, shopName: s.shopName || '', phone: s.phone || '', category: s.category || '', status: s.status || 'aktif', commission: s.commission || '', note: s.note || '' }); setShowForm(true); };
+
+  const save = async () => {
+    if (!form.name.trim()) return;
+    let list = await storage.getList('sellers:all');
+    if (editing) {
+      list = list.map(s => s.id === editing.id ? { ...s, ...form } : s);
+      await logActivity(`update seller ${form.name}`, user.name);
+    } else {
+      list.unshift({ id: uid(), ...form, managerId: user.id, managerName: user.name, createdAt: new Date().toISOString() });
+      await logActivity(`tambah seller ${form.name}`, user.name);
+    }
+    await storage.set('sellers:all', list);
+    setShowForm(false); setEditing(null); load();
+  };
+  const remove = async (s) => {
+    if (!confirm(`Hapus seller ${s.name}?`)) return;
+    await storage.set('sellers:all', (await storage.getList('sellers:all')).filter(x => x.id !== s.id));
+    await logActivity(`hapus seller ${s.name}`, user.name); load();
+  };
+
+  const filtered = sellers.filter(s =>
+    !search || s.name.toLowerCase().includes(search.toLowerCase()) || (s.shopName || '').toLowerCase().includes(search.toLowerCase())
+  );
+  const STATUS = { aktif: 'bg-emerald-100 text-emerald-700', nonaktif: 'bg-slate-100 text-slate-500', prospek: 'bg-amber-100 text-amber-700' };
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat...</div>;
+
+  return (
+    <div className="max-w-6xl">
+      <PageHeader title="Database Seller" subtitle="Seller yang bergabung & bind via TikTok Affiliate Partner (TAP)"
+        action={
+          <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Seller Baru
+          </button>
+        } />
+
+      <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input type="text" placeholder="Cari seller / toko..." value={search} onChange={e => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState icon={Briefcase} text="Belum ada seller. Tambah seller pertama." />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filtered.map(s => (
+            <div key={s.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-900 truncate">{s.name}</div>
+                  {s.shopName && <div className="text-xs text-slate-500 truncate">🏪 {s.shopName}</div>}
+                </div>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex-shrink-0 ${STATUS[s.status] || STATUS.aktif}`}>{(s.status || 'aktif').toUpperCase()}</span>
+              </div>
+              <div className="mt-2 space-y-1 text-xs text-slate-600">
+                {s.category && <div>Kategori: <span className="font-medium">{s.category}</span></div>}
+                {s.commission && <div>Komisi: <span className="font-medium">{s.commission}</span></div>}
+                {s.phone && <div>WA: {s.phone}</div>}
+                {s.note && <div className="text-slate-500 italic">"{s.note}"</div>}
+              </div>
+              <div className="flex items-center gap-1 mt-3 pt-3 border-t border-slate-100">
+                {s.phone && (
+                  <a href={`https://wa.me/${s.phone.replace(/[^0-9]/g, '').replace(/^0/, '62')}`} target="_blank" rel="noreferrer"
+                    className="text-[11px] text-emerald-600 hover:underline flex items-center gap-1">
+                    <Send className="w-3 h-3" /> WhatsApp
+                  </a>
+                )}
+                <button onClick={() => openEdit(s)} className="ml-auto text-slate-400 hover:text-blue-600 p-1"><Edit2 className="w-4 h-4" /></button>
+                <button onClick={() => remove(s)} className="text-slate-400 hover:text-red-600 p-1"><Trash2 className="w-4 h-4" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <Modal title={editing ? `Edit ${editing.name}` : 'Seller Baru'} onClose={() => setShowForm(false)}>
+          <div className="space-y-3">
+            <Field label="Nama Seller / PIC *">
+              <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </Field>
+            <Field label="Nama Toko / Shop">
+              <input type="text" value={form.shopName} onChange={e => setForm({ ...form, shopName: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Kategori Produk">
+                <input type="text" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
+                  placeholder="mis. Fashion, F&B"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </Field>
+              <Field label="Status">
+                <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="aktif">Aktif</option>
+                  <option value="prospek">Prospek</option>
+                  <option value="nonaktif">Nonaktif</option>
+                </select>
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Komisi (%)">
+                <input type="text" value={form.commission} onChange={e => setForm({ ...form, commission: e.target.value })}
+                  placeholder="mis. 10%"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </Field>
+              <Field label="No. WhatsApp">
+                <input type="text" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
+                  placeholder="08xxx"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </Field>
+            </div>
+            <Field label="Catatan">
+              <textarea value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} rows={2}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </Field>
+            <div className="flex gap-2 pt-2">
+              <button onClick={save} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-semibold">Simpan</button>
+              <button onClick={() => setShowForm(false)} className="px-4 py-2.5 border border-slate-300 rounded-lg font-medium hover:bg-slate-50">Batal</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ============ ABSENSI (Attendance + Lokasi GPS) ============
 function AttendanceView({ user, allUsers }) {
   const [records, setRecords] = useState([]);
@@ -4039,13 +4226,14 @@ function AttendanceView({ user, allUsers }) {
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [filterUser, setFilterUser] = useState('all');
+  const [filterDiv, setFilterDiv] = useState('all');
 
   const load = async () => {
     const list = await storage.getList('attendance:all');
     setRecords(list);
     setLoading(false);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
 
   const todayStr = new Date().toDateString();
   const myToday = records.filter(r => r.userId === user.id && new Date(r.timestamp).toDateString() === todayStr);
@@ -4066,21 +4254,35 @@ function AttendanceView({ user, allUsers }) {
     );
   });
 
+  // Reverse geocode → alamat teks (pakai Nominatim OpenStreetMap, gratis)
+  const getAddress = async (lat, lng) => {
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+        headers: { 'Accept-Language': 'id' }
+      });
+      const data = await res.json();
+      return data.display_name || '';
+    } catch { return ''; }
+  };
+
   const doAbsen = async (type) => {
     setError(''); setBusy(true);
     try {
       const loc = await getLocation();
+      const address = await getAddress(loc.lat, loc.lng);
       const rec = {
         id: uid(),
         userId: user.id,
         userName: user.name,
         userRole: user.role,
+        division: user.division || 'internal',
         jobTitle: user.jobTitle || '',
         type,
         timestamp: new Date().toISOString(),
         latitude: loc.lat,
         longitude: loc.lng,
         accuracy: loc.acc,
+        address,
         note: note.trim()
       };
       const list = await storage.getList('attendance:all');
@@ -4108,9 +4310,10 @@ function AttendanceView({ user, allUsers }) {
     } else {
       list = list.filter(r => r.userId === user.id);
     }
+    if (filterDiv !== 'all') list = list.filter(r => (r.division || 'internal') === filterDiv);
     if (filterUser !== 'all') list = list.filter(r => r.userId === filterUser);
     return list;
-  }, [records, user, allUsers, filterUser]);
+  }, [records, user, allUsers, filterUser, filterDiv]);
 
   const canSeeOthers = user.role === 'owner' || user.role === 'manajer' || user.role === 'leader';
   const teamForFilter = useMemo(() => {
@@ -4118,6 +4321,34 @@ function AttendanceView({ user, allUsers }) {
     if (user.role === 'leader') return allUsers.filter(u => u.leaderId === user.id || u.id === user.id);
     return [user];
   }, [allUsers, user]);
+
+  // Download rekap CSV
+  const downloadRecap = () => {
+    const rows = [['Nama', 'Divisi', 'Jabatan', 'Tipe', 'Tanggal', 'Jam', 'Lokasi (Alamat)', 'Koordinat', 'Akurasi (m)', 'Catatan']];
+    visibleRecords.forEach(r => {
+      const d = new Date(r.timestamp);
+      rows.push([
+        r.userName,
+        DIVISIONS[r.division]?.label || r.division || '-',
+        r.jobTitle || '-',
+        r.type === 'in' ? 'Masuk' : 'Pulang',
+        d.toLocaleDateString('id-ID'),
+        d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+        (r.address || '').replace(/"/g, "'"),
+        `${r.latitude},${r.longitude}`,
+        r.accuracy || '',
+        (r.note || '').replace(/"/g, "'")
+      ]);
+    });
+    const csv = rows.map(row => row.map(c => `"${c}"`).join(',')).join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Rekap-Absensi-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const fmtTime = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   const fmtDate = ts => new Date(ts).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
@@ -4174,15 +4405,26 @@ function AttendanceView({ user, allUsers }) {
         </div>
       </div>
 
-      {/* Filter (untuk leader/manajer/owner) */}
+      {/* Filter + Download (untuk leader/manajer/owner) */}
       {canSeeOthers && (
-        <div className="mb-4 flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-slate-500 font-semibold">Lihat:</span>
+        <div className="mb-4 flex items-center gap-2 flex-wrap bg-white rounded-xl border border-slate-200 p-3">
+          <span className="text-xs text-slate-500 font-semibold">Filter:</span>
+          {(user.role === 'owner' || user.role === 'manajer') && (
+            <select value={filterDiv} onChange={e => setFilterDiv(e.target.value)}
+              className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="all">Semua divisi</option>
+              {Object.entries(DIVISIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          )}
           <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
             className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
             <option value="all">Semua anggota</option>
             {teamForFilter.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
+          <button onClick={downloadRecap} disabled={visibleRecords.length === 0}
+            className="ml-auto bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+            <FileDown className="w-4 h-4" /> Download Rekap ({visibleRecords.length})
+          </button>
         </div>
       )}
 
@@ -4206,14 +4448,19 @@ function AttendanceView({ user, allUsers }) {
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${r.type === 'in' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                       {r.type === 'in' ? 'MASUK' : 'PULANG'}
                     </span>
-                    {ROLES[r.userRole] && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{ROLES[r.userRole].label}</span>
+                    {r.division && DIVISIONS[r.division] && (
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${DIVISIONS[r.division].color}`}>{DIVISIONS[r.division].label}</span>
                     )}
                   </div>
                   <div className="text-xs text-slate-500 mt-0.5">{fmtDate(r.timestamp)} · {fmtTime(r.timestamp)}</div>
+                  {r.address && (
+                    <div className="text-xs text-slate-700 mt-1 flex items-start gap-1">
+                      <MapPin className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0 mt-0.5" />
+                      <span>{r.address}</span>
+                    </div>
+                  )}
                   {r.note && <div className="text-xs text-slate-600 mt-1 italic">"{r.note}"</div>}
                   <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1 flex-wrap">
-                    <MapPin className="w-3 h-3" />
                     {r.latitude?.toFixed(5)}, {r.longitude?.toFixed(5)}
                     {r.accuracy ? <span>· ±{r.accuracy}m</span> : null}
                     <a href={mapsLink(r.latitude, r.longitude)} target="_blank" rel="noreferrer"
@@ -4349,15 +4596,31 @@ function AnnouncementsView({ user }) {
     await storage.set('announcements:all', list);
     load();
   };
+  const handleClearAll = async () => {
+    if (!confirm('Bersihkan SEMUA pengumuman? Tindakan ini tidak bisa dibatalkan.')) return;
+    await storage.set('announcements:all', []);
+    await logActivity('membersihkan semua pengumuman', user.name);
+    load();
+  };
+
+  const canClear = (user.role === 'owner' || user.role === 'manajer');
 
   return (
     <div className="max-w-3xl">
       <PageHeader title="Pengumuman Tim" subtitle="Info penting dari pimpinan ke seluruh tim"
         action={can.postAnnouncements(user) ? (
-          <button onClick={() => setShowForm(true)}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Buat Pengumuman
-          </button>
+          <div className="flex items-center gap-2">
+            {canClear && items.length > 0 && (
+              <button onClick={handleClearAll}
+                className="border border-red-200 text-red-600 hover:bg-red-50 px-3 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+                <Trash2 className="w-4 h-4" /> <span className="hidden sm:inline">Bersihkan Semua</span>
+              </button>
+            )}
+            <button onClick={() => setShowForm(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Buat Pengumuman</span><span className="sm:hidden">Buat</span>
+            </button>
+          </div>
         ) : null} />
       {items.length === 0 ? <EmptyState icon={Megaphone} text="Belum ada pengumuman." /> : (
         <div className="space-y-3">
