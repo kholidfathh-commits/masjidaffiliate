@@ -1061,32 +1061,30 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
   const mobileWide = mobileOpen;
 
   return (
-    <aside style={{ backgroundColor: '#1E1B4B', color: '#FFFFFF' }}
-      className={`fixed left-0 top-0 h-screen flex flex-col transition-all duration-200 border-r border-slate-800/50 z-40
+    <aside style={{ backgroundColor: '#FFFFFF', color: '#0E1525' }}
+      className={`fixed left-0 top-0 h-screen flex flex-col transition-all duration-200 border-r border-slate-200 z-40
         w-64 ${isOpen ? 'lg:w-64' : 'lg:w-16'}
         ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
       {/* Tombol tutup drawer (mobile only) */}
       <button onClick={onCloseMobile} title="Tutup menu"
-        className="lg:hidden absolute top-3 right-3 z-50 p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition">
+        className="lg:hidden absolute top-3 right-3 z-50 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
         <X className="w-5 h-5" />
       </button>
       {/* Brand header */}
-      <div style={{ borderBottomColor: 'rgba(30, 41, 59, 0.6)' }}
-        className={`${(isOpen || mobileWide) ? 'px-5 py-5' : 'p-3'} border-b flex items-center ${(isOpen || mobileWide) ? 'justify-between gap-2' : 'justify-center lg:justify-center'}`}>
+      <div className={`${(isOpen || mobileWide) ? 'px-5 py-5' : 'p-3'} border-b border-slate-100 flex items-center ${(isOpen || mobileWide) ? 'justify-between gap-2' : 'justify-center lg:justify-center'}`}>
         {(isOpen) ? (
           <>
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl flex items-center justify-center text-xl overflow-hidden flex-shrink-0 shadow-lg shadow-indigo-900/50 ring-1 ring-white/10">
+              <div className="w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl flex items-center justify-center text-xl overflow-hidden flex-shrink-0 shadow-lg shadow-indigo-500/30 ring-1 ring-black/5">
                 {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
               </div>
               <div className="min-w-0">
-                <div style={{ color: '#FFFFFF' }} className="font-display font-bold text-base truncate">{settings.appName}</div>
-                <div style={{ color: '#D6A84F' }} className="text-[9px] uppercase tracking-[0.15em] truncate font-bold">{settings.appSubtitle}</div>
+                <div style={{ color: '#0E1525' }} className="font-display font-bold text-base truncate">{settings.appName}</div>
+                <div style={{ color: '#B45309' }} className="text-[9px] uppercase tracking-[0.15em] truncate font-bold">{settings.appSubtitle}</div>
               </div>
             </div>
             <button onClick={onToggle} title="Sembunyikan sidebar"
-              style={{ color: '#94A3B8' }}
-              className="hidden lg:flex hover:!text-white p-1 flex-shrink-0 transition">
+              className="hidden lg:flex text-slate-400 hover:text-slate-700 p-1 flex-shrink-0 transition">
               <PanelLeftClose className="w-4 h-4" />
             </button>
           </>
@@ -1094,16 +1092,16 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
           <>
             {/* Mobile: tampilkan brand penuh; Desktop collapsed: cuma logo */}
             <div className="flex lg:hidden items-center gap-3 min-w-0">
-              <div className="w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl flex items-center justify-center text-xl overflow-hidden flex-shrink-0 shadow-lg ring-1 ring-white/10">
+              <div className="w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl flex items-center justify-center text-xl overflow-hidden flex-shrink-0 shadow-lg ring-1 ring-black/5">
                 {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
               </div>
               <div className="min-w-0">
-                <div style={{ color: '#FFFFFF' }} className="font-display font-bold text-base truncate">{settings.appName}</div>
-                <div style={{ color: '#D6A84F' }} className="text-[9px] uppercase tracking-[0.15em] truncate font-bold">{settings.appSubtitle}</div>
+                <div style={{ color: '#0E1525' }} className="font-display font-bold text-base truncate">{settings.appName}</div>
+                <div style={{ color: '#B45309' }} className="text-[9px] uppercase tracking-[0.15em] truncate font-bold">{settings.appSubtitle}</div>
               </div>
             </div>
             <button onClick={onToggle} title="Tampilkan sidebar"
-              className="hidden lg:flex w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl items-center justify-center text-xl overflow-hidden hover:opacity-90 transition shadow-lg ring-1 ring-white/10">
+              className="hidden lg:flex w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl items-center justify-center text-xl overflow-hidden hover:opacity-90 transition shadow-lg ring-1 ring-black/5">
               {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
             </button>
           </>
@@ -1111,17 +1109,17 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       </div>
 
       {/* Menu groups */}
-      <nav className={`flex-1 ${isOpen ? 'px-3 py-4' : 'px-2 py-3'} overflow-y-auto scroll-thin space-y-5`}>
+      <nav className={`flex-1 ${isOpen ? 'px-3 py-4' : 'px-2 py-3'} overflow-y-auto scroll-thin space-y-4`}>
         {menuGroups.map((group, gi) => {
           const visibleItems = group.items.filter(m => m.show);
           if (visibleItems.length === 0) return null;
           return (
             <div key={gi}>
-              <div style={{ color: '#94A3B8' }}
-                className={`text-[10px] uppercase tracking-[0.18em] font-bold mb-2 px-3 ${isOpen ? '' : 'lg:hidden'}`}>
+              <div style={{ color: '#9AA3AF' }}
+                className={`text-[10px] uppercase tracking-[0.16em] font-bold mb-2 px-3 ${isOpen ? '' : 'lg:hidden'}`}>
                 {group.label}
               </div>
-              {!isOpen && gi > 0 && <div className="hidden lg:block h-px bg-slate-700 mx-2 mb-3"></div>}
+              {!isOpen && gi > 0 && <div className="hidden lg:block h-px bg-slate-100 mx-2 mb-3"></div>}
               <div className="space-y-1">
                 {visibleItems.map(item => {
                   const Icon = item.icon;
@@ -1130,26 +1128,18 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
                     <button key={item.id} onClick={() => handleNav(item.id)}
                       title={!isOpen ? item.label : undefined}
                       style={active
-                        ? { background: 'linear-gradient(to right, #6366F1, #4F46E5)', color: '#FFFFFF' }
-                        : { color: '#CBD5E1' }}
-                      className={`group w-full flex items-center py-2.5 rounded-xl text-sm font-medium transition-all relative ${
+                        ? { backgroundColor: '#EEF0FF', color: '#4338CA' }
+                        : { color: '#3C4658' }}
+                      className={`group w-full flex items-center py-2.5 rounded-xl text-sm font-semibold transition-all relative ${
                         isOpen ? 'gap-3 px-3' : 'gap-3 px-3 lg:justify-center lg:gap-0 lg:px-2'
-                      } ${
-                        active
-                          ? 'shadow-lg shadow-indigo-900/50 ring-1 ring-indigo-400/20'
-                          : 'hover:bg-white/10 hover:text-white'
-                      }`}>
+                      } ${active ? '' : 'hover:bg-slate-100'}`}>
                       {active && (
-                        <div style={{ backgroundColor: '#D6A84F', boxShadow: '0 0 8px rgba(214,168,79,0.6)' }}
+                        <div style={{ backgroundColor: '#4F46E5' }}
                           className={`absolute -left-3 top-2 bottom-2 w-1 rounded-r-full ${isOpen ? '' : 'lg:hidden'}`}></div>
                       )}
-                      <Icon style={{ color: active ? '#FFFFFF' : '#94A3B8' }}
-                        className="w-[18px] h-[18px] flex-shrink-0 group-hover:!text-white transition" />
-                      <span className={`truncate font-medium ${isOpen ? '' : 'lg:hidden'}`}>{item.label}</span>
-                      {active && (
-                        <div style={{ backgroundColor: '#D6A84F', boxShadow: '0 0 6px rgba(214,168,79,0.6)' }}
-                          className={`ml-auto w-1.5 h-1.5 rounded-full ${isOpen ? '' : 'lg:hidden'}`}></div>
-                      )}
+                      <Icon style={{ color: active ? '#4F46E5' : '#8A93A4' }}
+                        className="w-[18px] h-[18px] flex-shrink-0 transition" />
+                      <span className={`truncate ${isOpen ? '' : 'lg:hidden'}`}>{item.label}</span>
                     </button>
                   );
                 })}
@@ -1160,28 +1150,25 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       </nav>
 
       {/* User profile bottom */}
-      <div style={{ borderTopColor: 'rgba(30, 41, 59, 0.6)' }}
-        className={`border-t ${isOpen ? 'p-3' : 'p-3 lg:p-2'}`}>
+      <div className={`border-t border-slate-100 ${isOpen ? 'p-3' : 'p-3 lg:p-2'}`}>
         {/* Expanded profile (mobile always, desktop when open) */}
         <div className={isOpen ? 'block' : 'block lg:hidden'}>
-          <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.04)' }}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 transition">
+          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 transition">
             <button onClick={onOpenProfile} title="Profil Saya"
-              className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-700 flex items-center justify-center font-bold text-sm flex-shrink-0 overflow-hidden ring-2 ring-amber-400/30 hover:ring-amber-400/70 transition text-white">
+              className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-700 flex items-center justify-center font-bold text-sm flex-shrink-0 overflow-hidden ring-2 ring-amber-400/40 hover:ring-amber-400/80 transition text-white">
               {user.avatarImage
                 ? <img src={user.avatarImage} alt="" className="w-full h-full object-cover" />
                 : user.name.charAt(0).toUpperCase()}
             </button>
             <button onClick={onOpenProfile} className="flex-1 min-w-0 text-left hover:opacity-90 transition">
-              <div style={{ color: '#FFFFFF' }} className="text-sm font-semibold truncate">{user.name}</div>
-              <div style={{ color: '#CBD5E1' }} className="text-[10px] flex items-center gap-1">
+              <div style={{ color: '#0E1525' }} className="text-sm font-semibold truncate">{user.name}</div>
+              <div style={{ color: '#64748B' }} className="text-[10px] flex items-center gap-1">
                 <RoleIcon className="w-2.5 h-2.5" /> {ROLES[user.role].label}
               </div>
-              {user.jobTitle && <div style={{ color: '#D6A84F' }} className="text-[10px] font-medium truncate mt-0.5">{user.jobTitle}</div>}
+              {user.jobTitle && <div style={{ color: '#B45309' }} className="text-[10px] font-medium truncate mt-0.5">{user.jobTitle}</div>}
             </button>
             <button onClick={onLogout} title="Keluar"
-              style={{ color: '#94A3B8' }}
-              className="hover:!text-red-400 transition p-1">
+              className="text-slate-400 hover:text-red-500 transition p-1">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -1189,14 +1176,13 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         {/* Collapsed profile (desktop collapsed only) */}
         <div className={isOpen ? 'hidden' : 'hidden lg:flex flex-col items-center gap-2'}>
           <button onClick={onOpenProfile} title={`${user.name} — ${ROLES[user.role].label} (klik untuk profil)`}
-            className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-700 flex items-center justify-center font-bold text-sm overflow-hidden ring-2 ring-amber-400/30 hover:ring-amber-400/70 transition text-white">
+            className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-700 flex items-center justify-center font-bold text-sm overflow-hidden ring-2 ring-amber-400/40 hover:ring-amber-400/80 transition text-white">
             {user.avatarImage
                 ? <img src={user.avatarImage} alt="" className="w-full h-full object-cover" />
                 : user.name.charAt(0).toUpperCase()}
             </button>
             <button onClick={onLogout} title="Keluar"
-              style={{ color: '#94A3B8' }}
-              className="hover:!text-red-400 p-1 transition">
+              className="text-slate-400 hover:text-red-500 p-1 transition">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -1867,9 +1853,10 @@ function Dashboard({ user, allUsers, setView }) {
         </div>
       </div>
 
-      {/* GMV Summary Widget */}
+      {/* Dashboard Bisnis: Keseluruhan + per-divisi MCN/TAP/Affiliator */}
       {canAccessFeature(user, 'gmv') && (
-        <DashboardGmvWidget entries={gmvEntries} targets={gmvTargets} onOpen={() => setView('gmv')} />
+        <BusinessDashboard gmvEntries={gmvEntries} gmvTargets={gmvTargets}
+          affAccounts={affAccounts} affEntries={affEntries} allUsers={allUsers} onNavigate={setView} />
       )}
 
       {/* KPI Saya + Masalah Aktif */}
@@ -2176,6 +2163,268 @@ function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTar
   const rank = { danger: 0, warning: 1, info: 2, good: 3 };
   out.sort((a, b) => rank[a.level] - rank[b.level]);
   return out.slice(0, 6);
+}
+
+// ============ DASHBOARD BISNIS (Keseluruhan + per-divisi MCN/TAP/Affiliator) ============
+function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, onNavigate }) {
+  const [scope, setScope] = useState('all'); // all | mcn | tap | internal
+  const [affGoal, setAffGoal] = useState(DEFAULT_AFFILIATE_GOAL);
+  const mKey = monthKey();
+  const dim = daysInMonth(mKey);
+  const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
+
+  useEffect(() => { (async () => { const g = await storage.get('affiliate:goal'); if (g && g[mKey]) setAffGoal(g[mKey]); })(); }, [mKey]);
+
+  const rpShort = (n) => {
+    n = Number(n) || 0;
+    if (n >= 1e9) return 'Rp ' + (n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace('.', ',') + ' M';
+    if (n >= 1e6) return 'Rp ' + (n / 1e6).toFixed(n >= 1e8 ? 0 : 1).replace('.', ',') + ' jt';
+    if (n >= 1e3) return 'Rp ' + Math.round(n / 1e3) + ' rb';
+    return 'Rp ' + n;
+  };
+
+  const totals = useMemo(() => {
+    const t = { mcn: 0, tap: 0, internal: 0 };
+    gmvEntries.forEach(e => { if (e.date && e.date.startsWith(mKey) && t[e.division] !== undefined) t[e.division] += Number(e.gmv) || 0; });
+    return t;
+  }, [gmvEntries, mKey]);
+  const targets = gmvTargets[mKey] || {};
+  const grandTotal = totals.mcn + totals.tap + totals.internal;
+  const grandTarget = (Number(targets.mcn) || 0) + (Number(targets.tap) || 0) + (Number(targets.internal) || 0);
+
+  const seriesByDiv = useMemo(() => ({
+    mcn: gmvDailySeries(gmvEntries, 'mcn', mKey),
+    tap: gmvDailySeries(gmvEntries, 'tap', mKey),
+    internal: gmvDailySeries(gmvEntries, 'internal', mKey)
+  }), [gmvEntries, mKey]);
+  const n = seriesByDiv.mcn.length || 1;
+  const totalSeries = Array.from({ length: n }, (_, i) => ({
+    day: i + 1,
+    value: (seriesByDiv.mcn[i]?.value || 0) + (seriesByDiv.tap[i]?.value || 0) + (seriesByDiv.internal[i]?.value || 0)
+  }));
+
+  const change = (series) => {
+    const s = series.filter(x => x.value > 0);
+    const today = s[s.length - 1]?.value || 0, prev = s[s.length - 2]?.value || 0;
+    const diff = today - prev, pct = prev > 0 ? Math.round((diff / prev) * 100) : (today > 0 ? 100 : 0);
+    return { today, prev, diff, pct };
+  };
+
+  // chart geometry
+  const CW = 720, CH = 200, PADL = 6, PADR = 6, PADT = 14, PADB = 6;
+  const xAt = (i) => PADL + (n <= 1 ? 0 : (i / (n - 1)) * (CW - PADL - PADR));
+  const yAt = (v, max) => CH - PADB - (max <= 0 ? 0 : (v / max) * (CH - PADT - PADB));
+  const pointsOf = (series, max) => series.map((s, i) => `${xAt(i).toFixed(1)},${yAt(s.value, max).toFixed(1)}`).join(' ');
+  const areaOf = (series, max) => `${pointsOf(series, max)} ${xAt(n - 1).toFixed(1)},${CH - PADB} ${xAt(0).toFixed(1)},${CH - PADB}`;
+
+  const isAll = scope === 'all';
+  const divColor = isAll ? '#4F46E5' : GMV_DIVISIONS[scope].color;
+  const chartSeries = isAll ? totalSeries : seriesByDiv[scope];
+  const chartMaxAll = Math.max(...seriesByDiv.mcn.map(s => s.value), ...seriesByDiv.tap.map(s => s.value), ...seriesByDiv.internal.map(s => s.value), 1);
+  const chartMaxDiv = Math.max(...chartSeries.map(s => s.value), 1);
+  const hasData = grandTotal > 0;
+
+  // stat cards per scope
+  let cards = [];
+  if (isAll) {
+    const ch = change(totalSeries);
+    const pctTarget = grandTarget > 0 ? Math.round((grandTotal / grandTarget) * 100) : null;
+    const share = (v) => grandTotal > 0 ? Math.round((v / grandTotal) * 100) : 0;
+    cards = [
+      { label: 'GMV Bisnis Bln Ini', value: rpShort(grandTotal), sub: pctTarget !== null ? `${pctTarget}% dari target ${rpShort(grandTarget)}` : 'Belum ada target', accent: '#4F46E5', bg: '#EEF0FF', trend: ch },
+      { label: 'MCN', value: rpShort(totals.mcn), sub: `${share(totals.mcn)}% kontribusi`, accent: '#10B981', bg: '#DCFCE7' },
+      { label: 'TAP', value: rpShort(totals.tap), sub: `${share(totals.tap)}% kontribusi`, accent: '#F97316', bg: '#FFEDD5' },
+      { label: 'Affiliator Internal', value: rpShort(totals.internal), sub: `${share(totals.internal)}% kontribusi`, accent: '#3B82F6', bg: '#DBEAFE' }
+    ];
+  } else {
+    const tot = totals[scope];
+    const tgt = Number(targets[scope]) || 0;
+    const ch = change(seriesByDiv[scope]);
+    const elapsed = n;
+    const avg = elapsed > 0 ? tot / elapsed : 0;
+    const best = Math.max(...seriesByDiv[scope].map(s => s.value), 0);
+    const proj = avg * dim;
+    const pctTarget = tgt > 0 ? Math.round((tot / tgt) * 100) : null;
+    cards = [
+      { label: 'GMV Bulan Ini', value: rpShort(tot), sub: pctTarget !== null ? `${pctTarget}% dari target ${rpShort(tgt)}` : 'Target belum di-set', accent: divColor, bg: '#EEF0FF', trend: ch },
+      { label: 'Rata-rata / Hari', value: rpShort(avg), sub: `${elapsed} hari berjalan`, accent: '#0EA5E9', bg: '#E0F2FE' },
+      { label: 'Hari Terbaik', value: rpShort(best), sub: 'GMV tertinggi sebulan', accent: '#16A34A', bg: '#DCFCE7' },
+      { label: 'Proyeksi Akhir Bln', value: rpShort(proj), sub: tgt > 0 ? (proj >= tgt ? 'On track ✓' : `Kurang ${rpShort(tgt - proj)}`) : 'Estimasi laju saat ini', accent: proj >= tgt && tgt > 0 ? '#16A34A' : '#B45309', bg: proj >= tgt && tgt > 0 ? '#DCFCE7' : '#FEF3C7' }
+    ];
+  }
+
+  // affiliator accounts (untuk tab internal)
+  const acctRows = useMemo(() => affAccounts.filter(a => a.active !== false).map(a => {
+    const real = affEntries.filter(e => e.accountId === a.id && e.date && e.date.startsWith(mKey)).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
+    const tgt = Number(a.targets?.[mKey]) || 0;
+    const pic = allUsers.find(u => u.id === a.picId);
+    return { a, real, tgt, pic, pct: tgt > 0 ? Math.round((real / tgt) * 100) : 0 };
+  }).sort((x, y) => y.real - x.real), [affAccounts, affEntries, mKey, allUsers]);
+
+  const TABS = [{ id: 'all', label: 'Keseluruhan' }, { id: 'mcn', label: 'MCN' }, { id: 'tap', label: 'TAP' }, { id: 'internal', label: 'Affiliator' }];
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/40">
+      {/* header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-5 border-b border-slate-100">
+        <div>
+          <h3 className="font-display font-bold text-lg text-slate-900 flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-indigo-600" /> Dashboard Bisnis
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">GMV {isAll ? 'gabungan semua lini' : GMV_DIVISIONS[scope].label} · {monthLabel}</p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => setScope(t.id)}
+              style={scope === t.id ? { backgroundColor: '#4F46E5', color: '#fff', borderColor: '#4F46E5' } : {}}
+              className="text-xs font-bold px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-indigo-300 transition">
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!hasData ? (
+        <div className="p-10 text-center">
+          <BarChart3 className="w-12 h-12 mx-auto mb-3 text-slate-200" />
+          <div className="text-sm text-slate-500 mb-3">Belum ada data GMV bulan ini.</div>
+          <button onClick={() => onNavigate('gmv')} className="text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-xl transition">
+            Input GMV Sekarang
+          </button>
+        </div>
+      ) : (
+        <div className="p-5 space-y-5">
+          {/* stat cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {cards.map((c, i) => (
+              <div key={i} className="rounded-2xl border border-slate-200 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c.accent }}></span>
+                  {c.trend && c.trend.today > 0 && (
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1"
+                      style={{ backgroundColor: c.trend.diff >= 0 ? '#DCFCE7' : '#FEE2E2', color: c.trend.diff >= 0 ? '#16A34A' : '#DC2626' }}>
+                      {c.trend.diff >= 0 ? '▲' : '▼'} {Math.abs(c.trend.pct)}%
+                    </span>
+                  )}
+                </div>
+                <div className="text-[12px] text-slate-500 font-semibold mt-2">{c.label}</div>
+                <div className="text-xl font-display font-bold text-slate-900 mt-0.5 tabular-nums">{c.value}</div>
+                <div className="text-[11px] text-slate-400 mt-1">{c.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* chart */}
+          <div className="rounded-2xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-bold text-slate-700">Traffic GMV — {n} hari</div>
+              <button onClick={() => onNavigate('gmv')} className="text-xs text-indigo-700 hover:text-indigo-800 font-semibold">Detail →</button>
+            </div>
+            <svg viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" className="w-full" style={{ height: 200 }}>
+              <defs>
+                <linearGradient id="bdArea" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stopColor={divColor} stopOpacity="0.18" />
+                  <stop offset="1" stopColor={divColor} stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {[0, 0.25, 0.5, 0.75, 1].map((f, i) => {
+                const y = PADT + f * (CH - PADT - PADB);
+                return <line key={i} x1={PADL} y1={y} x2={CW - PADR} y2={y} stroke="#EEF0F4" strokeWidth="1" />;
+              })}
+              {isAll ? (
+                <>
+                  <polyline points={pointsOf(seriesByDiv.mcn, chartMaxAll)} fill="none" stroke="#10B981" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                  <polyline points={pointsOf(seriesByDiv.tap, chartMaxAll)} fill="none" stroke="#F97316" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                  <polyline points={pointsOf(seriesByDiv.internal, chartMaxAll)} fill="none" stroke="#3B82F6" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                </>
+              ) : (
+                <>
+                  {(() => { const tgt = Number(targets[scope]) || 0; if (tgt <= 0) return null; const dailyTgt = tgt / dim; const y = yAt(dailyTgt, chartMaxDiv); return (<><line x1={PADL} y1={y} x2={CW - PADR} y2={y} stroke="#F59E0B" strokeWidth="1.6" strokeDasharray="6 5" /><text x={PADL + 4} y={y - 4} fontSize="11" fill="#B45309" fontWeight="700">Target harian</text></>); })()}
+                  <polygon points={areaOf(chartSeries, chartMaxDiv)} fill="url(#bdArea)" />
+                  <polyline points={pointsOf(chartSeries, chartMaxDiv)} fill="none" stroke={divColor} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                  {chartSeries.length > 0 && <circle cx={xAt(n - 1)} cy={yAt(chartSeries[n - 1].value, chartMaxDiv)} r="4.5" fill={divColor} />}
+                </>
+              )}
+            </svg>
+            {isAll && (
+              <div className="flex gap-4 justify-center mt-3 flex-wrap">
+                <span className="flex items-center gap-2 text-xs text-slate-600 font-semibold"><i className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#10B981' }}></i>MCN</span>
+                <span className="flex items-center gap-2 text-xs text-slate-600 font-semibold"><i className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#F97316' }}></i>TAP</span>
+                <span className="flex items-center gap-2 text-xs text-slate-600 font-semibold"><i className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#3B82F6' }}></i>Affiliator Internal</span>
+              </div>
+            )}
+          </div>
+
+          {/* ranking divisi (all) atau daftar akun (internal) */}
+          {isAll && (
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <div className="text-sm font-bold text-slate-700 mb-3">Kontribusi per Divisi</div>
+              <div className="space-y-2.5">
+                {[['mcn', totals.mcn], ['internal', totals.internal], ['tap', totals.tap]]
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([div, val], i) => {
+                    const pct = grandTotal > 0 ? Math.round((val / grandTotal) * 100) : 0;
+                    return (
+                      <div key={div} className="flex items-center gap-3">
+                        <div className="w-6 h-6 rounded-lg grid place-items-center text-xs font-bold flex-shrink-0"
+                          style={i === 0 ? { background: 'linear-gradient(135deg,#FDE68A,#F59E0B)', color: '#7c4a03' } : { background: '#F1F3F8', color: '#64748B' }}>{i + 1}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-sm font-semibold text-slate-800">{GMV_DIVISIONS[div].label}</span>
+                            <span className="text-xs font-bold text-slate-600">{rpShort(val)} · {pct}%</span>
+                          </div>
+                          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: GMV_DIVISIONS[div].color }}></div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
+          {scope === 'internal' && (
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-bold text-slate-700">Akun Affiliator · target harian vs realisasi</div>
+                <button onClick={() => onNavigate('affiliate-accounts')} className="text-xs text-indigo-700 hover:text-indigo-800 font-semibold">Kelola →</button>
+              </div>
+              {acctRows.length === 0 ? (
+                <div className="text-center py-5 text-sm text-slate-400">Belum ada akun affiliator. <button onClick={() => onNavigate('affiliate-accounts')} className="text-indigo-600 font-semibold">Tambah akun</button></div>
+              ) : (
+                <div className="space-y-3">
+                  {acctRows.slice(0, 6).map(({ a, real, tgt, pic, pct }) => (
+                    <div key={a.id}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-sm font-bold text-slate-800 flex items-center gap-2 min-w-0">
+                          <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white grid place-items-center text-[11px] font-bold flex-shrink-0">{a.name.charAt(0).toUpperCase()}</span>
+                          <span className="truncate">{a.name}</span>
+                          {pic && <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">· {pic.name.split(' ')[0]}</span>}
+                        </span>
+                        <span className="text-xs font-bold flex-shrink-0" style={{ color: tgt > 0 ? (real >= tgt ? '#16A34A' : '#DC2626') : '#64748B' }}>
+                          {rpShort(real)}{tgt > 0 ? ` / ${rpShort(tgt)}` : ''}
+                        </span>
+                      </div>
+                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: real >= tgt && tgt > 0 ? 'linear-gradient(90deg,#22C55E,#16A34A)' : 'linear-gradient(90deg,#818CF8,#4F46E5)' }}></div>
+                      </div>
+                    </div>
+                  ))}
+                  {affGoal > 0 && (
+                    <div className="pt-2 mt-1 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <span className="text-slate-500 font-semibold">Goal bulan ini</span>
+                      <span className="font-bold text-slate-700">{rpShort(totals.internal)} / {rpShort(affGoal)} · {affGoal > 0 ? Math.round(totals.internal / affGoal * 100) : 0}%</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function DashboardEvalWidget(props) {
