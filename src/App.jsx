@@ -3171,7 +3171,7 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
         </Field>
         <Field label="Peran *">
           <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
-            disabled={isEdit && editing.id === currentUser.id}
+            disabled={isEdit && editing.id === currentUser.id && currentUser.role !== 'owner'}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white disabled:bg-slate-100">
             {allowedRoles.map(r => <option key={r} value={r}>{ROLES[r].label}</option>)}
           </select>
