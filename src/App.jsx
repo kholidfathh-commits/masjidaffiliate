@@ -3119,7 +3119,7 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
   const isEdit = !!editing;
   // Allowed roles based on currentUser
   const allowedRoles = useMemo(() => {
-    if (currentUser.role === 'owner') return ['manajer', 'leader', 'operasional'];
+    if (currentUser.role === 'owner') return ['owner', 'manajer', 'leader', 'operasional'];
     if (currentUser.role === 'manajer') return ['manajer', 'leader', 'operasional'];
     if (currentUser.role === 'leader') return ['operasional'];
     return [];
@@ -6520,7 +6520,8 @@ function LeaderboardView({ allUsers }) {
     })();
   }, []);
 
-  const teamStats = allUsers.map(m => {
+  // Owner (mis. Azka & Kholid) tidak ikut kompetisi leaderboard
+  const teamStats = allUsers.filter(m => m.role !== 'owner').map(m => {
     const myTasks = tasks.filter(t => t.assigneeId === m.id);
     const done = myTasks.filter(t => t.status === 'done').length;
     return { ...m, total: myTasks.length, done, rate: myTasks.length ? Math.round(done / myTasks.length * 100) : 0 };
