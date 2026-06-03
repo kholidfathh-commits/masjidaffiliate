@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LayoutDashboard, CheckSquare, Users, FileText, Calendar, UserCog,
   Megaphone, Trophy, Plus, Search, X, Edit2, Trash2, Check,
@@ -8948,16 +8949,17 @@ function MiniStat({ label, value, color = 'emerald' }) {
   );
 }
 function Modal({ title, children, onClose, wide }) {
-  return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
-      <div className={`bg-white rounded-3xl shadow-2xl shadow-slate-900/20 w-full ${wide ? 'max-w-2xl' : 'max-w-md'} max-h-[90vh] overflow-y-auto scroll-thin border border-slate-200/60`}>
-        <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10 rounded-t-3xl">
+  return createPortal(
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-start sm:items-center justify-center z-[100] p-4 sm:p-6 overflow-y-auto animate-modal-backdrop">
+      <div className={`bg-white rounded-3xl shadow-2xl shadow-slate-900/30 w-full ${wide ? 'max-w-2xl' : 'max-w-md'} max-h-[92vh] overflow-y-auto scroll-thin border border-slate-200/60 my-auto animate-modal-pop`}>
+        <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur z-10 rounded-t-3xl">
           <h3 className="font-display font-bold text-lg text-slate-900 tracking-tight">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 hover:bg-slate-100 p-1.5 rounded-lg transition"><X className="w-4 h-4" /></button>
         </div>
         <div className="p-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 function Field({ label, children }) {
