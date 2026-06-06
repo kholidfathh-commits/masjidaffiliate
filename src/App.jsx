@@ -246,6 +246,26 @@ const DEFAULT_DAILY_FIELDS = [
 const DEFAULT_ROLE_LABELS = { owner: 'Owner', manajer: 'Manajer', leader: 'Leader', operasional: 'Karyawan' };
 const DEFAULT_JOB_TITLES = ['Creator Manager', 'Admin Live', 'Admin Grup', 'Creator Hunter', 'Content Creator', 'Tim Ads', 'Marketing', 'Editor Video', 'Affiliator', 'Admin Campaign', 'Dokumentasi', 'Live Streaming'];
 
+// Konfigurasi absensi: jam kerja, toleransi telat, & lokasi kerja
+const DEFAULT_ATTENDANCE_CONFIG = {
+  jamMasuk: '08:00',
+  jamPulang: '17:00',
+  toleransiMenit: 5,
+  lokasiAktif: false,
+  lokasiLabel: '',
+  lokasiLat: null,
+  lokasiLng: null,
+  radiusM: 200
+};
+
+// Semua key data tim (shared) yang ikut di-backup. ui:* & current-user TIDAK ikut (khusus per-perangkat).
+const BACKUP_KEYS = [
+  'users:list', 'app:settings', 'tasks:all', 'todos:all', 'creators:all', 'creators:last-sync',
+  'sellers:all', 'attendance:all', 'attendance:config', 'activities:all', 'announcements:all', 'schedule:all', 'calendar:all',
+  'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all', 'content-ideas:all',
+  'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal'
+];
+
 // Divisi tim Masjid Affiliate (sesuai struktur Al-Kahfi Corp)
 const DIVISIONS = {
   manajemen: { label: 'Manajemen', color: 'bg-violet-100 text-violet-800' },
@@ -6236,10 +6256,18 @@ function AttendanceView({ user, allUsers }) {
   const [note, setNote] = useState('');
   const [filterUser, setFilterUser] = useState('all');
   const [filterDiv, setFilterDiv] = useState('all');
+  const [config, setConfig] = useState(DEFAULT_ATTENDANCE_CONFIG);
+  const [result, setResult] = useState(null);   // banner hasil absen (telat/lokasi)
+  const [showSettings, setShowSettings] = useState(false);
+  const [editing, setEditing] = useState(null);  // record yang sedang diedit
+
+  const canManageAtt = user.role === 'owner' || user.role === 'manajer';
 
   const load = async () => {
     const list = await storage.getList('attendance:all');
     setRecords(list);
+    const cfg = await storage.get('attendance:config');
+    if (cfg) setConfig({ ...DEFAULT_ATTENDANCE_CONFIG, ...cfg });
     setLoading(false);
   };
   useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
@@ -6248,6 +6276,35 @@ function AttendanceView({ user, allUsers }) {
   const myToday = records.filter(r => r.userId === user.id && new Date(r.timestamp).toDateString() === todayStr);
   const lastToday = myToday.length ? myToday[myToday.length - 1] : null;
   const nextType = (!lastToday || lastToday.type === 'out') ? 'in' : 'out';
+
+  // ===== Helper jam & lokasi =====
+  const parseHM = (s) => { if (!s || !s.includes(':')) return null; const [h, m] = s.split(':').map(Number); return h * 60 + m; };
+  const haversine = (la1, lo1, la2, lo2) => {
+    const R = 6371000, toRad = d => d * Math.PI / 180;
+    const dLa = toRad(la2 - la1), dLo = toRad(lo2 - lo1);
+    const a = Math.sin(dLa / 2) ** 2 + Math.cos(toRad(la1)) * Math.cos(toRad(la2)) * Math.sin(dLo / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+  const computeFlags = (type, dateObj, loc, cfg) => {
+    const mins = dateObj.getHours() * 60 + dateObj.getMinutes();
+    let late = false, lateBy = 0, earlyLeave = false, earlyBy = 0;
+    if (type === 'in' && parseHM(cfg.jamMasuk) != null) {
+      const sched = parseHM(cfg.jamMasuk);
+      if (mins > sched + (Number(cfg.toleransiMenit) || 0)) { late = true; lateBy = mins - sched; }
+    }
+    if (type === 'out' && parseHM(cfg.jamPulang) != null) {
+      const sched = parseHM(cfg.jamPulang);
+      if (mins < sched) { earlyLeave = true; earlyBy = sched - mins; }
+    }
+    let locationMismatch = false, distanceM = null;
+    if (cfg.lokasiAktif && cfg.lokasiLat != null && cfg.lokasiLng != null && loc && loc.lat != null) {
+      distanceM = Math.round(haversine(loc.lat, loc.lng, cfg.lokasiLat, cfg.lokasiLng));
+      locationMismatch = distanceM > (Number(cfg.radiusM) || 200);
+    }
+    return { late, lateBy, earlyLeave, earlyBy, locationMismatch, distanceM };
+  };
+  const pad2 = n => String(n).padStart(2, '0');
+  const toLocalInput = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 
   const getLocation = () => new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject(new Error('Perangkat tidak mendukung GPS/lokasi.'));
@@ -6275,10 +6332,12 @@ function AttendanceView({ user, allUsers }) {
   };
 
   const doAbsen = async (type) => {
-    setError(''); setBusy(true);
+    setError(''); setResult(null); setBusy(true);
     try {
       const loc = await getLocation();
       const address = await getAddress(loc.lat, loc.lng);
+      const now = new Date();
+      const flags = computeFlags(type, now, loc, config);
       const rec = {
         id: uid(),
         userId: user.id,
@@ -6287,24 +6346,61 @@ function AttendanceView({ user, allUsers }) {
         division: user.division || 'internal',
         jobTitle: user.jobTitle || '',
         type,
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
         latitude: loc.lat,
         longitude: loc.lng,
         accuracy: loc.acc,
         address,
-        note: note.trim()
+        note: note.trim(),
+        ...flags
       };
       const list = await storage.getList('attendance:all');
       list.unshift(rec);
       await storage.set('attendance:all', list.slice(0, 2000));
-      await logActivity(`absen ${type === 'in' ? 'masuk' : 'pulang'}`, user.name);
+      await logActivity(`absen ${type === 'in' ? 'masuk' : 'pulang'}${flags.late ? ' (terlambat)' : ''}`, user.name);
       setNote('');
+      // banner hasil
+      const warns = [];
+      if (flags.late) warns.push(`Kamu terlambat ${flags.lateBy} menit (jam masuk ${config.jamMasuk}).`);
+      if (flags.earlyLeave) warns.push(`Pulang ${flags.earlyBy} menit lebih awal (jam pulang ${config.jamPulang}).`);
+      if (flags.locationMismatch) warns.push(`⚠️ Lokasi tidak sesuai — ±${flags.distanceM} m dari lokasi kerja (${config.lokasiLabel || 'kantor'}).`);
+      setResult({ ok: warns.length === 0, type, time: fmtTime(rec.timestamp), warns });
       await load();
     } catch (e) {
       setError(e.message || 'Gagal absen.');
     } finally {
       setBusy(false);
     }
+  };
+
+  // Simpan konfigurasi jam & lokasi
+  const saveConfig = async (cfg) => {
+    await storage.set('attendance:config', cfg);
+    setConfig(cfg);
+    setShowSettings(false);
+    await logActivity('mengubah pengaturan jam & lokasi absensi', user.name);
+  };
+
+  // Simpan hasil edit absensi (recompute telat/lokasi dari waktu baru)
+  const saveEdit = async (rec, { timestamp, note, clearLocationWarn }) => {
+    const d = new Date(timestamp);
+    const flags = computeFlags(rec.type, d, { lat: rec.latitude, lng: rec.longitude }, config);
+    if (clearLocationWarn) { flags.locationMismatch = false; }
+    const updated = { ...rec, timestamp: d.toISOString(), note: (note || '').trim(), ...flags, editedBy: user.name, editedAt: new Date().toISOString() };
+    const list = await storage.getList('attendance:all');
+    await storage.set('attendance:all', list.map(x => x.id === rec.id ? updated : x));
+    await logActivity(`mengedit absensi ${rec.userName}`, user.name);
+    setEditing(null);
+    await load();
+  };
+
+  // Hapus semua absensi (owner/manajer)
+  const deleteAllRecords = async () => {
+    if (!confirm(`Hapus SEMUA data absensi (${records.length} rekaman)? Tindakan ini tidak bisa dibatalkan.`)) return;
+    if (!confirm('Yakin 100%? Semua riwayat absen akan hilang permanen.')) return;
+    await storage.set('attendance:all', []);
+    await logActivity(`menghapus SEMUA data absensi (${records.length} rekaman)`, user.name);
+    await load();
   };
 
   // Permission: siapa yang bisa dilihat
@@ -6363,6 +6459,7 @@ function AttendanceView({ user, allUsers }) {
 
   // Hapus absensi: owner/manajer hapus semua, lainnya hanya miliknya
   const canDeleteRec = (r) => user.role === 'owner' || user.role === 'manajer' || r.userId === user.id;
+  const canEditRec = (r) => user.role === 'owner' || user.role === 'manajer' || r.userId === user.id;
   const deleteRecord = async (r) => {
     if (!confirm(`Hapus absensi ${r.userName} (${r.type === 'in' ? 'masuk' : 'pulang'}) ${new Date(r.timestamp).toLocaleString('id-ID')}?`)) return;
     await storage.set('attendance:all', (await storage.getList('attendance:all')).filter(x => x.id !== r.id));
@@ -6381,6 +6478,20 @@ function AttendanceView({ user, allUsers }) {
   return (
     <div>
       <PageHeader title="Absensi" subtitle="Absen masuk & pulang dengan lokasi GPS otomatis" />
+
+      {canManageAtt && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <button onClick={() => setShowSettings(true)}
+            className="flex items-center gap-2 bg-white border border-slate-300 hover:border-indigo-400 hover:text-indigo-700 text-slate-700 text-sm font-semibold px-3.5 py-2 rounded-xl transition">
+            <Clock className="w-4 h-4" /> Atur Jam & Lokasi Kerja
+          </button>
+          <span className="text-xs text-slate-500">
+            Jam kerja: <b className="text-slate-700">{config.jamMasuk}</b>–<b className="text-slate-700">{config.jamPulang}</b>
+            {config.toleransiMenit ? ` · toleransi ${config.toleransiMenit} mnt` : ''}
+            {config.lokasiAktif ? ` · lokasi: ${config.lokasiLabel || 'aktif'} (±${config.radiusM}m)` : ' · cek lokasi: nonaktif'}
+          </span>
+        </div>
+      )}
 
       {/* Kartu absen */}
       <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5 sm:p-6 mb-6 max-w-2xl">
@@ -6420,6 +6531,21 @@ function AttendanceView({ user, allUsers }) {
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /> <span>{error}</span>
             </div>
           )}
+          {result && (
+            <div className={`mt-3 text-sm rounded-lg px-3 py-2.5 border ${result.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+              <div className="font-bold flex items-center gap-2">
+                {result.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                Absen {result.type === 'in' ? 'masuk' : 'pulang'} tercatat {result.time}
+                {result.ok && ' · tepat waktu ✓'}
+              </div>
+              {result.warns.length > 0 && (
+                <ul className="mt-1.5 space-y-1 list-disc list-inside">
+                  {result.warns.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              )}
+              {!result.ok && <div className="text-[11px] mt-1.5 opacity-80">Kalau ini keliru (mis. GPS error), Owner/Manajer bisa perbaiki lewat tombol edit di riwayat.</div>}
+            </div>
+          )}
         </div>
       </div>
 
@@ -6443,6 +6569,12 @@ function AttendanceView({ user, allUsers }) {
             className="ml-auto bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5">
             <FileDown className="w-4 h-4" /> Download Rekap ({visibleRecords.length})
           </button>
+          {canManageAtt && (
+            <button onClick={deleteAllRecords} disabled={records.length === 0}
+              className="bg-white border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 text-sm font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+              <Trash2 className="w-4 h-4" /> Hapus Semua
+            </button>
+          )}
         </div>
       )}
 
@@ -6469,12 +6601,32 @@ function AttendanceView({ user, allUsers }) {
                     {r.division && DIVISIONS[r.division] && (
                       <span className={`text-[10px] px-2 py-0.5 rounded-full ${DIVISIONS[r.division].color}`}>{DIVISIONS[r.division].label}</span>
                     )}
-                    {canDeleteRec(r) && (
-                      <button onClick={() => deleteRecord(r)} title="Hapus absensi ini"
-                        className="ml-auto text-slate-300 hover:text-red-600 p-1 flex-shrink-0">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                    {r.late && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-100 text-red-700">Terlambat {r.lateBy ? `${r.lateBy}m` : ''}</span>
                     )}
+                    {r.earlyLeave && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-700">Pulang cepat {r.earlyBy ? `${r.earlyBy}m` : ''}</span>
+                    )}
+                    {r.locationMismatch && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-100 text-rose-700">Lokasi tidak sesuai{r.distanceM != null ? ` ±${r.distanceM}m` : ''}</span>
+                    )}
+                    {r.editedBy && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Diedit oleh ${r.editedBy}`}>diedit</span>
+                    )}
+                    <div className="ml-auto flex items-center gap-1 flex-shrink-0">
+                      {canEditRec(r) && (
+                        <button onClick={() => setEditing(r)} title="Edit absensi ini"
+                          className="text-slate-300 hover:text-indigo-600 p-1">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canDeleteRec(r) && (
+                        <button onClick={() => deleteRecord(r)} title="Hapus absensi ini"
+                          className="text-slate-300 hover:text-red-600 p-1">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="text-xs text-slate-500 mt-0.5">{fmtDate(r.timestamp)} · {fmtTime(r.timestamp)}</div>
                   {r.address && (
@@ -6507,7 +6659,127 @@ function AttendanceView({ user, allUsers }) {
           ))}
         </div>
       )}
+
+      {showSettings && (
+        <AttendanceSettingsModal config={config} onSave={saveConfig} onClose={() => setShowSettings(false)} getLocation={getLocation} />
+      )}
+      {editing && (
+        <AttendanceEditModal record={editing} config={config} toLocalInput={toLocalInput} canManage={canManageAtt} onSave={saveEdit} onClose={() => setEditing(null)} />
+      )}
     </div>
+  );
+}
+
+// Modal: atur jam kerja & lokasi kerja (owner/manajer)
+function AttendanceSettingsModal({ config, onSave, onClose, getLocation }) {
+  const [form, setForm] = useState({ ...DEFAULT_ATTENDANCE_CONFIG, ...config });
+  const [locBusy, setLocBusy] = useState(false);
+  const [locErr, setLocErr] = useState('');
+
+  const pakaiLokasiSaya = async () => {
+    setLocErr(''); setLocBusy(true);
+    try {
+      const loc = await getLocation();
+      setForm(f => ({ ...f, lokasiLat: loc.lat, lokasiLng: loc.lng, lokasiAktif: true }));
+    } catch (e) { setLocErr(e.message || 'Gagal ambil lokasi.'); }
+    setLocBusy(false);
+  };
+
+  return (
+    <Modal title="Atur Jam & Lokasi Kerja" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Jam Masuk">
+            <input type="time" value={form.jamMasuk} onChange={e => setForm({ ...form, jamMasuk: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </Field>
+          <Field label="Jam Pulang">
+            <input type="time" value={form.jamPulang} onChange={e => setForm({ ...form, jamPulang: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </Field>
+        </div>
+        <Field label="Toleransi telat (menit)">
+          <input type="number" min="0" value={form.toleransiMenit} onChange={e => setForm({ ...form, toleransiMenit: Number(e.target.value) })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <div className="text-[11px] text-slate-500 mt-1">Absen masuk lewat dari jam masuk + toleransi = ditandai "Terlambat".</div>
+        </Field>
+
+        <div className="border-t border-slate-100 pt-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={form.lokasiAktif} onChange={e => setForm({ ...form, lokasiAktif: e.target.checked })}
+              className="w-4 h-4 rounded accent-indigo-600" />
+            <span className="text-sm font-semibold text-slate-800">Aktifkan pengecekan lokasi kerja</span>
+          </label>
+          <div className="text-[11px] text-slate-500 mt-1">Kalau aktif, absen di luar radius lokasi kerja akan ditandai "Lokasi tidak sesuai".</div>
+        </div>
+
+        {form.lokasiAktif && (
+          <div className="space-y-3 bg-slate-50 rounded-xl p-3">
+            <Field label="Nama lokasi (mis. Kantor Al-Kahfi)">
+              <input type="text" value={form.lokasiLabel} onChange={e => setForm({ ...form, lokasiLabel: e.target.value })}
+                placeholder="Kantor Al-Kahfi"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Latitude">
+                <input type="number" step="any" value={form.lokasiLat ?? ''} onChange={e => setForm({ ...form, lokasiLat: e.target.value === '' ? null : Number(e.target.value) })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              </Field>
+              <Field label="Longitude">
+                <input type="number" step="any" value={form.lokasiLng ?? ''} onChange={e => setForm({ ...form, lokasiLng: e.target.value === '' ? null : Number(e.target.value) })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              </Field>
+            </div>
+            <button onClick={pakaiLokasiSaya} disabled={locBusy}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg flex items-center justify-center gap-2">
+              <MapPin className="w-4 h-4" /> {locBusy ? 'Mengambil lokasi…' : 'Pakai lokasi saya sekarang'}
+            </button>
+            {locErr && <div className="text-xs text-red-600">{locErr}</div>}
+            <Field label="Radius toleransi (meter)">
+              <input type="number" min="20" value={form.radiusM} onChange={e => setForm({ ...form, radiusM: Number(e.target.value) })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              <div className="text-[11px] text-slate-500 mt-1">Mis. 200 m. Absen di luar jarak ini dari titik lokasi = "Lokasi tidak sesuai".</div>
+            </Field>
+          </div>
+        )}
+
+        <FormActions onCancel={onClose} onSave={() => onSave(form)} saveLabel="Simpan Pengaturan" />
+      </div>
+    </Modal>
+  );
+}
+
+// Modal: edit satu data absensi
+function AttendanceEditModal({ record, config, toLocalInput, canManage, onSave, onClose }) {
+  const [dt, setDt] = useState(toLocalInput(record.timestamp));
+  const [note, setNote] = useState(record.note || '');
+  const [clearLoc, setClearLoc] = useState(false);
+
+  return (
+    <Modal title={`Edit Absensi — ${record.userName}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-600">
+          {record.type === 'in' ? 'Absen MASUK' : 'Absen PULANG'} · jam kerja {config.jamMasuk}–{config.jamPulang}
+        </div>
+        <Field label="Tanggal & Jam">
+          <input type="datetime-local" value={dt} onChange={e => setDt(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <div className="text-[11px] text-slate-500 mt-1">Status "Terlambat/Pulang cepat" otomatis dihitung ulang dari jam baru.</div>
+        </Field>
+        <Field label="Catatan">
+          <input type="text" value={note} onChange={e => setNote(e.target.value)}
+            placeholder="mis. lupa absen, GPS error, dll"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </Field>
+        {record.locationMismatch && canManage && (
+          <label className="flex items-center gap-2 cursor-pointer bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            <input type="checkbox" checked={clearLoc} onChange={e => setClearLoc(e.target.checked)} className="w-4 h-4 rounded accent-indigo-600" />
+            <span className="text-xs text-amber-800">Tandai lokasi sudah benar (hapus peringatan "Lokasi tidak sesuai")</span>
+          </label>
+        )}
+        <FormActions onCancel={onClose} onSave={() => onSave(record, { timestamp: dt, note, clearLocationWarn: clearLoc })} saveLabel="Simpan Perubahan" />
+      </div>
+    </Modal>
   );
 }
 
@@ -7072,6 +7344,50 @@ function SettingsView({ user, settings, onSave }) {
   const [logoMode, setLogoMode] = useState(settings.logoImage ? 'image' : 'emoji');
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
+  // Backup & restore
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState('');
+  const restoreRef = useRef();
+
+  const doExport = async () => {
+    setBackupBusy(true);
+    try {
+      const dump = { _meta: { app: 'Al-Kahfi Corp Team App', exportedAt: new Date().toISOString(), by: user.name, version: 1 }, data: {} };
+      for (const k of BACKUP_KEYS) {
+        const v = await storage.get(k);
+        if (v !== null && v !== undefined) dump.data[k] = v;
+      }
+      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const d = new Date();
+      a.href = url;
+      a.download = `alkahfi-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { alert('Gagal export: ' + e.message); }
+    setBackupBusy(false);
+  };
+
+  const doRestore = async (file) => {
+    setRestoreMsg('');
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const data = parsed.data || parsed;
+      const keys = Object.keys(data).filter(k => BACKUP_KEYS.includes(k));
+      if (keys.length === 0) { setRestoreMsg('File tidak dikenali atau kosong. Pastikan ini file backup dari app ini.'); return; }
+      const when = parsed._meta?.exportedAt ? new Date(parsed._meta.exportedAt).toLocaleString('id-ID') : 'tidak diketahui';
+      if (!confirm(`⚠️ PERINGATAN: Ini akan MENIMPA SEMUA data sekarang dengan isi backup (${keys.length} bagian data, dibuat ${when}).\n\nData saat ini akan HILANG dan diganti dengan isi backup. Lanjutkan?`)) return;
+      if (!confirm('Yakin 100%? Tindakan ini TIDAK BISA dibatalkan.')) return;
+      setBackupBusy(true);
+      for (const k of keys) await storage.set(k, data[k]);
+      setBackupBusy(false);
+      alert('✓ Data berhasil dipulihkan dari backup. Halaman akan dimuat ulang.');
+      window.location.reload();
+    } catch (e) { setBackupBusy(false); setRestoreMsg('Gagal memulihkan: ' + e.message); }
+  };
 
   const EMOJI_OPTIONS = ['🌙', '🕌', '⭐', '🌟', '💎', '🔥', '🚀', '⚡', '🎯', '👑', '🏆', '✨'];
 
@@ -7279,6 +7595,46 @@ function SettingsView({ user, settings, onSave }) {
         </div>
         <div className="text-[11px] text-slate-500 bg-slate-50 p-2 rounded">
           💡 Saat menambah anggota tim, posisi ini akan muncul sebagai saran. User juga bisa ketik manual kalau perlu posisi khusus.
+        </div>
+      </div>
+
+      {/* Backup & Keamanan Data */}
+      <div className="bg-white rounded-2xl border border-slate-200/70 p-6 shadow-sm shadow-slate-200/40 space-y-4">
+        <div>
+          <h3 className="font-display font-bold text-slate-900 flex items-center gap-2">
+            <Database className="w-4 h-4 text-indigo-600" /> Backup &amp; Keamanan Data
+          </h3>
+          <p className="text-xs text-slate-500 mt-1">Download cadangan semua data tim (anggota, tugas, GMV, creator, laporan, dll) jadi 1 file. Simpan rutin di Google Drive/laptop sebagai jaring pengaman.</p>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[12px] text-amber-800 leading-relaxed">
+          <b>Kenapa penting:</b> paket Supabase gratis <b>tidak menyimpan backup otomatis</b>. Kalau ada data terhapus tidak sengaja, tidak bisa dikembalikan. Biasakan <b>Export tiap minggu</b> (mis. tiap habis rekap mingguan) dan simpan filenya.
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-3">
+          <button onClick={doExport} disabled={backupBusy}
+            className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white py-3 rounded-xl font-semibold text-sm transition shadow-sm">
+            <Download className="w-4 h-4" /> {backupBusy ? 'Memproses…' : 'Export Semua Data (.json)'}
+          </button>
+
+          {user.role === 'owner' ? (
+            <>
+              <button onClick={() => restoreRef.current?.click()} disabled={backupBusy}
+                className="flex items-center justify-center gap-2 bg-white border border-slate-300 hover:border-red-300 hover:bg-red-50 text-slate-700 hover:text-red-700 py-3 rounded-xl font-semibold text-sm transition">
+                <Upload className="w-4 h-4" /> Pulihkan dari Backup
+              </button>
+              <input ref={restoreRef} type="file" accept="application/json,.json" className="hidden"
+                onChange={e => { doRestore(e.target.files?.[0]); e.target.value = ''; }} />
+            </>
+          ) : (
+            <div className="flex items-center justify-center gap-2 bg-slate-50 border border-slate-200 text-slate-400 py-3 rounded-xl text-xs text-center px-3">
+              Pemulihan data hanya bisa oleh Owner
+            </div>
+          )}
+        </div>
+        {restoreMsg && <div className="text-xs text-red-600">{restoreMsg}</div>}
+        <div className="text-[11px] text-slate-500 bg-slate-50 p-2 rounded leading-relaxed">
+          ⚠️ <b>Pulihkan dari Backup</b> akan <b>menimpa semua data sekarang</b> dengan isi file backup — pakai hanya saat darurat (mis. pindah ke project Supabase baru atau data hilang). Owner-only, dengan konfirmasi ganda.
         </div>
       </div>
 
