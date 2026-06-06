@@ -3036,7 +3036,7 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
         role: data.role, leaderId: data.role === 'operasional' ? data.leaderId : null,
         jobTitle: data.jobTitle?.trim() || '',
         division: data.division || 'internal',
-        phone: data.phone || '', salt, passwordHash,
+        phone: data.phone || '', gmail: data.gmail || '', isSecretariat: !!data.isSecretariat, salt, passwordHash,
         joinedAt: new Date().toISOString(), createdById: user.id
       };
       list.push(newUser);
@@ -3153,6 +3153,8 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
     jobTitle: editing?.jobTitle || '',
     division: editing?.division || 'internal',
     phone: editing?.phone || '',
+    gmail: editing?.gmail || '',
+    isSecretariat: editing?.isSecretariat || false,
     password: '', confirmPassword: ''
   });
   const [error, setError] = useState('');
@@ -3227,6 +3229,23 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
             placeholder="08xxxxxxxxxx"
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
         </Field>
+        <Field label="Gmail (untuk undangan Google Calendar)">
+          <input type="email" value={form.gmail} onChange={e => setForm({ ...form, gmail: e.target.value })}
+            placeholder="nama@gmail.com"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <div className="text-[11px] text-slate-500 mt-1">💡 Dipakai supaya anggota ini otomatis diundang ke agenda di Google Calendar. Anggota juga bisa isi sendiri di Profil.</div>
+        </Field>
+        {(currentUser.role === 'owner' || currentUser.role === 'manajer') && (
+          <Field label="Akses Khusus">
+            <label className="flex items-start gap-2 cursor-pointer bg-indigo-50/60 border border-indigo-100 rounded-lg px-3 py-2.5">
+              <input type="checkbox" checked={form.isSecretariat} onChange={e => setForm({ ...form, isSecretariat: e.target.checked })}
+                className="w-4 h-4 rounded accent-indigo-600 mt-0.5" />
+              <span className="text-xs text-slate-700">
+                <b>Sekretariat / Asisten CEO</b> — bisa menambah & atur agenda kalender untuk <b>seluruh tim</b> (seperti Manajer, khusus untuk Kalender).
+              </span>
+            </label>
+          </Field>
+        )}
         {!isEdit && (
           <>
             <Field label="Password Awal *">
@@ -8903,12 +8922,19 @@ function FieldBuilder({ field, idx, total, onChange, onRemove, onMoveUp, onMoveD
 
 
 // ============ TEAM CALENDAR ============
+// Siapa yang boleh menambah/atur agenda kalender:
+// Owner (CEO), Manajer, Leader (khusus timnya), & Sekretariat (seluruh tim). Lainnya hanya lihat.
+function canManageCalendar(u) {
+  return u.role === 'owner' || u.role === 'manajer' || u.role === 'leader' || !!u.isSecretariat;
+}
+
 function CalendarView({ user, allUsers }) {
   const [events, setEvents] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const canManage = canManageCalendar(user);
 
   const load = async () => setEvents(await storage.getList('calendar:all'));
   useEffect(() => { load(); }, []);
@@ -8980,10 +9006,12 @@ function CalendarView({ user, allUsers }) {
       <PageHeader title="Kalender Tim"
         subtitle="Meeting, agenda, kegiatan tim. Bisa ditambahkan ke Google Calendar pribadi."
         action={
-          <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Agenda Baru
-          </button>
+          canManage ? (
+            <button onClick={() => { setEditing(null); setShowForm(true); }}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Agenda Baru
+            </button>
+          ) : null
         } />
 
       {/* Notice about Google Calendar */}
@@ -8992,7 +9020,8 @@ function CalendarView({ user, allUsers }) {
         <div className="flex-1 text-sm">
           <div className="font-semibold text-blue-900">Integrasi Google Calendar</div>
           <div className="text-blue-800 mt-0.5">
-            Setiap agenda punya tombol <b>"Tambah ke Google Calendar"</b> — klik untuk buka Google Calendar dengan event sudah ter-prefill. Atau download file <b>.ics</b> untuk import ke kalender lain (Outlook, Apple Calendar).
+            Pilih peserta saat membuat agenda → peserta yang sudah isi <b>Gmail</b> (di Profil) akan otomatis <b>diundang</b> ke Google Calendar saat agenda dibuka & disimpan lewat tombol <b>"Google Calendar"</b>. Bisa juga download <b>.ics</b> untuk Outlook/Apple Calendar.
+            {!canManage && <span className="block mt-1 text-blue-700">Kamu bisa <b>melihat</b> agenda. Penambahan agenda dilakukan oleh Leader/Manajer/CEO/Sekretariat.</span>}
           </div>
         </div>
       </div>
@@ -9019,8 +9048,8 @@ function CalendarView({ user, allUsers }) {
                 <div key={cell.key} className="min-h-[100px] border-b border-r border-slate-100 bg-slate-50/50"></div>
               ) : (
                 <div key={cell.key}
-                  onClick={() => { setEditing({ date: cell.dateStr }); setShowForm(true); }}
-                  className={`min-h-[100px] p-2 border-b border-r border-slate-100 cursor-pointer hover:bg-slate-50 ${cell.isToday ? 'bg-indigo-50/50' : ''}`}>
+                  onClick={() => { if (!canManage) return; setEditing({ date: cell.dateStr }); setShowForm(true); }}
+                  className={`min-h-[100px] p-2 border-b border-r border-slate-100 ${canManage ? 'cursor-pointer hover:bg-slate-50' : ''} ${cell.isToday ? 'bg-indigo-50/50' : ''}`}>
                   <div className={`text-xs font-bold mb-1 ${cell.isToday ? 'inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600 text-white' : 'text-slate-700'}`}>
                     {cell.dayNum}
                   </div>
@@ -9067,7 +9096,7 @@ function CalendarView({ user, allUsers }) {
         </div>
       </div>
 
-      {showForm && <EventForm event={editing} allUsers={allUsers}
+      {showForm && <EventForm event={editing} allUsers={allUsers} user={user}
         onSave={handleSave} onClose={() => { setShowForm(false); setEditing(null); }} />}
       {viewing && <EventDetailModal event={viewing} user={user}
         onEdit={() => { setEditing(viewing); setViewing(null); setShowForm(true); }}
@@ -9077,7 +9106,7 @@ function CalendarView({ user, allUsers }) {
   );
 }
 
-function EventForm({ event, allUsers, onSave, onClose }) {
+function EventForm({ event, allUsers, user, onSave, onClose }) {
   const [form, setForm] = useState({
     title: event?.title || '',
     description: event?.description || '',
@@ -9089,6 +9118,10 @@ function EventForm({ event, allUsers, onSave, onClose }) {
     attendeeIds: event?.attendeeIds || []
   });
 
+  // Scope peserta: owner/manajer/sekretariat → semua tim; leader → hanya timnya + dirinya
+  const canAll = user.role === 'owner' || user.role === 'manajer' || !!user.isSecretariat;
+  const selectableUsers = canAll ? allUsers : allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
+
   const toggleAttendee = (id) => {
     const list = form.attendeeIds.includes(id)
       ? form.attendeeIds.filter(x => x !== id)
@@ -9097,8 +9130,10 @@ function EventForm({ event, allUsers, onSave, onClose }) {
   };
 
   const submit = () => {
-    const attendees = form.attendeeIds.map(id => allUsers.find(u => u.id === id)?.name).filter(Boolean);
-    onSave({ ...form, attendeeNames: attendees });
+    const chosen = allUsers.filter(u => form.attendeeIds.includes(u.id));
+    const attendees = chosen.map(u => u.name);
+    const attendeeEmails = chosen.map(u => (u.gmail || '').trim()).filter(Boolean);
+    onSave({ ...form, attendeeNames: attendees, attendeeEmails });
   };
 
   return (
@@ -9147,9 +9182,9 @@ function EventForm({ event, allUsers, onSave, onClose }) {
         <Field label="Peserta (opsional)">
           <div className="flex items-center gap-2 mb-2">
             <button type="button"
-              onClick={() => setForm({ ...form, attendeeIds: allUsers.map(u => u.id) })}
+              onClick={() => setForm({ ...form, attendeeIds: selectableUsers.map(u => u.id) })}
               className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition">
-              ✓ Centang Semua Tim
+              ✓ Centang Semua {canAll ? 'Tim' : 'Anggota Saya'}
             </button>
             <button type="button"
               onClick={() => setForm({ ...form, attendeeIds: [] })}
@@ -9158,17 +9193,18 @@ function EventForm({ event, allUsers, onSave, onClose }) {
             </button>
           </div>
           <div className="max-h-40 overflow-y-auto scroll-thin border border-slate-200 rounded-lg p-2 space-y-1">
-            {allUsers.map(u => (
+            {selectableUsers.map(u => (
               <label key={u.id} className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded cursor-pointer">
                 <input type="checkbox" checked={form.attendeeIds.includes(u.id)}
                   onChange={() => toggleAttendee(u.id)} />
                 <span className="text-sm">{u.name}</span>
                 {u.jobTitle && <span className="text-xs text-slate-500">· {u.jobTitle}</span>}
+                {!u.gmail && <span className="text-[10px] text-amber-600" title="Belum isi Gmail — tidak akan diundang ke Google Calendar">⚠ no gmail</span>}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded ml-auto ${ROLES[u.role].color}`}>{ROLES[u.role].label}</span>
               </label>
             ))}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">{form.attendeeIds.length} dari {allUsers.length} anggota dipilih</div>
+          <div className="text-[11px] text-slate-500 mt-1">{form.attendeeIds.length} dari {selectableUsers.length} anggota dipilih{!canAll ? ' (timmu)' : ''}. Yang sudah isi Gmail akan diundang otomatis ke Google Calendar.</div>
         </Field>
         <FormActions onCancel={onClose} onSave={submit} disabled={!form.title.trim() || !form.date || !form.time} />
       </div>
@@ -9177,9 +9213,9 @@ function EventForm({ event, allUsers, onSave, onClose }) {
 }
 
 function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
-  const canEdit = event.createdById === user.id || (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader';
+  const canEdit = user.role === 'manajer' || user.role === 'owner' || !!user.isSecretariat || event.createdById === user.id;
 
-  // Generate Google Calendar URL
+  // Generate Google Calendar URL (+ undang peserta yang punya Gmail)
   const googleCalendarUrl = useMemo(() => {
     const formatGCalDate = (date, time) => {
       const d = new Date(`${date}T${time || '00:00'}:00`);
@@ -9196,6 +9232,9 @@ function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
       details: event.description || '',
       location: event.location || ''
     });
+    if (event.attendeeEmails && event.attendeeEmails.length > 0) {
+      params.set('add', event.attendeeEmails.join(','));
+    }
     return `https://calendar.google.com/calendar/u/0/r/eventedit?${params.toString()}`;
   }, [event]);
 
@@ -9283,11 +9322,16 @@ function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
 
         {/* Action buttons */}
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 p-4 rounded-lg space-y-2">
-          <div className="text-sm font-semibold text-slate-800">Tambahkan ke kalender pribadi:</div>
+          <div className="text-sm font-semibold text-slate-800">Tambahkan ke kalender:</div>
+          {event.attendeeEmails && event.attendeeEmails.length > 0 && (
+            <div className="text-[11px] text-blue-800 bg-white/70 border border-blue-100 rounded-lg px-2.5 py-1.5">
+              📨 {event.attendeeEmails.length} peserta akan <b>diundang otomatis</b> (Google kirim undangan ke Gmail mereka) saat kamu klik tombol Google Calendar lalu <b>Simpan</b>.
+            </div>
+          )}
           <div className="flex gap-2 flex-wrap">
             <a href={googleCalendarUrl} target="_blank" rel="noopener noreferrer"
               className="flex-1 bg-white border border-slate-300 hover:border-indigo-500 hover:bg-indigo-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-              <CalendarDays className="w-4 h-4" /> Google Calendar
+              <CalendarDays className="w-4 h-4" /> Google Calendar {event.attendeeEmails?.length ? '+ Undang Tim' : ''}
             </a>
             <button onClick={downloadICS}
               className="flex-1 bg-white border border-slate-300 hover:border-indigo-500 hover:bg-indigo-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
@@ -9321,6 +9365,7 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
   const [form, setForm] = useState({
     name: user.name,
     phone: user.phone || '',
+    gmail: user.gmail || '',
     avatarImage: user.avatarImage || null
   });
   const [pwForm, setPwForm] = useState({ oldPw: '', newPw: '', confirmPw: '' });
@@ -9374,6 +9419,7 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
     await onSaveProfile({
       name: form.name.trim(),
       phone: form.phone.trim(),
+      gmail: form.gmail.trim(),
       avatarImage: form.avatarImage
     });
     setSaved(true);
@@ -9441,6 +9487,12 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
             <input type="text" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
               placeholder="08xxxxxxxxxx"
               className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </Field>
+          <Field label="Gmail (untuk undangan Google Calendar)">
+            <input type="email" value={form.gmail} onChange={e => setForm({ ...form, gmail: e.target.value })}
+              placeholder="nama@gmail.com"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <div className="text-[11px] text-slate-500 mt-1">💡 Isi Gmail-mu supaya otomatis diundang ke agenda tim di Google Calendar.</div>
           </Field>
           {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
           <div className="flex items-center justify-end gap-3">
