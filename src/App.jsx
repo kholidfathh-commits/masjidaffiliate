@@ -263,7 +263,7 @@ const BACKUP_KEYS = [
   'users:list', 'app:settings', 'tasks:all', 'todos:all', 'creators:all', 'creators:last-sync',
   'sellers:all', 'attendance:all', 'attendance:config', 'activities:all', 'announcements:all', 'schedule:all', 'calendar:all',
   'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all', 'content-ideas:all',
-  'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal'
+  'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all'
 ];
 
 // Divisi tim Masjid Affiliate (sesuai struktur Al-Kahfi Corp)
@@ -494,6 +494,7 @@ export default function App() {
             {view === 'attendance' && <AttendanceView user={currentUser} allUsers={allUsers} />}
             {view === 'leaderboard' && <LeaderboardView allUsers={allUsers} />}
             {view === 'announcements' && <AnnouncementsView user={currentUser} />}
+            {view === 'feedback' && <FeedbackView user={currentUser} allUsers={allUsers} />}
             {view === 'content-ideas' && <ContentIdeasView user={currentUser} allUsers={allUsers} settings={settings} />}
             {view === 'media-tasks' && <MediaTasksView user={currentUser} allUsers={allUsers} />}
             {view === 'users' && <UsersView user={currentUser} allUsers={allUsers} settings={settings} onRefresh={refreshAll} />}
@@ -1070,6 +1071,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       items: [
         { id: 'users', label: 'Anggota Tim', icon: UserCog, show: user.role !== 'operasional' },
         { id: 'announcements', label: 'Pengumuman', icon: Megaphone, show: true },
+        { id: 'feedback', label: 'Masukan & Bug', icon: MessageSquare, show: true },
         { id: 'settings', label: 'Pengaturan App', icon: Settings, show: can.editAppSettings(user) }
       ]
     }
@@ -7352,6 +7354,203 @@ function RejectIdeaModal({ idea, onSave, onClose }) {
 }
 
 // ============ APP SETTINGS (Manajer only) ============
+// ============ MASUKAN & BUG (feedback tim untuk aplikasi) ============
+const FEEDBACK_TYPES = {
+  bug: { label: 'Bug / Error', color: 'bg-red-100 text-red-700', icon: '🐞' },
+  saran: { label: 'Saran / Ide', color: 'bg-indigo-100 text-indigo-700', icon: '💡' },
+  lainnya: { label: 'Lainnya', color: 'bg-slate-100 text-slate-600', icon: '💬' }
+};
+const FEEDBACK_STATUS = {
+  baru: { label: 'Baru', color: 'bg-amber-100 text-amber-700' },
+  diproses: { label: 'Diproses', color: 'bg-blue-100 text-blue-700' },
+  selesai: { label: 'Selesai', color: 'bg-emerald-100 text-emerald-700' }
+};
+
+function FeedbackView({ user, allUsers }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [type, setType] = useState('bug');
+  const [msg, setMsg] = useState('');
+  const [page, setPage] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [busy, setBusy] = useState(false);
+  const [replyText, setReplyText] = useState({});
+
+  const isManager = user.role === 'owner' || user.role === 'manajer';
+
+  const load = async () => { setItems(await storage.getList('feedback:all')); setLoading(false); };
+  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
+
+  const submit = async () => {
+    if (!msg.trim()) return;
+    setBusy(true);
+    const item = {
+      id: uid(), type, message: msg.trim(), page: page.trim(),
+      userId: user.id, userName: user.name, userRole: user.role,
+      status: 'baru', createdAt: new Date().toISOString(), replies: []
+    };
+    const list = await storage.getList('feedback:all');
+    list.unshift(item);
+    await storage.set('feedback:all', list);
+    await logActivity(`mengirim masukan (${FEEDBACK_TYPES[type].label})`, user.name);
+    setMsg(''); setPage(''); setType('bug'); setBusy(false);
+    await load();
+  };
+
+  const setStatus = async (id, status) => {
+    const list = await storage.getList('feedback:all');
+    await storage.set('feedback:all', list.map(x => x.id === id ? { ...x, status } : x));
+    await load();
+  };
+
+  const addReply = async (id) => {
+    const text = (replyText[id] || '').trim();
+    if (!text) return;
+    const list = await storage.getList('feedback:all');
+    await storage.set('feedback:all', list.map(x => x.id === id
+      ? { ...x, replies: [...(x.replies || []), { id: uid(), userId: user.id, userName: user.name, text, createdAt: new Date().toISOString() }] }
+      : x));
+    setReplyText(p => ({ ...p, [id]: '' }));
+    await load();
+  };
+
+  const del = async (item) => {
+    if (!confirm('Hapus masukan ini?')) return;
+    await storage.set('feedback:all', (await storage.getList('feedback:all')).filter(x => x.id !== item.id));
+    await load();
+  };
+
+  const canDelete = (item) => isManager || item.userId === user.id;
+  const counts = {
+    all: items.length,
+    baru: items.filter(i => i.status === 'baru').length,
+    diproses: items.filter(i => i.status === 'diproses').length,
+    selesai: items.filter(i => i.status === 'selesai').length
+  };
+  const filtered = filter === 'all' ? items : items.filter(i => i.status === filter);
+  const TABS = [['all', 'Semua'], ['baru', 'Baru'], ['diproses', 'Diproses'], ['selesai', 'Selesai']];
+
+  return (
+    <div className="max-w-3xl">
+      <PageHeader title="Masukan & Bug" subtitle="Lapor kekurangan, error, atau ide perbaikan aplikasi. Tim teknis akan tindak lanjuti." />
+
+      {/* Form kirim masukan */}
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5 mb-5">
+        <div className="flex flex-wrap gap-2 mb-3">
+          {Object.entries(FEEDBACK_TYPES).map(([k, v]) => (
+            <button key={k} onClick={() => setType(k)}
+              className={`text-sm font-semibold px-3.5 py-1.5 rounded-lg border transition ${type === k ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+              {v.icon} {v.label}
+            </button>
+          ))}
+        </div>
+        <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={3}
+          placeholder={type === 'bug' ? 'Jelaskan bug-nya: apa yang terjadi, di halaman mana, langkahnya gimana…' : 'Tulis saran/masukanmu di sini…'}
+          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none text-sm" />
+        <div className="flex flex-col sm:flex-row gap-2 mt-2">
+          <input type="text" value={page} onChange={e => setPage(e.target.value)}
+            placeholder="Halaman terkait (opsional, mis. Absensi, Kalender)"
+            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+          <button onClick={submit} disabled={busy || !msg.trim()}
+            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold px-5 py-2 rounded-lg text-sm flex items-center justify-center gap-2">
+            <MessageSquare className="w-4 h-4" /> {busy ? 'Mengirim…' : 'Kirim Masukan'}
+          </button>
+        </div>
+      </div>
+
+      {/* Filter tabs */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {TABS.map(([k, label]) => (
+          <button key={k} onClick={() => setFilter(k)}
+            style={filter === k ? { backgroundColor: '#4F46E5', color: '#fff', borderColor: '#4F46E5' } : {}}
+            className="text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-indigo-300 transition">
+            {label} ({counts[k]})
+          </button>
+        ))}
+      </div>
+
+      {/* List */}
+      {loading ? (
+        <div className="text-slate-400 text-sm">Memuat…</div>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={MessageSquare} text="Belum ada masukan. Jadilah yang pertama melapor!" />
+      ) : (
+        <div className="space-y-3">
+          {filtered.map(item => {
+            const t = FEEDBACK_TYPES[item.type] || FEEDBACK_TYPES.lainnya;
+            const st = FEEDBACK_STATUS[item.status] || FEEDBACK_STATUS.baru;
+            return (
+              <div key={item.id} className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-700 text-white grid place-items-center font-bold text-sm flex-shrink-0">
+                    {item.userName.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-slate-900 text-sm">{item.userName}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${t.color}`}>{t.icon} {t.label}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${st.color}`}>{st.label}</span>
+                      {item.page && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">📍 {item.page}</span>}
+                      {canDelete(item) && (
+                        <button onClick={() => del(item)} title="Hapus" className="ml-auto text-slate-300 hover:text-red-600 p-1">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">{fmtDateTime(item.createdAt)}</div>
+                    <div className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{item.message}</div>
+
+                    {/* Status controls (owner/manajer) */}
+                    {isManager && (
+                      <div className="flex items-center gap-1.5 mt-3">
+                        <span className="text-[11px] text-slate-500 font-semibold">Ubah status:</span>
+                        {Object.entries(FEEDBACK_STATUS).map(([k, v]) => (
+                          <button key={k} onClick={() => setStatus(item.id, k)}
+                            className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border transition ${item.status === k ? v.color + ' border-transparent' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                            {v.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Replies */}
+                    {(item.replies || []).length > 0 && (
+                      <div className="mt-3 space-y-2 border-l-2 border-slate-100 pl-3">
+                        {item.replies.map(r => (
+                          <div key={r.id}>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-slate-700">{r.userName}</span>
+                              <span className="text-[10px] text-slate-400">{fmtDateTime(r.createdAt)}</span>
+                            </div>
+                            <div className="text-sm text-slate-600 whitespace-pre-wrap">{r.text}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Reply input */}
+                    <div className="flex gap-2 mt-3">
+                      <input type="text" value={replyText[item.id] || ''}
+                        onChange={e => setReplyText(p => ({ ...p, [item.id]: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') addReply(item.id); }}
+                        placeholder="Tulis balasan…"
+                        className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                      <button onClick={() => addReply(item.id)} disabled={!(replyText[item.id] || '').trim()}
+                        className="bg-slate-100 hover:bg-indigo-100 hover:text-indigo-700 disabled:opacity-40 text-slate-600 font-semibold px-3 py-1.5 rounded-lg text-sm transition">
+                        Balas
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsView({ user, settings, onSave }) {
   if (!can.editAppSettings(user)) return <NoAccess />;
   const [form, setForm] = useState({
