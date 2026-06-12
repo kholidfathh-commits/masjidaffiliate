@@ -336,7 +336,8 @@ const BACKUP_KEYS = [
   'sellers:all', 'attendance:all', 'attendance:config', 'activities:all', 'announcements:all', 'schedule:all', 'calendar:all',
   'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all', 'content-ideas:all',
   'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all',
-  'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history'
+  'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history',
+  'daily-tasks:all', 'daily-tasks:log'
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
@@ -684,6 +685,7 @@ export default function App() {
           <div className="p-4 sm:p-6 lg:p-8 animate-fade-in" key={view}>
             {view === 'dashboard' && <Dashboard user={currentUser} allUsers={allUsers} setView={setView} settings={settings} />}
             {view === 'tasks' && <TasksView user={currentUser} allUsers={allUsers} />}
+            {view === 'daily-tasks' && <DailyTasksView user={currentUser} allUsers={allUsers} />}
             {view === 'todos' && <TodosView user={currentUser} allUsers={allUsers} />}
             {view === 'creators' && <CreatorsView user={currentUser} allUsers={allUsers} />}
             {view === 'creator-management' && <CreatorManagementView user={currentUser} allUsers={allUsers} />}
@@ -1282,7 +1284,8 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
     {
       label: 'Operasional',
       items: [
-        { id: 'tasks', label: 'Tugas Tim', icon: CheckSquare, show: true },
+        { id: 'tasks', label: 'Tiket', icon: CheckSquare, show: true },
+        { id: 'daily-tasks', label: 'Tugas Harian', icon: CheckCircle2, show: true },
         { id: 'todos', label: 'To-Do List', icon: KanbanSquare, show: true },
         { id: 'attendance', label: 'Absensi', icon: MapPin, show: true },
         { id: 'calendar', label: 'Kalender Tim', icon: CalendarDays, show: true },
@@ -1541,7 +1544,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
         .slice(0, 10).forEach(t => {
           notifs.push({
             id: `task-${t.id}`, type: 'task',
-            title: `Tugas baru: ${t.title}`,
+            title: `Tiket baru: ${t.title}`,
             subtitle: `Dari ${t.createdByName || 'Sistem'}`,
             time: t.createdAt,
             action: () => setView('tasks')
@@ -1651,7 +1654,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
   };
 
   const quickActions = [
-    { label: 'Tugas Baru', icon: CheckSquare, view: 'tasks', color: 'text-blue-600 bg-blue-50' },
+    { label: 'Tiket Baru', icon: CheckSquare, view: 'tasks', color: 'text-blue-600 bg-blue-50' },
     { label: 'Creator Baru', icon: Users, view: 'creators', color: 'text-purple-600 bg-purple-50' },
     { label: 'Laporan Harian', icon: ClipboardList, view: 'daily-reports', color: 'text-blue-600 bg-blue-50' },
     { label: 'Ide Konten Baru', icon: Lightbulb, view: 'content-ideas', color: 'text-amber-600 bg-amber-50' },
@@ -1938,6 +1941,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
       setSchedules(await storage.getList('schedule:all'));
       setDailyReports(await storage.getList('daily-reports:all'));
       setCalendarEvents(await storage.getList('calendar:all'));
+      await syncInternalFromAccounts(); // GMV akun affiliator otomatis masuk divisi internal
       setGmvEntries(await storage.getList('gmv:daily'));
       setGmvTargets((await storage.get('gmv:targets')) || {});
       setAttendanceRecs(await storage.getList('attendance:all'));
@@ -2055,12 +2059,17 @@ function Dashboard({ user, allUsers, setView, settings }) {
       sub: 'Yang Anda kelola',
       action: () => setView('creators')
     },
-    {
-      label: 'Target Aktif', value: targets.filter(t => t.status === 'active').length,
-      icon: Target, iconBg: 'bg-amber-100 text-amber-600',
-      sub: 'Sedang berjalan',
-      action: () => canManageTargets ? setShowTargetsManager(true) : null
-    }
+    (() => {
+      // Target Aktif = target GMV divisi bulan ini (dari "Set Target" di Target & GMV) + target tim manual
+      const gmvTargetCount = Object.values(gmvTargets[monthKey()] || {}).filter(v => Number(v) > 0).length;
+      const manualCount = targets.filter(t => t.status === 'active').length;
+      return {
+        label: 'Target Aktif', value: gmvTargetCount + manualCount,
+        icon: Target, iconBg: 'bg-amber-100 text-amber-600',
+        sub: `${gmvTargetCount} target GMV divisi · ${manualCount} target tim`,
+        action: () => (gmvTargetCount > 0 || !canManageTargets) ? setView('gmv') : setShowTargetsManager(true)
+      };
+    })()
   ];
 
   return (
@@ -2095,7 +2104,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
               <button onClick={() => setView('tasks')}
                 style={{ boxShadow: '0 10px 28px -8px rgba(37,99,235,0.7)' }}
                 className="bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5">
-                <CheckSquare className="w-3.5 h-3.5" /> Lihat Tugas
+                <CheckSquare className="w-3.5 h-3.5" /> Lihat Tiket
               </button>
               <button onClick={() => setView('daily-reports')}
                 className="bg-white/10 hover:bg-white/20 backdrop-blur text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 border border-white/20">
@@ -4116,11 +4125,11 @@ function TasksView({ user, allUsers }) {
 
   return (
     <div className="max-w-7xl">
-      <PageHeader title="Tugas Tim" subtitle="Kelola semua tugas dalam satu tempat"
+      <PageHeader title="Tiket" subtitle="Kelola semua tiket pekerjaan tim dalam satu tempat"
         action={can.createTasks(user) || user.role === 'operasional' ? (
           <button onClick={() => { setEditing(null); setShowForm(true); }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Tugas Baru
+            <Plus className="w-4 h-4" /> Tiket Baru
           </button>
         ) : null} />
 
@@ -4519,7 +4528,7 @@ function TaskForm({ task, user, assignableUsers, onSave, onClose }) {
     status: task?.status || 'todo'
   });
   return (
-    <Modal title={task ? 'Edit Tugas' : 'Tugas Baru'} onClose={onClose}>
+    <Modal title={task ? 'Edit Tiket' : 'Tiket Baru'} onClose={onClose}>
       <div className="space-y-3">
         <Field label="Judul Tugas *">
           <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
@@ -5633,6 +5642,106 @@ function MiniBarChart({ series, color }) {
   );
 }
 
+// Sinkron SEMUA tanggal: total GMV akun affiliator → GMV divisi "internal" (anti input dobel).
+// Dipanggil saat Dashboard/GMV/Akun Affiliator dimuat & setiap ada perubahan input akun.
+async function syncInternalFromAccounts() {
+  const accEntries = await storage.getList('affiliate-gmv:daily');
+  const byDate = {};
+  accEntries.forEach(e => { if (e.date) byDate[e.date] = (byDate[e.date] || 0) + (Number(e.gmv) || 0); });
+  if (Object.keys(byDate).length === 0) return false;
+  const divList = await storage.getList('gmv:daily');
+  let changed = false;
+  Object.entries(byDate).forEach(([date, total]) => {
+    const ex = divList.find(x => x.division === 'internal' && x.date === date);
+    if (ex) {
+      if ((Number(ex.gmv) || 0) !== total) {
+        ex.gmv = total; ex.autoSynced = true; ex.inputByName = 'auto (akun affiliator)'; ex.updatedAt = new Date().toISOString();
+        changed = true;
+      }
+    } else {
+      divList.unshift({ id: uid(), division: 'internal', date, gmv: total, autoSynced: true, inputByName: 'auto (akun affiliator)', createdAt: new Date().toISOString() });
+      changed = true;
+    }
+  });
+  if (changed) await storage.set('gmv:daily', divList);
+  return changed;
+}
+
+// Kurva interaktif: arahkan kursor / sentuh untuk lihat nilai per tanggal
+function InteractiveLineChart({ series, color = '#2563EB', height = 150, targetDaily = 0 }) {
+  const [hover, setHover] = useState(null);
+  const wrapRef = useRef(null);
+  const gradId = useMemo(() => 'ilc-' + Math.random().toString(36).slice(2, 8), []);
+  if (!series || series.length === 0) return null;
+  const CW = 600, CH = 160, PADL = 8, PADR = 8, PADT = 16, PADB = 20;
+  const n = series.length;
+  const max = Math.max(...series.map(s => s.value), targetDaily || 0, 1);
+  const xAt = (i) => PADL + (n <= 1 ? 0 : (i / (n - 1)) * (CW - PADL - PADR));
+  const yAt = (v) => CH - PADB - (v / max) * (CH - PADT - PADB);
+  const pts = series.map((s, i) => `${xAt(i).toFixed(1)},${yAt(s.value).toFixed(1)}`).join(' ');
+  const area = `${pts} ${xAt(n - 1).toFixed(1)},${CH - PADB} ${xAt(0).toFixed(1)},${CH - PADB}`;
+  const labelEvery = Math.ceil(n / 10);
+  const todayStr = dayKey();
+
+  const onMove = (e) => {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const fx = (clientX - rect.left) / rect.width * CW;
+    let idx = Math.round((fx - PADL) / ((CW - PADL - PADR) / Math.max(n - 1, 1)));
+    setHover(Math.max(0, Math.min(n - 1, idx)));
+  };
+  const h = hover != null ? series[hover] : null;
+
+  return (
+    <div ref={wrapRef} className="relative select-none" style={{ touchAction: 'pan-y' }}
+      onMouseMove={onMove} onMouseLeave={() => setHover(null)}
+      onTouchStart={onMove} onTouchMove={onMove} onTouchEnd={() => setHover(null)}>
+      <svg viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" className="w-full" style={{ height }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={color} stopOpacity="0.22" />
+            <stop offset="1" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0, 0.5, 1].map((f, i) => {
+          const y = PADT + f * (CH - PADT - PADB);
+          return <line key={i} x1={PADL} y1={y} x2={CW - PADR} y2={y} stroke="#EEF0F4" strokeWidth="1" />;
+        })}
+        {targetDaily > 0 && (
+          <line x1={PADL} y1={yAt(targetDaily)} x2={CW - PADR} y2={yAt(targetDaily)} stroke="#F59E0B" strokeWidth="1.4" strokeDasharray="5 4" />
+        )}
+        <polygon points={area} fill={`url(#${gradId})`} />
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+        {h && (
+          <>
+            <line x1={xAt(hover)} y1={PADT} x2={xAt(hover)} y2={CH - PADB} stroke={color} strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+            <circle cx={xAt(hover)} cy={yAt(h.value)} r="4.5" fill={color} stroke="#fff" strokeWidth="2" />
+          </>
+        )}
+        {series.map((s, i) => (
+          (i % labelEvery === 0) ? (
+            <text key={i} x={xAt(i)} y={CH - 6} fontSize="9" textAnchor="middle"
+              fill={s.date === todayStr ? color : '#94A3B8'} fontWeight={s.date === todayStr ? '800' : '500'}>
+              {s.day || Number((s.date || '').slice(8, 10)) || i + 1}
+            </text>
+          ) : null
+        ))}
+      </svg>
+      {h && (
+        <div className="absolute pointer-events-none px-2.5 py-1.5 rounded-lg text-white text-[11px] font-bold whitespace-nowrap shadow-lg"
+          style={{
+            left: `${(xAt(hover) / CW) * 100}%`, top: 0,
+            transform: `translateX(${hover > n * 0.7 ? '-100%' : hover < n * 0.3 ? '0' : '-50%'})`,
+            backgroundColor: '#0B1437'
+          }}>
+          {h.date ? fmtDate(h.date) : `Hari ${h.day}`} · {fmtRupiah(h.value)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GmvView({ user, allUsers }) {
   const [entries, setEntries] = useState([]);
   const [targets, setTargets] = useState({});
@@ -5643,6 +5752,7 @@ function GmvView({ user, allUsers }) {
   const [editing, setEditing] = useState(null);
 
   const load = async () => {
+    await syncInternalFromAccounts();
     setEntries(await storage.getList('gmv:daily'));
     setTargets((await storage.get('gmv:targets')) || {});
     setLoading(false);
@@ -5802,13 +5912,15 @@ function GmvView({ user, allUsers }) {
           const ch = dailyChange[div];
           const isCurrentMonth = mKey === monthKey();
           const filled = series.filter(s => s.value > 0).length;
+          const divTarget = Number(monthTargets[div]) || 0;
+          const dailyTgt = divTarget > 0 ? Math.round(divTarget / daysInMonth(mKey)) : 0;
           return (
             <div key={div} className="bg-white rounded-2xl border border-slate-200 p-4">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-bold text-slate-800">{cfg.label}</span>
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: cfg.color }} />
               </div>
-              <MiniBarChart series={series} color={cfg.color} />
+              <InteractiveLineChart series={series} color={cfg.color} height={130} targetDaily={dailyTgt} />
               <div className="flex items-center justify-between mt-2 text-xs">
                 <span className="text-slate-500">{filled} hari terisi</span>
                 {isCurrentMonth && ch && (ch.today > 0 || ch.prev > 0) ? (
@@ -6104,6 +6216,7 @@ function AffiliateAccountsView({ user, allUsers }) {
   const [lightbox, setLightbox] = useState(null);     // lihat bukti GMV besar
 
   const load = async () => {
+    await syncInternalFromAccounts(); // pastikan dashboard & divisi internal selalu sama dengan total akun
     setAccounts(await storage.getList('affiliate-accounts:all'));
     setEntries(await storage.getList('affiliate-gmv:daily'));
     const g = await storage.get('affiliate:goal');
@@ -6154,21 +6267,6 @@ function AffiliateAccountsView({ user, allUsers }) {
     await logActivity(`set target akun ${monthLabel}`, user.name);
     setTargetAcct(null); load();
   };
-  // Sinkron otomatis: total semua akun per tanggal → GMV divisi "internal" (gmv:daily),
-  // jadi Dashboard Bisnis & goal bulanan ikut ter-update tanpa input dobel.
-  const syncInternalDivision = async (date, byName) => {
-    const accEntries = await storage.getList('affiliate-gmv:daily');
-    const totalThatDate = accEntries.filter(e => e.date === date).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
-    let divList = await storage.getList('gmv:daily');
-    const existing = divList.find(e => e.division === 'internal' && e.date === date);
-    if (existing) {
-      divList = divList.map(e => e.id === existing.id ? { ...e, gmv: totalThatDate, autoSynced: true, inputByName: `${byName} (auto)`, updatedAt: new Date().toISOString() } : e);
-    } else {
-      divList.unshift({ id: uid(), division: 'internal', date, gmv: totalThatDate, autoSynced: true, inputById: user.id, inputByName: `${byName} (auto)`, createdAt: new Date().toISOString() });
-    }
-    await storage.set('gmv:daily', divList);
-  };
-
   const saveEntry = async (data) => {
     let list = await storage.getList('affiliate-gmv:daily');
     const existing = list.find(e => e.accountId === data.accountId && e.date === data.date);
@@ -6178,7 +6276,7 @@ function AffiliateAccountsView({ user, allUsers }) {
       list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
     }
     await storage.set('affiliate-gmv:daily', list);
-    await syncInternalDivision(data.date, user.name);
+    await syncInternalFromAccounts(); // dashboard & Target GMV divisi internal ikut ter-update otomatis
     await logActivity(`update GMV akun ${data.accountName} ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
     setInputAcct(null); load();
   };
@@ -6186,7 +6284,7 @@ function AffiliateAccountsView({ user, allUsers }) {
   const deleteEntry = async (e) => {
     if (!confirm(`Hapus GMV ${e.accountName || ''} tanggal ${fmtDate(e.date)} (${fmtRupiah(e.gmv)})?`)) return;
     await storage.set('affiliate-gmv:daily', (await storage.getList('affiliate-gmv:daily')).filter(x => x.id !== e.id));
-    await syncInternalDivision(e.date, user.name);
+    await syncInternalFromAccounts();
     load();
   };
   const saveGoal = async (value) => {
@@ -6249,7 +6347,6 @@ function AffiliateAccountsView({ user, allUsers }) {
             const dailyTarget = target > 0 ? Math.round(target / dim) : 0;
             const todayVal = acctToday(a.id);
             const hitToday = dailyTarget > 0 && todayVal >= dailyTarget;
-            const series = acctDailySeries(entries, a.id, mKey);
             const pic = allUsers.find(u => u.id === a.picId);
             return (
               <div key={a.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
@@ -6298,16 +6395,12 @@ function AffiliateAccountsView({ user, allUsers }) {
                   </div>
                 )}
 
-                {/* Traffic harian */}
-                <div className="mt-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Traffic Harian</div>
-                    <button onClick={() => setDetailAcct(detailAcct === a.id ? null : a.id)}
-                      className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
-                      {detailAcct === a.id ? 'Tutup rincian' : 'Lihat rincian angka'} <ChevronDown className={`w-3.5 h-3.5 transition-transform ${detailAcct === a.id ? 'rotate-180' : ''}`} />
-                    </button>
-                  </div>
-                  <MiniBarChart series={series} color="#3B82F6" />
+                {/* Rincian (grafik + angka) dibuka lewat tombol — tanpa bar chart kecil */}
+                <div className="mt-3 flex items-center justify-end">
+                  <button onClick={() => setDetailAcct(detailAcct === a.id ? null : a.id)}
+                    className="text-[12px] font-semibold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                    {detailAcct === a.id ? 'Tutup rincian' : 'Lihat grafik & rincian angka'} <ChevronDown className={`w-3.5 h-3.5 transition-transform ${detailAcct === a.id ? 'rotate-180' : ''}`} />
+                  </button>
                 </div>
 
                 {/* Rincian: grafik harian (pekanan/bulanan) + angka per tanggal */}
@@ -7356,6 +7449,223 @@ function SellersView({ user, allUsers }) {
 }
 
 // ============ ABSENSI (Attendance + Lokasi GPS) ============
+// ============ TUGAS HARIAN (checklist berulang — diatur Leader/Manajer) ============
+function DailyTasksView({ user, allUsers }) {
+  const [tasks, setTasks] = useState([]);
+  const [log, setLog] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const canManage = user.role === 'owner' || user.role === 'manajer' || user.role === 'leader';
+  const today = dayKey();
+
+  const load = async () => {
+    setTasks(await storage.getList('daily-tasks:all'));
+    setLog(await storage.getList('daily-tasks:log'));
+    setLoading(false);
+  };
+  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
+
+  // Siapa saja yang kena tugas ini
+  const targetsOf = (t) => (!t.assigneeIds || t.assigneeIds.length === 0)
+    ? allUsers.filter(u => u.role !== 'owner')
+    : allUsers.filter(u => t.assigneeIds.includes(u.id));
+
+  // Tugas untuk SAYA hari ini
+  const myTasks = tasks.filter(t => t.active !== false && targetsOf(t).some(u => u.id === user.id));
+  const isDone = (taskId, userId, date = today) => log.some(l => l.taskId === taskId && l.userId === userId && l.date === date);
+  const myDoneCount = myTasks.filter(t => isDone(t.id, user.id)).length;
+
+  const toggleDone = async (t) => {
+    let list = await storage.getList('daily-tasks:log');
+    const existing = list.find(l => l.taskId === t.id && l.userId === user.id && l.date === today);
+    if (existing) {
+      list = list.filter(l => l.id !== existing.id);
+    } else {
+      list.unshift({ id: uid(), taskId: t.id, userId: user.id, userName: user.name, date: today, doneAt: new Date().toISOString() });
+      await logActivity(`menyelesaikan tugas harian "${t.title}"`, user.name);
+    }
+    // rapikan log lebih tua dari 90 hari
+    const cutoff = dayKey(new Date(Date.now() - 90 * 86400000));
+    await storage.set('daily-tasks:log', list.filter(l => l.date >= cutoff));
+    load();
+  };
+
+  const saveTask = async (data) => {
+    let list = await storage.getList('daily-tasks:all');
+    if (editing) {
+      list = list.map(t => t.id === editing.id ? { ...t, ...data, updatedAt: new Date().toISOString() } : t);
+    } else {
+      list.unshift({ id: uid(), ...data, createdById: user.id, createdByName: user.name, createdAt: new Date().toISOString() });
+      await logActivity(`membuat tugas harian "${data.title}"`, user.name);
+    }
+    await storage.set('daily-tasks:all', list);
+    setShowForm(false); setEditing(null); load();
+  };
+
+  const deleteTask = async (t) => {
+    if (!confirm(`Hapus tugas harian "${t.title}"? Riwayat ceklisnya juga dihapus.`)) return;
+    await storage.set('daily-tasks:all', (await storage.getList('daily-tasks:all')).filter(x => x.id !== t.id));
+    await storage.set('daily-tasks:log', (await storage.getList('daily-tasks:log')).filter(l => l.taskId !== t.id));
+    load();
+  };
+
+  // Monitoring (leader lihat timnya, manajer/owner semua)
+  const scopeUsers = user.role === 'leader' ? allUsers.filter(u => u.leaderId === user.id || u.id === user.id) : allUsers;
+  const monitorTasks = tasks.filter(t => t.active !== false && (canManage
+    ? targetsOf(t).some(u => scopeUsers.some(s => s.id === u.id))
+    : false));
+
+  // Strip 7 hari terakhir per tugas (untuk monitoring)
+  const last7 = Array.from({ length: 7 }, (_, i) => dayKey(new Date(Date.now() - (6 - i) * 86400000)));
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat tugas harian...</div>;
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="Tugas Harian"
+        subtitle="Checklist rutinitas berulang tiap hari — dibuat Leader/Manajer, diceklis anggota, otomatis reset besok."
+        action={canManage ? (
+          <button onClick={() => { setEditing(null); setShowForm(true); }}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Tugas Harian Baru
+          </button>
+        ) : null} />
+
+      {/* Checklist saya hari ini */}
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5 mb-6">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <h3 className="font-display font-bold text-slate-900">Checklist Saya · {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short' })}</h3>
+          {myTasks.length > 0 && (
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${myDoneCount === myTasks.length ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+              {myDoneCount}/{myTasks.length} selesai{myDoneCount === myTasks.length && myTasks.length > 0 ? ' 🎉' : ''}
+            </span>
+          )}
+        </div>
+        {myTasks.length === 0 ? (
+          <div className="text-sm text-slate-400 text-center py-6">Tidak ada tugas harian untukmu. {canManage ? 'Buat lewat tombol di atas.' : 'Leader-mu belum menetapkan tugas rutin.'}</div>
+        ) : (
+          <div className="space-y-2">
+            {myTasks.map(t => {
+              const done = isDone(t.id, user.id);
+              return (
+                <button key={t.id} onClick={() => toggleDone(t)}
+                  className={`w-full flex items-start gap-3 p-3.5 rounded-xl border-2 text-left transition ${done ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50/40'}`}>
+                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 transition ${done ? 'bg-emerald-500 text-white' : 'border-2 border-slate-300 bg-white'}`}>
+                    {done && <Check className="w-4 h-4" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-sm font-semibold ${done ? 'text-emerald-800 line-through decoration-emerald-400' : 'text-slate-800'}`}>{t.title}</div>
+                    {t.description && <div className="text-xs text-slate-500 mt-0.5">{t.description}</div>}
+                  </div>
+                  {done && <span className="text-[10px] text-emerald-600 font-bold flex-shrink-0">✓ selesai</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Monitoring untuk leader/manajer */}
+      {canManage && monitorTasks.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5">
+          <h3 className="font-display font-bold text-slate-900 mb-1">Monitoring Tim · Hari Ini</h3>
+          <p className="text-xs text-slate-500 mb-4">Siapa yang sudah/belum menjalankan rutinitas — plus jejak 7 hari terakhir.</p>
+          <div className="space-y-3">
+            {monitorTasks.map(t => {
+              const people = targetsOf(t).filter(u => scopeUsers.some(s => s.id === u.id));
+              const doneToday = people.filter(u => isDone(t.id, u.id));
+              const notDone = people.filter(u => !isDone(t.id, u.id));
+              return (
+                <div key={t.id} className="border border-slate-200 rounded-xl p-4">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-slate-900 text-sm">{t.title}</span>
+                        {t.active === false && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-bold">Nonaktif</span>}
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${doneToday.length === people.length && people.length > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {doneToday.length}/{people.length} selesai hari ini
+                        </span>
+                      </div>
+                      {notDone.length > 0 && (
+                        <div className="text-[11px] text-slate-500 mt-1">
+                          Belum: {notDone.slice(0, 5).map(u => u.name.split(' ')[0]).join(', ')}{notDone.length > 5 ? `, +${notDone.length - 5} lagi` : ''}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* Jejak 7 hari */}
+                      <div className="flex items-end gap-0.5" title="7 hari terakhir (% anggota yang ceklis)">
+                        {last7.map(d => {
+                          const cnt = people.filter(u => isDone(t.id, u.id, d)).length;
+                          const pctH = people.length > 0 ? cnt / people.length : 0;
+                          return <div key={d} className="w-1.5 rounded-t" style={{ height: `${6 + pctH * 18}px`, backgroundColor: pctH >= 1 ? '#10B981' : pctH > 0 ? '#60A5FA' : '#E2E8F0' }} title={`${fmtDate(d)}: ${cnt}/${people.length}`}></div>;
+                        })}
+                      </div>
+                      <button onClick={() => { setEditing(t); setShowForm(true); }} className="text-slate-400 hover:text-blue-600 p-1"><Edit2 className="w-4 h-4" /></button>
+                      <button onClick={() => deleteTask(t)} className="text-slate-400 hover:text-red-600 p-1"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {showForm && <DailyTaskForm editing={editing} user={user} allUsers={allUsers}
+        onSave={saveTask} onClose={() => { setShowForm(false); setEditing(null); }} />}
+    </div>
+  );
+}
+
+function DailyTaskForm({ editing, user, allUsers, onSave, onClose }) {
+  const assignable = user.role === 'leader'
+    ? allUsers.filter(u => u.leaderId === user.id || u.id === user.id)
+    : allUsers.filter(u => u.role !== 'owner');
+  const [form, setForm] = useState({
+    title: editing?.title || '',
+    description: editing?.description || '',
+    assigneeIds: editing?.assigneeIds || [],
+    active: editing?.active !== false
+  });
+  const toggle = (id) => setForm(f => ({ ...f, assigneeIds: f.assigneeIds.includes(id) ? f.assigneeIds.filter(x => x !== id) : [...f.assigneeIds, id] }));
+  return (
+    <Modal title={editing ? 'Edit Tugas Harian' : 'Tugas Harian Baru'} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Nama Tugas *">
+          <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+            placeholder="mis. Posting 3 konten TikTok / Follow up creator / Cek pesanan masuk"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </Field>
+        <Field label="Keterangan (opsional)">
+          <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+            rows={2} placeholder="Detail singkat / standar hasil yang diharapkan"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </Field>
+        <Field label={`Berlaku untuk (${form.assigneeIds.length === 0 ? 'semua anggota' : form.assigneeIds.length + ' orang'})`}>
+          <div className="text-[11px] text-slate-500 mb-1.5">Kosongkan = berlaku untuk semua anggota{user.role === 'leader' ? ' (timmu)' : ''}.</div>
+          <div className="max-h-44 overflow-y-auto scroll-thin border border-slate-200 rounded-lg p-2 space-y-1">
+            {assignable.map(u => (
+              <label key={u.id} className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded cursor-pointer">
+                <input type="checkbox" checked={form.assigneeIds.includes(u.id)} onChange={() => toggle(u.id)} className="w-4 h-4 accent-blue-600 rounded" />
+                <span className="text-sm flex-1">{u.name}</span>
+                {displayJobTitle(u) && <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{displayJobTitle(u)}</span>}
+              </label>
+            ))}
+          </div>
+        </Field>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} className="w-4 h-4 accent-blue-600 rounded" />
+          <span className="text-sm text-slate-700">Aktif (muncul di checklist harian)</span>
+        </label>
+        <FormActions onCancel={onClose} onSave={() => onSave({ ...form, title: form.title.trim() })} disabled={!form.title.trim()} />
+      </div>
+    </Modal>
+  );
+}
+
 // ============ KALKULATOR PEMBAGIAN KOMISI TAP ============
 function TapCommissionView({ user }) {
   const [tab, setTab] = useState('calc'); // calc | history | tiers
