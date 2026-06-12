@@ -20,7 +20,7 @@ const ROLES = {
   owner:      { label: 'Owner',            color: 'bg-violet-100 text-violet-800 border-violet-300',   icon: Crown,     rank: 4 },
   manajer:    { label: 'Manajer',          color: 'bg-amber-100 text-amber-800 border-amber-300',      icon: Shield,    rank: 3 },
   leader:     { label: 'Leader',           color: 'bg-blue-100 text-blue-800 border-blue-300',          icon: UserCheck, rank: 2 },
-  operasional:{ label: 'Karyawan',         color: 'bg-indigo-100 text-indigo-800 border-indigo-300',    icon: User,      rank: 1 }
+  operasional:{ label: 'Karyawan',         color: 'bg-blue-100 text-blue-800 border-blue-300',    icon: User,      rank: 1 }
 };
 
 const can = {
@@ -204,7 +204,7 @@ function Avatar({ person, size = 'md', className = '' }) {
   const sizes = { xs: 'w-6 h-6 text-[10px]', sm: 'w-7 h-7 text-xs', md: 'w-9 h-9 text-sm', lg: 'w-11 h-11 text-base', xl: 'w-14 h-14 text-lg' };
   const name = person?.name || '?';
   return (
-    <div className={`${sizes[size] || sizes.md} rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold flex-shrink-0 overflow-hidden ${className}`}>
+    <div className={`${sizes[size] || sizes.md} rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white font-bold flex-shrink-0 overflow-hidden ${className}`}>
       {person?.avatarImage
         ? <img src={person.avatarImage} alt={name} className="w-full h-full object-cover" />
         : name.charAt(0).toUpperCase()}
@@ -236,10 +236,10 @@ const PRIORITIES = {
 const TASK_STATUS = {
   todo:        { label: 'Belum Mulai', color: 'bg-slate-100 text-slate-700', dot: 'bg-slate-400' },
   in_progress: { label: 'Dikerjakan',  color: 'bg-blue-100 text-blue-700',   dot: 'bg-blue-500' },
-  done:        { label: 'Selesai',     color: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' }
+  done:        { label: 'Selesai',     color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' }
 };
 const CREATOR_STATUS = {
-  aktif:   { label: 'Aktif',   color: 'bg-indigo-100 text-indigo-700' },
+  aktif:   { label: 'Aktif',   color: 'bg-blue-100 text-blue-700' },
   pasif:   { label: 'Pasif',   color: 'bg-slate-100 text-slate-600' },
   pending: { label: 'Pending', color: 'bg-amber-100 text-amber-800' }
 };
@@ -253,7 +253,7 @@ const CONTENT_STATUS = {
   idea:        { label: 'Ide',          color: 'bg-amber-100 text-amber-800',   dot: 'bg-amber-400' },
   approved:    { label: 'Disetujui',    color: 'bg-blue-100 text-blue-700',     dot: 'bg-blue-500' },
   in_progress: { label: 'Produksi',     color: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
-  published:   { label: 'Sudah Tayang', color: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' },
+  published:   { label: 'Sudah Tayang', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
   rejected:    { label: 'Ditolak',      color: 'bg-red-100 text-red-700',       dot: 'bg-red-500' }
 };
 const CONTENT_FORMAT = {
@@ -267,13 +267,13 @@ const CONTENT_FORMAT = {
 const TODO_STATUS = {
   todo:        { label: 'To Do',       color: 'bg-slate-100 text-slate-700',   border: 'border-slate-300',   bg: 'bg-slate-50' },
   in_progress: { label: 'In Progress', color: 'bg-blue-100 text-blue-700',     border: 'border-blue-300',    bg: 'bg-blue-50' },
-  done:        { label: 'Done',        color: 'bg-indigo-100 text-indigo-700', border: 'border-indigo-300', bg: 'bg-indigo-50' }
+  done:        { label: 'Done',        color: 'bg-blue-100 text-blue-700', border: 'border-blue-300', bg: 'bg-blue-50' }
 };
 const EVENT_TYPE = {
   meeting:  { label: 'Meeting',  icon: '👥', color: 'bg-blue-100 text-blue-700 border-blue-300' },
   agenda:   { label: 'Agenda',   icon: '📋', color: 'bg-purple-100 text-purple-700 border-purple-300' },
   kegiatan: { label: 'Kegiatan', icon: '🎯', color: 'bg-amber-100 text-amber-800 border-amber-300' },
-  training: { label: 'Training', icon: '🎓', color: 'bg-indigo-100 text-indigo-700 border-indigo-300' },
+  training: { label: 'Training', icon: '🎓', color: 'bg-blue-100 text-blue-700 border-blue-300' },
   briefing: { label: 'Briefing', icon: '🗣️', color: 'bg-cyan-100 text-cyan-700 border-cyan-300' },
   lain:     { label: 'Lainnya',  icon: '📌', color: 'bg-slate-100 text-slate-700 border-slate-300' }
 };
@@ -619,7 +619,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F6F5FE]" style={{ fontFamily: "'Inter', 'Plus Jakarta Sans', system-ui, sans-serif" }}>
+    <div className="min-h-screen bg-[#F4F7FE]" style={{ fontFamily: "'Inter', 'Plus Jakarta Sans', system-ui, sans-serif" }}>
       <div className="flex">
         <Sidebar view={view} setView={setView} user={currentUser} settings={settings} onLogout={handleLogout}
           isOpen={sidebarOpen} onToggle={toggleSidebar}
@@ -673,158 +673,194 @@ export default function App() {
 // ============ FIRST TIME SETUP ============
 // ============ LANDING PAGE (Homepage) ============
 function LandingPage({ settings, onGetStarted }) {
-  const navLinks = ['Beranda', 'Fitur', 'Tim', 'Laporan', 'Kontak', 'FAQ'];
+  const navLinks = ['Beranda', 'Fitur', 'Tim', 'Laporan', 'Kontak'];
+  const stats = [
+    { value: '400+', label: 'Creator Dikelola' },
+    { value: 'Rp 1M+', label: 'Target GMV / Bulan' },
+    { value: '8', label: 'Divisi Tim' },
+    { value: '24/7', label: 'Akses Multi-Device' }
+  ];
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 sm:p-8"
-      style={{ backgroundColor: '#5B4FE5', fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <div className="min-h-screen relative overflow-hidden"
+      style={{ background: 'linear-gradient(160deg, #060B18 0%, #0A1430 45%, #0B1B45 80%, #081026 100%)', fontFamily: "'Inter', system-ui, sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'); .font-display { font-family: 'Inter', system-ui, sans-serif; letter-spacing: -0.025em; }`}</style>
 
-      {/* White page card */}
-      <div className="relative w-full max-w-6xl bg-white rounded-[28px] shadow-2xl overflow-hidden"
-        style={{ boxShadow: '0 40px 80px -20px rgba(79, 70, 229, 0.5)' }}>
+      {/* Glow orbs biru elektrik */}
+      <div className="absolute pointer-events-none" style={{ top: '-15%', right: '-10%', width: '55vw', height: '55vw', background: 'radial-gradient(circle, rgba(37,99,235,0.35) 0%, transparent 65%)' }}></div>
+      <div className="absolute pointer-events-none" style={{ bottom: '-20%', left: '-12%', width: '50vw', height: '50vw', background: 'radial-gradient(circle, rgba(59,130,246,0.22) 0%, transparent 65%)' }}></div>
+      <div className="absolute pointer-events-none" style={{ top: '35%', left: '40%', width: '24vw', height: '24vw', background: 'radial-gradient(circle, rgba(96,165,250,0.14) 0%, transparent 70%)' }}></div>
+      {/* Bintik cahaya */}
+      <div className="absolute top-24 right-1/4 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#60A5FA', boxShadow: '0 0 12px rgba(96,165,250,0.9)' }}></div>
+      <div className="absolute top-1/2 left-16 w-1 h-1 rounded-full" style={{ backgroundColor: '#93C5FD', boxShadow: '0 0 8px rgba(147,197,253,0.8)' }}></div>
+      <div className="absolute bottom-32 right-16 w-2 h-2 rounded-full" style={{ backgroundColor: '#3B82F6', boxShadow: '0 0 14px rgba(59,130,246,0.9)' }}></div>
 
-        {/* Purple wave decorations (right side) */}
-        <svg className="absolute right-0 top-0 h-full pointer-events-none" style={{ width: '62%' }}
-          viewBox="0 0 600 700" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
-          <path d="M 180 0 Q 80 180 200 320 Q 320 460 180 700 L 600 700 L 600 0 Z" fill="#6366F1" opacity="0.12" />
-          <path d="M 280 0 Q 180 200 300 360 Q 420 520 300 700 L 600 700 L 600 0 Z" fill="#5B4FE5" opacity="0.9" />
-          <path d="M 360 0 Q 280 220 380 380 Q 480 540 380 700 L 600 700 L 600 0 Z" fill="#4F46E5" opacity="0.85" />
-        </svg>
-
-        {/* Bottom purple bar */}
-        <div className="absolute bottom-0 left-0 right-0 h-3" style={{ backgroundColor: '#4338CA' }}></div>
-
-        {/* Nav */}
-        <nav className="relative z-20 flex items-center justify-between px-6 sm:px-12 py-6">
-          <div className="flex items-center gap-2.5">
-            {/* Dot cluster logo */}
-            <div className="grid grid-cols-2 gap-0.5" style={{ width: '22px' }}>
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#5B4FE5' }}></div>
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#A5B4FC' }}></div>
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#A5B4FC' }}></div>
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#5B4FE5' }}></div>
-            </div>
-            <span className="font-bold tracking-wide text-base sm:text-lg" style={{ color: '#312E81' }}>
-              {(settings.appName || 'AL-KAHFI').toUpperCase()}
-            </span>
+      {/* Nav */}
+      <nav className="relative z-20 flex items-center justify-between px-6 sm:px-12 lg:px-16 py-5">
+        <div className="flex items-center gap-3">
+          <div style={{ boxShadow: '0 8px 24px -6px rgba(37,99,235,0.7)' }}
+            className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center text-xl overflow-hidden ring-1 ring-white/25">
+            {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
           </div>
-          <div className="hidden md:flex items-center gap-6 lg:gap-8">
-            {navLinks.map((l, i) => (
-              <button key={i} onClick={onGetStarted}
-                className="text-xs lg:text-sm font-medium uppercase tracking-wide transition hover:opacity-70"
-                style={{ color: i === 0 ? '#4338CA' : '#64748B' }}>
-                {l}
-              </button>
-            ))}
+          <div>
+            <div className="font-display font-bold text-white text-base leading-tight">{settings.appName}</div>
+            <div className="text-[9px] uppercase tracking-[0.2em] font-bold" style={{ color: '#60A5FA' }}>{settings.appSubtitle}</div>
           </div>
-          {/* Mobile menu dots */}
-          <button onClick={onGetStarted} className="md:hidden flex flex-col gap-1">
-            <span className="w-5 h-0.5 rounded" style={{ backgroundColor: '#4338CA' }}></span>
-            <span className="w-5 h-0.5 rounded" style={{ backgroundColor: '#4338CA' }}></span>
-            <span className="w-5 h-0.5 rounded" style={{ backgroundColor: '#4338CA' }}></span>
-          </button>
-        </nav>
+        </div>
+        <div className="hidden md:flex items-center gap-7">
+          {navLinks.map((l, i) => (
+            <button key={i} onClick={onGetStarted}
+              className="text-sm font-medium transition hover:text-white"
+              style={{ color: i === 0 ? '#FFFFFF' : '#94A3B8' }}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <button onClick={onGetStarted}
+          style={{ boxShadow: '0 10px 30px -8px rgba(37,99,235,0.8)' }}
+          className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold px-5 py-2.5 rounded-full transition flex items-center gap-2">
+          Masuk <ArrowRight className="w-4 h-4" />
+        </button>
+      </nav>
 
-        {/* Hero */}
-        <div className="relative z-10 grid lg:grid-cols-2 gap-6 px-6 sm:px-12 pb-16 pt-6 lg:pt-12 items-center">
-          {/* Left: copy */}
-          <div className="relative z-10">
-            <h1 className="font-display font-extrabold leading-[0.92] tracking-tight"
-              style={{ fontSize: 'clamp(2.8rem, 6vw, 4.5rem)' }}>
-              <span style={{
-                background: 'linear-gradient(180deg, #A5B4FC 0%, #818CF8 100%)',
-                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'
-              }}>AL-KAHFI</span>
-              <br />
-              <span style={{ color: '#4338CA' }}>TEAM SUITE</span>
-            </h1>
-            <p className="mt-5 text-sm leading-relaxed max-w-sm" style={{ color: '#64748B' }}>
-              Satu dashboard untuk kelola tugas, creator, laporan harian, jadwal live, dan performa tim affiliate agency Anda — rapi dan profesional.
-            </p>
+      {/* Hero */}
+      <div className="relative z-10 grid lg:grid-cols-2 gap-10 px-6 sm:px-12 lg:px-16 pt-8 lg:pt-16 pb-10 items-center max-w-7xl mx-auto">
+        {/* Left: copy */}
+        <div>
+          <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.25em] font-bold mb-5" style={{ color: '#60A5FA' }}>
+            <span className="w-8 h-px" style={{ backgroundColor: 'rgba(96,165,250,0.6)' }}></span>
+            WE MANAGE · WE BUILD · WE GROW
+          </div>
+          <h1 className="font-display font-extrabold leading-[1.02] tracking-tight text-white"
+            style={{ fontSize: 'clamp(2.6rem, 5.5vw, 4.2rem)' }}>
+            Satu Dashboard,<br />
+            <span style={{
+              background: 'linear-gradient(135deg, #93C5FD 0%, #3B82F6 60%, #2563EB 100%)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text'
+            }}>Semua Terkendali.</span>
+          </h1>
+          <p className="mt-5 text-base leading-relaxed max-w-md" style={{ color: '#94A3B8' }}>
+            Sistem manajemen tim {settings.appName} — tugas, absensi, creator, GMV, laporan, dan KPI dalam satu tempat. Rapi, terukur, profesional.
+          </p>
+          <div className="flex flex-wrap items-center gap-3 mt-8">
             <button onClick={onGetStarted}
-              className="mt-7 inline-flex items-center gap-2 text-white font-bold text-sm px-7 py-3.5 rounded-full transition hover:scale-105 active:scale-95"
-              style={{ backgroundColor: '#4F46E5', boxShadow: '0 12px 24px -6px rgba(79, 70, 229, 0.5)' }}>
-              GET STARTED
+              style={{ boxShadow: '0 16px 40px -10px rgba(37,99,235,0.9)' }}
+              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm px-7 py-3.5 rounded-full transition hover:scale-[1.03] active:scale-95 shine-hover">
+              Buka Dashboard <ArrowRight className="w-4 h-4" />
+            </button>
+            <button onClick={onGetStarted}
+              className="inline-flex items-center gap-2 text-white font-semibold text-sm px-6 py-3.5 rounded-full transition border border-white/20 hover:bg-white/10 backdrop-blur">
+              Lihat Fitur
             </button>
           </div>
+        </div>
 
-          {/* Right: laptop illustration */}
-          <div className="relative h-[280px] sm:h-[360px] flex items-center justify-center">
-            {/* Orange clouds */}
-            <div className="absolute rounded-full" style={{ width: '60px', height: '22px', backgroundColor: '#FB923C', top: '8%', right: '12%', opacity: 0.9 }}></div>
-            <div className="absolute rounded-full" style={{ width: '44px', height: '16px', backgroundColor: '#FBBF24', top: '30%', right: '4%', opacity: 0.85 }}></div>
-            <div className="absolute rounded-full" style={{ width: '50px', height: '18px', backgroundColor: '#FB923C', bottom: '14%', left: '6%', opacity: 0.8 }}></div>
-            <div className="absolute rounded-full" style={{ width: '36px', height: '14px', backgroundColor: '#FBBF24', bottom: '6%', right: '20%', opacity: 0.85 }}></div>
-
-            {/* Laptop */}
-            <div className="relative" style={{ width: 'min(340px, 90%)' }}>
-              {/* Screen */}
-              <div className="rounded-t-2xl p-2.5 shadow-2xl" style={{ backgroundColor: '#312E81' }}>
-                <div className="rounded-lg overflow-hidden" style={{ backgroundColor: '#FFEDD5', aspectRatio: '16/10' }}>
-                  <div className="p-3 h-full flex flex-col gap-2">
-                    <div className="h-2.5 rounded-full" style={{ width: '40%', backgroundColor: '#FB923C' }}></div>
-                    <div className="grid grid-cols-3 gap-2 flex-1">
-                      <div className="rounded-md" style={{ backgroundColor: '#FDBA74' }}></div>
-                      <div className="rounded-md" style={{ backgroundColor: '#F97316' }}></div>
-                      <div className="rounded-md" style={{ backgroundColor: '#FB923C' }}></div>
-                    </div>
-                    <div className="h-2 rounded-full" style={{ width: '70%', backgroundColor: '#FDBA74' }}></div>
-                    <div className="h-2 rounded-full" style={{ width: '55%', backgroundColor: '#FED7AA' }}></div>
-                  </div>
+        {/* Right: mockup dashboard 3D melayang */}
+        <div className="relative h-[340px] sm:h-[420px] scene-3d hidden sm:block">
+          {/* Kartu utama (glass, miring 3D) */}
+          <div className="card-3d animate-float absolute left-0 right-10 top-8 rounded-2xl p-4 backdrop-blur-xl glow-blue-soft"
+            style={{ backgroundColor: 'rgba(13,25,55,0.75)', border: '1px solid rgba(96,165,250,0.25)' }}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-sm overflow-hidden">
+                  {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
                 </div>
+                <div className="text-white text-xs font-bold">{settings.appName}</div>
               </div>
-              {/* Base */}
-              <div className="h-3 rounded-b-md" style={{ backgroundColor: '#C7D2FE' }}></div>
-              <div className="h-2 mx-auto rounded-b-xl" style={{ width: '55%', backgroundColor: '#A5B4FC' }}></div>
-
-              {/* Floating browser window (left) */}
-              <div className="absolute bg-white rounded-xl shadow-xl p-2.5"
-                style={{ left: '-18%', top: '38%', width: '46%' }}>
-                <div className="flex gap-1 mb-2">
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#F87171' }}></div>
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#FBBF24' }}></div>
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#34D399' }}></div>
-                </div>
-                <div className="space-y-1.5">
-                  <div className="h-2 rounded-full" style={{ width: '90%', backgroundColor: '#C7D2FE' }}></div>
-                  <div className="h-2 rounded-full" style={{ width: '70%', backgroundColor: '#E0E7FF' }}></div>
-                  <div className="h-2 rounded-full" style={{ width: '80%', backgroundColor: '#C7D2FE' }}></div>
-                  <div className="h-2 rounded-full" style={{ width: '55%', backgroundColor: '#E0E7FF' }}></div>
-                </div>
-              </div>
-
-              {/* Floating image card (top right) */}
-              <div className="absolute bg-white rounded-xl shadow-xl p-2"
-                style={{ right: '-8%', top: '-14%', width: '32%' }}>
-                <div className="rounded-md flex items-center justify-center" style={{ backgroundColor: '#E0E7FF', aspectRatio: '4/3' }}>
-                  <svg width="60%" height="60%" viewBox="0 0 24 24" fill="none">
-                    <rect x="2" y="4" width="20" height="16" rx="2" stroke="#818CF8" strokeWidth="1.5" />
-                    <circle cx="8" cy="9" r="1.5" fill="#FBBF24" />
-                    <path d="M3 18 L9 12 L13 16 L17 12 L21 17" stroke="#818CF8" strokeWidth="1.5" fill="none" />
-                  </svg>
-                </div>
-              </div>
-
-              {/* Floating chat bubble (top center) */}
-              <div className="absolute rounded-2xl shadow-lg"
-                style={{ left: '28%', top: '-22%', width: '34%', height: '34px', backgroundColor: '#E0E7FF' }}>
-                <div className="p-2 space-y-1">
-                  <div className="h-1.5 rounded-full" style={{ width: '70%', backgroundColor: '#A5B4FC' }}></div>
-                  <div className="h-1.5 rounded-full" style={{ width: '45%', backgroundColor: '#C7D2FE' }}></div>
-                </div>
-              </div>
-
-              {/* Floating small card (right) */}
-              <div className="absolute bg-white rounded-xl shadow-xl p-2"
-                style={{ right: '-14%', top: '46%', width: '38%' }}>
-                <div className="space-y-1.5">
-                  <div className="h-1.5 rounded-full" style={{ width: '85%', backgroundColor: '#C7D2FE' }}></div>
-                  <div className="h-1.5 rounded-full" style={{ width: '60%', backgroundColor: '#E0E7FF' }}></div>
-                  <div className="h-4 w-8 rounded mt-1" style={{ backgroundColor: '#FB923C' }}></div>
-                </div>
+              <div className="flex gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-red-400/80"></div>
+                <div className="w-2 h-2 rounded-full bg-amber-400/80"></div>
+                <div className="w-2 h-2 rounded-full bg-emerald-400/80"></div>
               </div>
             </div>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              {[['GMV Bulan Ini', 'Rp 3,7M', true], ['Creator Aktif', '414', false], ['Tugas Selesai', '78%', false]].map(([l, v, hl], i) => (
+                <div key={i} className="rounded-xl p-2.5" style={hl
+                  ? { backgroundColor: 'rgba(37,99,235,0.3)', border: '1px solid rgba(96,165,250,0.4)' }
+                  : { backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div className="text-[8px] uppercase font-bold tracking-wide" style={{ color: hl ? '#93C5FD' : '#64748B' }}>{l}</div>
+                  <div className="text-sm font-display font-bold text-white mt-0.5">{v}</div>
+                </div>
+              ))}
+            </div>
+            {/* Mini line chart */}
+            <div className="rounded-xl p-3" style={{ backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[9px] font-bold" style={{ color: '#94A3B8' }}>Traffic GMV — 13 hari</span>
+                <span className="text-[9px] font-bold" style={{ color: '#34D399' }}>▲ 133%</span>
+              </div>
+              <svg viewBox="0 0 200 50" className="w-full h-12">
+                <defs>
+                  <linearGradient id="landArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor="#3B82F6" stopOpacity="0.4" />
+                    <stop offset="1" stopColor="#3B82F6" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <polygon points="0,38 20,30 40,34 60,22 80,26 100,14 120,20 140,10 160,16 180,6 200,12 200,50 0,50" fill="url(#landArea)" />
+                <polyline points="0,38 20,30 40,34 60,22 80,26 100,14 120,20 140,10 160,16 180,6 200,12" fill="none" stroke="#60A5FA" strokeWidth="2" strokeLinecap="round" />
+                <circle cx="200" cy="12" r="3" fill="#60A5FA" />
+              </svg>
+            </div>
           </div>
+
+          {/* Kartu kecil: Tim (kanan atas, 3D miring kanan) */}
+          <div className="card-3d-r animate-float-slow absolute -right-2 top-0 rounded-2xl px-4 py-3 backdrop-blur-xl"
+            style={{ backgroundColor: 'rgba(13,25,55,0.85)', border: '1px solid rgba(96,165,250,0.3)', boxShadow: '0 20px 50px -12px rgba(37,99,235,0.6)' }}>
+            <div className="text-[9px] font-bold uppercase tracking-wide mb-2" style={{ color: '#93C5FD' }}>Tim Solid</div>
+            <div className="flex -space-x-2">
+              {['A', 'S', 'F', 'T'].map((c, i) => (
+                <div key={i} className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
+                  style={{ background: `linear-gradient(135deg, ${['#3B82F6', '#2563EB', '#1D4ED8', '#60A5FA'][i]}, #1E40AF)`, border: '2px solid #0D1937' }}>
+                  {c}
+                </div>
+              ))}
+              <div className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-bold text-blue-200 bg-white/10" style={{ border: '2px solid #0D1937' }}>+10</div>
+            </div>
+          </div>
+
+          {/* Kartu kecil: notifikasi target (kiri bawah) */}
+          <div className="card-3d animate-float absolute left-4 bottom-2 rounded-2xl px-4 py-3 backdrop-blur-xl"
+            style={{ backgroundColor: 'rgba(13,25,55,0.85)', border: '1px solid rgba(96,165,250,0.3)', boxShadow: '0 20px 50px -12px rgba(37,99,235,0.55)', animationDelay: '1.2s' }}>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'rgba(52,211,153,0.2)' }}>
+                <Target className="w-4 h-4" style={{ color: '#34D399' }} />
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-white">Goal 1 Miliar</div>
+                <div className="text-[9px]" style={{ color: '#94A3B8' }}>Breakdown per akun ✓</div>
+              </div>
+            </div>
+            <div className="w-full h-1 rounded-full overflow-hidden mt-2" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>
+              <div className="h-full rounded-full" style={{ width: '68%', background: 'linear-gradient(90deg, #34D399, #10B981)' }}></div>
+            </div>
+          </div>
+
+          {/* Kartu mini: bar chart (kanan bawah) */}
+          <div className="card-3d-r animate-float-slow absolute right-6 bottom-10 rounded-2xl px-3.5 py-3 backdrop-blur-xl"
+            style={{ backgroundColor: 'rgba(13,25,55,0.85)', border: '1px solid rgba(96,165,250,0.3)', boxShadow: '0 20px 50px -12px rgba(37,99,235,0.55)', animationDelay: '0.6s' }}>
+            <div className="text-[8px] uppercase font-bold mb-1.5" style={{ color: '#64748B' }}>Pekan Ini</div>
+            <div className="flex items-end gap-1 h-9">
+              {[40, 60, 45, 80, 95].map((h, i) => (
+                <div key={i} className="w-1.5 rounded-t" style={{ height: `${h}%`, background: i >= 3 ? 'linear-gradient(180deg, #60A5FA, #2563EB)' : 'rgba(96,165,250,0.4)' }}></div>
+              ))}
+            </div>
+            <div className="text-[9px] font-bold mt-1" style={{ color: '#60A5FA' }}>↗ +24%</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats bar */}
+      <div className="relative z-10 px-6 sm:px-12 lg:px-16 pb-12 max-w-7xl mx-auto">
+        <div className="rounded-2xl backdrop-blur-xl grid grid-cols-2 lg:grid-cols-4 divide-x divide-white/5"
+          style={{ backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          {stats.map((s, i) => (
+            <div key={i} className="px-6 py-5 text-center">
+              <div className="font-display font-bold text-white text-2xl">{s.value}</div>
+              <div className="text-[11px] mt-1" style={{ color: '#94A3B8' }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+        <div className="text-center text-[11px] mt-6" style={{ color: '#475569' }}>
+          © {new Date().getFullYear()} Al-Kahfi Corp · Built for Affiliate Agency
         </div>
       </div>
     </div>
@@ -861,7 +897,7 @@ function FirstTimeSetup({ settings, onComplete }) {
   return (
     <AuthShell settings={settings}>
       <div className="text-center mb-7">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-amber-100 to-amber-50 text-amber-800 rounded-full text-xs font-bold mb-4 border border-amber-200/60 shadow-sm">
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-blue-100 to-blue-50 text-blue-800 rounded-full text-xs font-bold mb-4 border border-blue-200/60 shadow-sm">
           <Crown className="w-3.5 h-3.5" /> SETUP PERTAMA
         </div>
         <h2 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">Daftarkan Akun Owner</h2>
@@ -871,18 +907,18 @@ function FirstTimeSetup({ settings, onComplete }) {
         <Field label="Nama Lengkap">
           <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
             placeholder="Mis. Al-Kahfi"
-            className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-[#4F46E5] transition" />
+            className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] transition" />
         </Field>
         <Field label="Username (untuk login)">
           <input type="text" value={form.username} onChange={e => setForm({ ...form, username: e.target.value.toLowerCase() })}
             placeholder="mis. alkahfi"
-            className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-[#4F46E5] lowercase transition" />
+            className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] lowercase transition" />
         </Field>
         <Field label="Password (minimal 6 karakter)">
           <div className="relative">
             <input type={show ? 'text' : 'password'} value={form.password}
               onChange={e => setForm({ ...form, password: e.target.value })}
-              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-[#4F46E5] pr-10 transition" />
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] pr-10 transition" />
             <button type="button" onClick={() => setShow(!show)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
               {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
@@ -891,15 +927,15 @@ function FirstTimeSetup({ settings, onComplete }) {
         <Field label="Konfirmasi Password">
           <input type={show ? 'text' : 'password'} value={form.confirmPassword}
             onChange={e => setForm({ ...form, confirmPassword: e.target.value })}
-            className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-[#4F46E5] transition" />
+            className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] transition" />
         </Field>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2.5 rounded-xl flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />{error}</div>}
         <button onClick={submit} disabled={busy}
-          className="w-full bg-gradient-to-r from-[#4F46E5] to-indigo-700 hover:from-[#4F46E5] hover:to-indigo-800 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-indigo-900/20 hover:shadow-xl hover:shadow-indigo-900/30 flex items-center justify-center gap-2 mt-2">
+          className="w-full bg-gradient-to-r from-[#2563EB] to-blue-700 hover:from-[#2563EB] hover:to-blue-800 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-blue-900/20 hover:shadow-xl hover:shadow-blue-900/30 flex items-center justify-center gap-2 mt-2">
           <Crown className="w-4 h-4" /> {busy ? 'Memproses...' : 'Daftar & Masuk sebagai Owner'}
         </button>
         <p className="text-[11px] text-center text-slate-500 mt-3 leading-relaxed">
-          <Shield className="w-3 h-3 inline -mt-0.5 mr-1 text-indigo-600" />
+          <Shield className="w-3 h-3 inline -mt-0.5 mr-1 text-blue-600" />
           Akses pertama otomatis menjadi Owner utama. Anda bisa tambahkan Manajer, Leader & Karyawan dari menu "Anggota Tim".
         </p>
       </div>
@@ -929,7 +965,7 @@ function LoginScreen({ allUsers, settings, onLogin }) {
   return (
     <AuthShell settings={settings}>
       <div className="text-center mb-7">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-indigo-50 text-indigo-800 rounded-full text-xs font-bold mb-4 border border-indigo-200/60">
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-blue-50 text-blue-800 rounded-full text-xs font-bold mb-4 border border-blue-200/60">
           <Lock className="w-3.5 h-3.5" /> SELAMAT DATANG KEMBALI
         </div>
         <h2 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">Masuk ke Sistem</h2>
@@ -940,14 +976,14 @@ function LoginScreen({ allUsers, settings, onLogin }) {
           <input type="text" value={form.username} onChange={e => setForm({ ...form, username: e.target.value.toLowerCase() })}
             onKeyDown={e => e.key === 'Enter' && submit()}
             placeholder="mis. alkahfi"
-            className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-[#4F46E5] lowercase transition" />
+            className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] lowercase transition" />
         </Field>
         <Field label="Password">
           <div className="relative">
             <input type={show ? 'text' : 'password'} value={form.password}
               onChange={e => setForm({ ...form, password: e.target.value })}
               onKeyDown={e => e.key === 'Enter' && submit()}
-              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-[#4F46E5] pr-10 transition" />
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] pr-10 transition" />
             <button type="button" onClick={() => setShow(!show)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
               {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
@@ -955,11 +991,11 @@ function LoginScreen({ allUsers, settings, onLogin }) {
         </Field>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2.5 rounded-xl flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />{error}</div>}
         <button onClick={submit} disabled={busy}
-          className="w-full bg-gradient-to-r from-[#4F46E5] to-indigo-700 hover:from-[#4F46E5] hover:to-indigo-800 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-indigo-900/20 hover:shadow-xl hover:shadow-indigo-900/30 flex items-center justify-center gap-2 mt-2">
+          className="w-full bg-gradient-to-r from-[#2563EB] to-blue-700 hover:from-[#2563EB] hover:to-blue-800 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-blue-900/20 hover:shadow-xl hover:shadow-blue-900/30 flex items-center justify-center gap-2 mt-2">
           <Lock className="w-4 h-4" /> {busy ? 'Memproses...' : 'Masuk ke Dashboard'}
         </button>
         <p className="text-[11px] text-center text-slate-500 mt-3 leading-relaxed">
-          <Shield className="w-3 h-3 inline -mt-0.5 mr-1 text-indigo-600" />
+          <Shield className="w-3 h-3 inline -mt-0.5 mr-1 text-blue-600" />
           Lupa password? Hubungi Manajer atau Leader Anda untuk reset.
         </p>
       </div>
@@ -973,20 +1009,20 @@ function AuthShell({ settings, children }) {
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'); .font-display { font-family: 'Inter', system-ui, sans-serif; letter-spacing: -0.025em; }`}</style>
 
       {/* LEFT: Landing-style Hero panel (hidden on mobile) */}
-      <div style={{ background: 'linear-gradient(135deg, #3730A3 0%, #4F46E5 50%, #1E1B4B 100%)', color: '#FFFFFF' }}
+      <div style={{ background: 'linear-gradient(160deg, #060B18 0%, #0A1430 50%, #0B1B45 100%)', color: '#FFFFFF' }}
         className="hidden lg:flex lg:w-1/2 xl:w-[58%] relative overflow-hidden text-white">
 
         {/* Organic wave shapes (background blobs) */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="xMidYMid slice" viewBox="0 0 800 1000" xmlns="http://www.w3.org/2000/svg">
-          {/* Top-right gold blob */}
+          {/* Top-right blue blob */}
           <path d="M 800 0 Q 720 80 760 200 Q 800 320 700 380 Q 600 440 680 540 Q 760 640 720 720 L 800 720 Z"
-            fill="rgba(252, 211, 77, 0.08)" />
+            fill="rgba(59, 130, 246, 0.10)" />
           {/* Mid wave */}
           <path d="M 0 500 Q 200 460 320 540 Q 440 620 600 580 Q 720 540 800 600 L 800 1000 L 0 1000 Z"
-            fill="rgba(55, 48, 163, 0.4)" />
+            fill="rgba(30, 58, 138, 0.35)" />
           {/* Bottom wave */}
           <path d="M 0 700 Q 160 660 280 720 Q 400 780 540 740 Q 660 700 800 760 L 800 1000 L 0 1000 Z"
-            fill="rgba(49, 46, 129, 0.5)" />
+            fill="rgba(8, 16, 38, 0.6)" />
         </svg>
 
         {/* Subtle islamic geometric pattern */}
@@ -1003,14 +1039,14 @@ function AuthShell({ settings, children }) {
 
         {/* Glow accents */}
         <div className="absolute -left-32 -top-32 w-96 h-96 rounded-full blur-[120px] pointer-events-none"
-          style={{ background: 'rgba(252, 211, 77, 0.18)' }}></div>
+          style={{ background: 'rgba(37, 99, 235, 0.28)' }}></div>
         <div className="absolute right-0 bottom-0 w-[500px] h-[500px] rounded-full blur-[140px] pointer-events-none"
-          style={{ background: 'rgba(129, 140, 248, 0.18)' }}></div>
+          style={{ background: 'rgba(59, 130, 246, 0.22)' }}></div>
 
         {/* Decorative dots (like clouds in reference) */}
-        <div className="absolute top-32 right-24 w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#FCD34D', boxShadow: '0 0 14px rgba(252,211,77,0.7)' }}></div>
-        <div className="absolute top-52 right-44 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#FCD34D', opacity: 0.7, boxShadow: '0 0 8px rgba(252,211,77,0.5)' }}></div>
-        <div className="absolute bottom-72 left-32 w-1 h-1 rounded-full" style={{ backgroundColor: '#FCD34D', opacity: 0.8, boxShadow: '0 0 6px rgba(252,211,77,0.5)' }}></div>
+        <div className="absolute top-32 right-24 w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#60A5FA', boxShadow: '0 0 14px rgba(96,165,250,0.8)' }}></div>
+        <div className="absolute top-52 right-44 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#93C5FD', opacity: 0.7, boxShadow: '0 0 8px rgba(147,197,253,0.6)' }}></div>
+        <div className="absolute bottom-72 left-32 w-1 h-1 rounded-full" style={{ backgroundColor: '#60A5FA', opacity: 0.8, boxShadow: '0 0 6px rgba(96,165,250,0.6)' }}></div>
 
         <div className="relative z-10 flex flex-col h-full p-10 xl:p-14 w-full">
 
@@ -1023,13 +1059,13 @@ function AuthShell({ settings, children }) {
               </div>
               <div>
                 <h1 style={{ color: '#FFFFFF' }} className="font-display text-xl font-bold">{settings.appName}</h1>
-                <p style={{ color: '#FCD34D' }} className="text-[10px] uppercase tracking-[0.2em] font-bold">{settings.appSubtitle}</p>
+                <p style={{ color: '#60A5FA' }} className="text-[10px] uppercase tracking-[0.2em] font-bold">{settings.appSubtitle}</p>
               </div>
             </div>
             <div className="flex gap-2 mt-5 flex-wrap">
               <span style={{ backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)', color: '#FFFFFF' }}
                 className="text-[10px] px-3 py-1.5 rounded-full font-bold uppercase tracking-wider">Agency</span>
-              <span style={{ backgroundColor: 'rgba(252,211,77,0.18)', border: '1px solid rgba(252,211,77,0.4)', color: '#FCD34D' }}
+              <span style={{ backgroundColor: 'rgba(59,130,246,0.18)', border: '1px solid rgba(96,165,250,0.4)', color: '#93C5FD' }}
                 className="text-[10px] px-3 py-1.5 rounded-full font-bold uppercase tracking-wider">Team Suite</span>
               <span style={{ backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)', color: '#FFFFFF' }}
                 className="text-[10px] px-3 py-1.5 rounded-full font-bold uppercase tracking-wider">v1.0</span>
@@ -1040,30 +1076,30 @@ function AuthShell({ settings, children }) {
           <div className="flex-1 flex flex-col justify-center py-8 gap-7">
             <div className="max-w-lg">
               <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] font-bold mb-3"
-                style={{ color: '#FCD34D' }}>
-                <span className="w-8 h-px" style={{ backgroundColor: 'rgba(252,211,77,0.6)' }}></span>
+                style={{ color: '#60A5FA' }}>
+                <span className="w-8 h-px" style={{ backgroundColor: 'rgba(96,165,250,0.6)' }}></span>
                 MASJID AFFILIATE AGENCY
               </div>
               <h2 className="font-display font-bold leading-[0.95] mb-4 text-5xl xl:text-6xl">
                 <span style={{ color: '#FFFFFF' }}>Kelola Tim</span><br/>
                 <span style={{ color: '#FFFFFF' }}>Agency</span><br/>
                 <span style={{
-                  background: 'linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%)',
+                  background: 'linear-gradient(135deg, #93C5FD 0%, #3B82F6 60%, #2563EB 100%)',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   backgroundClip: 'text'
                 }}>Lebih Rapi.</span>
               </h2>
-              <p style={{ color: 'rgba(209,250,229,0.9)' }} className="text-base leading-relaxed max-w-md">
+              <p style={{ color: 'rgba(191,219,254,0.85)' }} className="text-base leading-relaxed max-w-md">
                 Satu dashboard untuk tugas, creator, laporan, jadwal live, dan performa tim — semua terkontrol dari satu tempat.
               </p>
             </div>
 
-            {/* Dashboard mockup preview (decorative) */}
-            <div className="relative max-w-md mt-2">
+            {/* Dashboard mockup preview (decorative, 3D melayang) */}
+            <div className="relative max-w-md mt-2 scene-3d">
               {/* Main "browser window" */}
-              <div className="rounded-2xl shadow-2xl p-3 backdrop-blur-md"
-                style={{ backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)' }}>
+              <div className="card-3d animate-float rounded-2xl p-3 backdrop-blur-md glow-blue-soft"
+                style={{ backgroundColor: 'rgba(13,25,55,0.7)', border: '1px solid rgba(96,165,250,0.25)' }}>
                 {/* Window chrome dots */}
                 <div className="flex gap-1.5 mb-3 pl-1">
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#F87171' }}></div>
@@ -1080,31 +1116,31 @@ function AuthShell({ settings, children }) {
                     <div className="text-[8px] uppercase font-bold" style={{ color: 'rgba(209,250,229,0.7)' }}>Creator</div>
                     <div className="text-base font-display font-bold" style={{ color: '#FFFFFF' }}>48</div>
                   </div>
-                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(252,211,77,0.18)', border: '1px solid rgba(252,211,77,0.3)' }}>
-                    <div className="text-[8px] uppercase font-bold" style={{ color: '#FCD34D' }}>GMV</div>
-                    <div className="text-base font-display font-bold" style={{ color: '#FCD34D' }}>Rp 85jt</div>
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(37,99,235,0.28)', border: '1px solid rgba(96,165,250,0.4)' }}>
+                    <div className="text-[8px] uppercase font-bold" style={{ color: '#93C5FD' }}>GMV</div>
+                    <div className="text-base font-display font-bold" style={{ color: '#BFDBFE' }}>Rp 3,7M</div>
                   </div>
                 </div>
                 {/* Target row */}
                 <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#FCD34D' }}></div>
-                      <span className="text-[9px] font-semibold" style={{ color: 'rgba(209,250,229,0.95)' }}>Target Tim Mei</span>
+                      <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#60A5FA', boxShadow: '0 0 8px rgba(96,165,250,0.8)' }}></div>
+                      <span className="text-[9px] font-semibold" style={{ color: 'rgba(191,219,254,0.95)' }}>Goal Affiliator 1M</span>
                     </div>
-                    <span className="text-[9px] font-bold" style={{ color: '#FCD34D' }}>68%</span>
+                    <span className="text-[9px] font-bold" style={{ color: '#60A5FA' }}>68%</span>
                   </div>
                   <div className="w-full h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>
-                    <div className="h-full rounded-full" style={{ width: '68%', backgroundColor: '#FCD34D' }}></div>
+                    <div className="h-full rounded-full" style={{ width: '68%', background: 'linear-gradient(90deg, #60A5FA, #2563EB)' }}></div>
                   </div>
                 </div>
               </div>
 
               {/* Floating notification card (top right) */}
-              <div className="absolute -top-5 -right-3 rounded-xl px-3 py-2 shadow-xl flex items-center gap-2 transform rotate-[4deg]"
-                style={{ backgroundColor: '#FFFFFF', color: '#111827' }}>
+              <div className="absolute -top-5 -right-3 rounded-xl px-3 py-2 flex items-center gap-2 transform rotate-[4deg] animate-float-slow"
+                style={{ backgroundColor: '#FFFFFF', color: '#111827', boxShadow: '0 18px 44px -12px rgba(37,99,235,0.6)' }}>
                 <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#D1FAE5' }}>
-                  <Check className="w-3 h-3" style={{ color: '#4338CA' }} />
+                  <Check className="w-3 h-3" style={{ color: '#1D4ED8' }} />
                 </div>
                 <div>
                   <div className="text-[9px] font-bold" style={{ color: '#111827' }}>Tugas Selesai</div>
@@ -1113,10 +1149,10 @@ function AuthShell({ settings, children }) {
               </div>
 
               {/* Floating user card (bottom left) */}
-              <div className="absolute -bottom-4 -left-6 rounded-xl px-3 py-2 shadow-xl flex items-center gap-2 transform -rotate-[3deg]"
-                style={{ backgroundColor: '#FFFFFF', color: '#111827' }}>
+              <div className="absolute -bottom-4 -left-6 rounded-xl px-3 py-2 flex items-center gap-2 transform -rotate-[3deg] animate-float"
+                style={{ backgroundColor: '#FFFFFF', color: '#111827', boxShadow: '0 18px 44px -12px rgba(37,99,235,0.55)', animationDelay: '0.8s' }}>
                 <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[11px] font-bold"
-                  style={{ background: 'linear-gradient(135deg, #14B8A6, #4338CA)' }}>A</div>
+                  style={{ background: 'linear-gradient(135deg, #14B8A6, #1D4ED8)' }}>A</div>
                 <div>
                   <div className="text-[10px] font-bold" style={{ color: '#111827' }}>Al-Kahfi</div>
                   <div className="text-[8px] flex items-center gap-1" style={{ color: '#64748B' }}>
@@ -1127,55 +1163,57 @@ function AuthShell({ settings, children }) {
               </div>
 
               {/* Floating chart card (right middle) */}
-              <div className="absolute top-1/2 -right-8 -translate-y-1/2 rounded-xl px-3 py-2 shadow-xl transform rotate-[6deg]"
-                style={{ backgroundColor: '#FFFFFF', color: '#111827' }}>
+              <div className="absolute top-1/2 -right-8 -translate-y-1/2 rounded-xl px-3 py-2 transform rotate-[6deg] animate-float-slow"
+                style={{ backgroundColor: '#FFFFFF', color: '#111827', boxShadow: '0 18px 44px -12px rgba(37,99,235,0.55)', animationDelay: '1.4s' }}>
                 <div className="text-[8px] uppercase font-bold mb-1" style={{ color: '#64748B' }}>Pekan Ini</div>
                 <div className="flex items-end gap-1 h-8">
-                  <div className="w-1.5 rounded-t" style={{ height: '40%', backgroundColor: '#4F46E5' }}></div>
-                  <div className="w-1.5 rounded-t" style={{ height: '60%', backgroundColor: '#4F46E5' }}></div>
-                  <div className="w-1.5 rounded-t" style={{ height: '45%', backgroundColor: '#4F46E5' }}></div>
-                  <div className="w-1.5 rounded-t" style={{ height: '80%', backgroundColor: '#D6A84F' }}></div>
-                  <div className="w-1.5 rounded-t" style={{ height: '95%', backgroundColor: '#D6A84F' }}></div>
+                  <div className="w-1.5 rounded-t" style={{ height: '40%', backgroundColor: '#BFDBFE' }}></div>
+                  <div className="w-1.5 rounded-t" style={{ height: '60%', backgroundColor: '#93C5FD' }}></div>
+                  <div className="w-1.5 rounded-t" style={{ height: '45%', backgroundColor: '#BFDBFE' }}></div>
+                  <div className="w-1.5 rounded-t" style={{ height: '80%', backgroundColor: '#3B82F6' }}></div>
+                  <div className="w-1.5 rounded-t" style={{ height: '95%', backgroundColor: '#2563EB' }}></div>
                 </div>
-                <div className="text-[8px] font-bold mt-1" style={{ color: '#4338CA' }}>↗ +24%</div>
+                <div className="text-[8px] font-bold mt-1" style={{ color: '#1D4ED8' }}>↗ +24%</div>
               </div>
             </div>
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between text-[11px] pt-6 border-t" style={{ borderTopColor: 'rgba(255,255,255,0.1)', color: 'rgba(167,243,208,0.6)' }}>
+          <div className="flex items-center justify-between text-[11px] pt-6 border-t" style={{ borderTopColor: 'rgba(255,255,255,0.1)', color: 'rgba(148,163,184,0.7)' }}>
             <span>© {new Date().getFullYear()} Al-Kahfi Corp</span>
             <span className="flex items-center gap-1.5"><Shield className="w-3 h-3" /> Ter-enkripsi PBKDF2</span>
           </div>
         </div>
       </div>
 
-      {/* RIGHT: Form panel */}
+      {/* RIGHT: Form panel (gelap, kartu form putih melayang) */}
       <div className="flex-1 flex items-center justify-center p-6 sm:p-12 relative overflow-hidden"
-        style={{ background: 'linear-gradient(135deg, #F6F5FE 0%, #FFFFFF 50%, #ECFDF5 100%)' }}>
-        {/* Subtle decoration */}
-        <div className="absolute top-16 right-16 w-40 h-40 rounded-full blur-3xl pointer-events-none" style={{ backgroundColor: 'rgba(199, 210, 254, 0.4)' }}></div>
-        <div className="absolute bottom-16 left-16 w-48 h-48 rounded-full blur-3xl pointer-events-none" style={{ backgroundColor: 'rgba(253, 230, 138, 0.3)' }}></div>
+        style={{ background: 'linear-gradient(160deg, #081026 0%, #0A1430 55%, #0B1B45 100%)' }}>
+        {/* Glow biru */}
+        <div className="absolute top-10 right-10 w-64 h-64 rounded-full blur-[100px] pointer-events-none" style={{ backgroundColor: 'rgba(37,99,235,0.25)' }}></div>
+        <div className="absolute bottom-10 left-10 w-72 h-72 rounded-full blur-[110px] pointer-events-none" style={{ backgroundColor: 'rgba(59,130,246,0.18)' }}></div>
+        <div className="absolute top-1/4 left-1/3 w-1.5 h-1.5 rounded-full pointer-events-none" style={{ backgroundColor: '#60A5FA', boxShadow: '0 0 10px rgba(96,165,250,0.9)' }}></div>
 
         <div className="relative w-full max-w-md">
           {/* Mobile brand (only on small screens) */}
           <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl overflow-hidden shadow-lg shadow-indigo-900/20"
-              style={{ background: 'linear-gradient(135deg, #4F46E5, #4338CA)' }}>
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl overflow-hidden"
+              style={{ background: 'linear-gradient(135deg, #2563EB, #1D4ED8)', boxShadow: '0 10px 30px -8px rgba(37,99,235,0.8)' }}>
               {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
             </div>
             <div>
-              <h1 className="font-display text-xl font-bold text-slate-900">{settings.appName}</h1>
-              <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">{settings.appSubtitle}</p>
+              <h1 className="font-display text-xl font-bold text-white">{settings.appName}</h1>
+              <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: '#60A5FA' }}>{settings.appSubtitle}</p>
             </div>
           </div>
 
-          {/* Form card */}
-          <div className="bg-white rounded-3xl shadow-2xl shadow-indigo-900/10 p-8 sm:p-10 border border-slate-200/60">
+          {/* Form card — melayang dengan glow 3D */}
+          <div className="bg-white rounded-3xl p-8 sm:p-10 border border-white/20"
+            style={{ boxShadow: '0 30px 80px -16px rgba(37,99,235,0.5), 0 8px 24px rgba(2,6,23,0.6)' }}>
             {children}
           </div>
 
-          <div className="text-center text-[11px] text-slate-400 mt-6">
+          <div className="text-center text-[11px] mt-6" style={{ color: '#475569' }}>
             Powered by Al-Kahfi Corp · Built for Affiliate Agency
           </div>
         </div>
@@ -1241,30 +1279,31 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
   const mobileWide = mobileOpen;
 
   return (
-    <aside style={{ backgroundColor: '#FFFFFF', color: '#0E1525' }}
-      className={`fixed left-0 top-0 h-screen flex flex-col transition-all duration-200 border-r border-slate-200 z-40
+    <aside style={{ backgroundColor: '#0B1120', color: '#E2E8F0' }}
+      className={`fixed left-0 top-0 h-screen flex flex-col transition-all duration-200 border-r border-white/10 z-40
         w-64 ${isOpen ? 'lg:w-64' : 'lg:w-16'}
         ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
       {/* Tombol tutup drawer (mobile only) */}
       <button onClick={onCloseMobile} title="Tutup menu"
-        className="lg:hidden absolute top-3 right-3 z-50 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
+        className="lg:hidden absolute top-3 right-3 z-50 p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition">
         <X className="w-5 h-5" />
       </button>
       {/* Brand header */}
-      <div className={`${(isOpen || mobileWide) ? 'px-5 py-5' : 'p-3'} border-b border-slate-100 flex items-center ${(isOpen || mobileWide) ? 'justify-between gap-2' : 'justify-center lg:justify-center'}`}>
+      <div className={`${(isOpen || mobileWide) ? 'px-5 py-5' : 'p-3'} border-b border-white/10 flex items-center ${(isOpen || mobileWide) ? 'justify-between gap-2' : 'justify-center lg:justify-center'}`}>
         {(isOpen) ? (
           <>
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl flex items-center justify-center text-xl overflow-hidden flex-shrink-0 shadow-lg shadow-indigo-500/30 ring-1 ring-black/5">
+              <div style={{ boxShadow: '0 8px 24px -6px rgba(37,99,235,0.55)' }}
+                className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center text-xl overflow-hidden flex-shrink-0 ring-1 ring-white/20">
                 {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
               </div>
               <div className="min-w-0">
-                <div style={{ color: '#0E1525' }} className="font-display font-bold text-base truncate">{settings.appName}</div>
-                <div style={{ color: '#B45309' }} className="text-[9px] uppercase tracking-[0.15em] truncate font-bold">{settings.appSubtitle}</div>
+                <div style={{ color: '#F8FAFC' }} className="font-display font-bold text-base truncate">{settings.appName}</div>
+                <div style={{ color: '#60A5FA' }} className="text-[9px] uppercase tracking-[0.15em] truncate font-bold">{settings.appSubtitle}</div>
               </div>
             </div>
             <button onClick={onToggle} title="Sembunyikan sidebar"
-              className="hidden lg:flex text-slate-400 hover:text-slate-700 p-1 flex-shrink-0 transition">
+              className="hidden lg:flex text-slate-500 hover:text-white p-1 flex-shrink-0 transition">
               <PanelLeftClose className="w-4 h-4" />
             </button>
           </>
@@ -1272,16 +1311,18 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
           <>
             {/* Mobile: tampilkan brand penuh; Desktop collapsed: cuma logo */}
             <div className="flex lg:hidden items-center gap-3 min-w-0">
-              <div className="w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl flex items-center justify-center text-xl overflow-hidden flex-shrink-0 shadow-lg ring-1 ring-black/5">
+              <div style={{ boxShadow: '0 8px 24px -6px rgba(37,99,235,0.55)' }}
+                className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center text-xl overflow-hidden flex-shrink-0 ring-1 ring-white/20">
                 {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
               </div>
               <div className="min-w-0">
-                <div style={{ color: '#0E1525' }} className="font-display font-bold text-base truncate">{settings.appName}</div>
-                <div style={{ color: '#B45309' }} className="text-[9px] uppercase tracking-[0.15em] truncate font-bold">{settings.appSubtitle}</div>
+                <div style={{ color: '#F8FAFC' }} className="font-display font-bold text-base truncate">{settings.appName}</div>
+                <div style={{ color: '#60A5FA' }} className="text-[9px] uppercase tracking-[0.15em] truncate font-bold">{settings.appSubtitle}</div>
               </div>
             </div>
             <button onClick={onToggle} title="Tampilkan sidebar"
-              className="hidden lg:flex w-10 h-10 bg-gradient-to-br from-violet-600 to-indigo-700 rounded-xl items-center justify-center text-xl overflow-hidden hover:opacity-90 transition shadow-lg ring-1 ring-black/5">
+              style={{ boxShadow: '0 8px 24px -6px rgba(37,99,235,0.55)' }}
+              className="hidden lg:flex w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl items-center justify-center text-xl overflow-hidden hover:opacity-90 transition ring-1 ring-white/20">
               {settings.logoImage ? <img src={settings.logoImage} alt="" className="w-full h-full object-cover" /> : settings.logoEmoji}
             </button>
           </>
@@ -1295,11 +1336,11 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
           if (visibleItems.length === 0) return null;
           return (
             <div key={gi}>
-              <div style={{ color: '#9AA3AF' }}
+              <div style={{ color: '#5B6B85' }}
                 className={`text-[10px] uppercase tracking-[0.16em] font-bold mb-2 px-3 ${isOpen ? '' : 'lg:hidden'}`}>
                 {group.label}
               </div>
-              {!isOpen && gi > 0 && <div className="hidden lg:block h-px bg-slate-100 mx-2 mb-3"></div>}
+              {!isOpen && gi > 0 && <div className="hidden lg:block h-px bg-white/10 mx-2 mb-3"></div>}
               <div className="space-y-1">
                 {visibleItems.map(item => {
                   const Icon = item.icon;
@@ -1308,16 +1349,16 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
                     <button key={item.id} onClick={() => handleNav(item.id)}
                       title={!isOpen ? item.label : undefined}
                       style={active
-                        ? { backgroundColor: '#EEF0FF', color: '#4338CA' }
-                        : { color: '#3C4658' }}
+                        ? { backgroundColor: 'rgba(37,99,235,0.22)', color: '#FFFFFF', boxShadow: 'inset 0 0 0 1px rgba(96,165,250,0.35), 0 6px 18px -8px rgba(37,99,235,0.6)' }
+                        : { color: '#94A3B8' }}
                       className={`group w-full flex items-center py-2.5 rounded-xl text-sm font-semibold transition-all relative ${
                         isOpen ? 'gap-3 px-3' : 'gap-3 px-3 lg:justify-center lg:gap-0 lg:px-2'
-                      } ${active ? '' : 'hover:bg-slate-100'}`}>
+                      } ${active ? '' : 'hover:bg-white/5 hover:text-white'}`}>
                       {active && (
-                        <div style={{ backgroundColor: '#4F46E5' }}
+                        <div style={{ backgroundColor: '#3B82F6', boxShadow: '0 0 12px rgba(59,130,246,0.9)' }}
                           className={`absolute -left-3 top-2 bottom-2 w-1 rounded-r-full ${isOpen ? '' : 'lg:hidden'}`}></div>
                       )}
-                      <Icon style={{ color: active ? '#4F46E5' : '#8A93A4' }}
+                      <Icon style={{ color: active ? '#60A5FA' : '#64748B' }}
                         className="w-[18px] h-[18px] flex-shrink-0 transition" />
                       <span className={`truncate ${isOpen ? '' : 'lg:hidden'}`}>{item.label}</span>
                     </button>
@@ -1330,25 +1371,25 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       </nav>
 
       {/* User profile bottom */}
-      <div className={`border-t border-slate-100 ${isOpen ? 'p-3' : 'p-3 lg:p-2'}`}>
+      <div className={`border-t border-white/10 ${isOpen ? 'p-3' : 'p-3 lg:p-2'}`}>
         {/* Expanded profile (mobile always, desktop when open) */}
         <div className={isOpen ? 'block' : 'block lg:hidden'}>
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 transition">
+          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition">
             <button onClick={onOpenProfile} title="Profil Saya"
-              className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-700 flex items-center justify-center font-bold text-sm flex-shrink-0 overflow-hidden ring-2 ring-amber-400/40 hover:ring-amber-400/80 transition text-white">
+              className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center font-bold text-sm flex-shrink-0 overflow-hidden ring-2 ring-blue-400/40 hover:ring-blue-400/80 transition text-white">
               {user.avatarImage
                 ? <img src={user.avatarImage} alt="" className="w-full h-full object-cover" />
                 : user.name.charAt(0).toUpperCase()}
             </button>
             <button onClick={onOpenProfile} className="flex-1 min-w-0 text-left hover:opacity-90 transition">
-              <div style={{ color: '#0E1525' }} className="text-sm font-semibold truncate">{user.name}</div>
-              <div style={{ color: '#64748B' }} className="text-[10px] flex items-center gap-1">
+              <div style={{ color: '#F1F5F9' }} className="text-sm font-semibold truncate">{user.name}</div>
+              <div style={{ color: '#94A3B8' }} className="text-[10px] flex items-center gap-1">
                 <RoleIcon className="w-2.5 h-2.5" /> {ROLES[user.role].label}
               </div>
-              {user.jobTitle && <div style={{ color: '#B45309' }} className="text-[10px] font-medium truncate mt-0.5">{user.jobTitle}</div>}
+              {displayJobTitle(user) && <div style={{ color: '#60A5FA' }} className="text-[10px] font-medium truncate mt-0.5">{displayJobTitle(user)}</div>}
             </button>
             <button onClick={onLogout} title="Keluar"
-              className="text-slate-400 hover:text-red-500 transition p-1">
+              className="text-slate-500 hover:text-red-400 transition p-1">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -1356,7 +1397,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         {/* Collapsed profile (desktop collapsed only) */}
         <div className={isOpen ? 'hidden' : 'hidden lg:flex flex-col items-center gap-2'}>
           <button onClick={onOpenProfile} title={`${user.name} — ${ROLES[user.role].label} (klik untuk profil)`}
-            className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-700 flex items-center justify-center font-bold text-sm overflow-hidden ring-2 ring-amber-400/40 hover:ring-amber-400/80 transition text-white">
+            className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center font-bold text-sm overflow-hidden ring-2 ring-blue-400/40 hover:ring-blue-400/80 transition text-white">
             {user.avatarImage
                 ? <img src={user.avatarImage} alt="" className="w-full h-full object-cover" />
                 : user.name.charAt(0).toUpperCase()}
@@ -1563,7 +1604,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
   const quickActions = [
     { label: 'Tugas Baru', icon: CheckSquare, view: 'tasks', color: 'text-blue-600 bg-blue-50' },
     { label: 'Creator Baru', icon: Users, view: 'creators', color: 'text-purple-600 bg-purple-50' },
-    { label: 'Laporan Harian', icon: ClipboardList, view: 'daily-reports', color: 'text-indigo-600 bg-indigo-50' },
+    { label: 'Laporan Harian', icon: ClipboardList, view: 'daily-reports', color: 'text-blue-600 bg-blue-50' },
     { label: 'Ide Konten Baru', icon: Lightbulb, view: 'content-ideas', color: 'text-amber-600 bg-amber-50' },
     { label: 'Pengumuman', icon: Megaphone, view: 'announcements', color: 'text-rose-600 bg-rose-50' }
   ];
@@ -1577,8 +1618,8 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
       <div className="fixed top-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm pointer-events-none">
         {toasts.map(t => {
           const Icon = t.type === 'task' ? CheckSquare : t.type === 'comment' ? MessageSquare : t.type === 'calendar' ? CalendarDays : Megaphone;
-          const accent = t.type === 'task' ? '#4F46E5' : t.type === 'comment' ? '#9333EA' : t.type === 'calendar' ? '#0284C7' : '#D97706';
-          const bg = t.type === 'task' ? '#EEF2FF' : t.type === 'comment' ? '#FAF5FF' : t.type === 'calendar' ? '#E0F2FE' : '#FFFBEB';
+          const accent = t.type === 'task' ? '#2563EB' : t.type === 'comment' ? '#9333EA' : t.type === 'calendar' ? '#0284C7' : '#D97706';
+          const bg = t.type === 'task' ? '#EFF6FF' : t.type === 'comment' ? '#FAF5FF' : t.type === 'calendar' ? '#E0F2FE' : '#FFFBEB';
           return (
             <button key={t.toastId}
               onClick={() => { t.action && t.action(); setToasts(prev => prev.filter(x => x.toastId !== t.toastId)); }}
@@ -1623,7 +1664,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
 
       {/* Search bar */}
       <div ref={searchRef} className="flex-1 max-w-xl mx-auto relative">
-        <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition ${showSearchDropdown ? 'bg-white border-indigo-500 ring-2 ring-indigo-500/20' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition ${showSearchDropdown ? 'bg-white border-blue-500 ring-2 ring-blue-500/20' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
           <Search className="w-4 h-4 text-slate-400 flex-shrink-0" />
           <input type="text" value={searchQuery}
             onChange={e => { setSearchQuery(e.target.value); setShowSearchDropdown(true); }}
@@ -1650,7 +1691,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                     <div className="px-4 py-2 text-[10px] uppercase font-bold text-slate-500 bg-slate-50/50">Tugas ({searchResults.tasks.length})</div>
                     {searchResults.tasks.map(t => (
                       <button key={t.id} onClick={() => { setView('tasks'); setShowSearchDropdown(false); setSearchQuery(''); }}
-                        className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition flex items-center gap-3">
+                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
                           <CheckSquare className="w-4 h-4" />
                         </div>
@@ -1667,7 +1708,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                     <div className="px-4 py-2 text-[10px] uppercase font-bold text-slate-500 bg-slate-50/50">Creator ({searchResults.creators.length})</div>
                     {searchResults.creators.map(c => (
                       <button key={c.id} onClick={() => { setView('creators'); setShowSearchDropdown(false); setSearchQuery(''); }}
-                        className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition flex items-center gap-3">
+                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center flex-shrink-0">
                           <Users className="w-4 h-4" />
                         </div>
@@ -1684,8 +1725,8 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                     <div className="px-4 py-2 text-[10px] uppercase font-bold text-slate-500 bg-slate-50/50">Anggota Tim ({searchResults.users.length})</div>
                     {searchResults.users.map(u => (
                       <button key={u.id} onClick={() => { setView(user.role !== 'operasional' ? 'users' : 'leaderboard'); setShowSearchDropdown(false); setSearchQuery(''); }}
-                        className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-700 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden">
+                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-700 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden">
                           {u.avatarImage ? <img src={u.avatarImage} alt="" className="w-full h-full object-cover" /> : u.name.charAt(0).toUpperCase()}
                         </div>
                         <div className="min-w-0 flex-1">
@@ -1707,7 +1748,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
         {/* Quick action */}
         <div className="relative">
           <button onClick={() => { setShowQuickAction(!showQuickAction); setShowNotifDropdown(false); }}
-            className="bg-gradient-to-r from-violet-600 to-indigo-700 hover:from-violet-700 hover:to-indigo-800 text-white px-3 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-900/15 transition">
+            className="bg-gradient-to-r from-violet-600 to-blue-700 hover:from-violet-700 hover:to-blue-800 text-white px-3 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5 shadow-md shadow-blue-900/15 transition">
             <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Tambah</span>
           </button>
           {showQuickAction && (
@@ -1762,7 +1803,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                   </div>
                   <button onClick={toggleSound}
                     title={soundOn ? 'Suara notif: AKTIF (klik untuk matikan)' : 'Suara notif: MATI (klik untuk aktifkan)'}
-                    className={`flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition ${soundOn ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-400'}`}>
+                    className={`flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition ${soundOn ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-400'}`}>
                     {soundOn ? <Bell className="w-3.5 h-3.5" /> : <Bell className="w-3.5 h-3.5" />}
                     {soundOn ? 'Suara ON' : 'Suara OFF'}
                   </button>
@@ -1781,7 +1822,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                       const color = n.type === 'task' ? 'text-blue-600 bg-blue-50' : n.type === 'comment' ? 'text-purple-600 bg-purple-50' : n.type === 'calendar' ? 'text-sky-600 bg-sky-50' : 'text-amber-600 bg-amber-50';
                       return (
                         <button key={n.id} onClick={() => { n.action(); setShowNotifDropdown(false); }}
-                          className={`w-full text-left px-4 py-2.5 hover:bg-slate-50 transition flex items-start gap-3 border-b border-slate-50 ${isUnread ? 'bg-indigo-50/30' : ''}`}>
+                          className={`w-full text-left px-4 py-2.5 hover:bg-slate-50 transition flex items-start gap-3 border-b border-slate-50 ${isUnread ? 'bg-blue-50/30' : ''}`}>
                           <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${color}`}>
                             <Icon className="w-4 h-4" />
                           </div>
@@ -1790,7 +1831,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                             <div className="text-xs text-slate-500 line-clamp-1">{n.subtitle}</div>
                             <div className="text-[10px] text-slate-400 mt-0.5">{n.time ? fmtDateTime(n.time) : ''}</div>
                           </div>
-                          {isUnread && <div className="w-2 h-2 rounded-full bg-indigo-500 flex-shrink-0 mt-1.5"></div>}
+                          {isUnread && <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1.5"></div>}
                         </button>
                       );
                     })}
@@ -1804,7 +1845,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
         {/* User chip */}
         <button onClick={onOpenProfile}
           className="hidden md:flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 transition">
-          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-indigo-700 flex items-center justify-center text-xs font-bold text-white overflow-hidden">
+          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-blue-700 flex items-center justify-center text-xs font-bold text-white overflow-hidden">
             {user.avatarImage ? <img src={user.avatarImage} alt="" className="w-full h-full object-cover" /> : user.name.charAt(0).toUpperCase()}
           </div>
           <div className="text-left min-w-0 max-w-[120px]">
@@ -1907,7 +1948,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
       badge: overdue > 0
         ? { text: `${overdue} Terlambat`, color: 'bg-red-100 text-red-700 border-red-200' }
         : myTasks.length === 0
-        ? { text: 'Selesai', color: 'bg-indigo-100 text-indigo-700 border-indigo-200' }
+        ? { text: 'Selesai', color: 'bg-blue-100 text-blue-700 border-blue-200' }
         : { text: 'Aktif', color: 'bg-blue-100 text-blue-700 border-blue-200' },
       action: () => setView('tasks')
     },
@@ -1917,7 +1958,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
       icon: Users,
       gradient: 'from-purple-500/15 to-pink-500/15 text-purple-700',
       badge: activeCreators > 0
-        ? { text: 'Aktif', color: 'bg-indigo-100 text-indigo-700 border-indigo-200' }
+        ? { text: 'Aktif', color: 'bg-blue-100 text-blue-700 border-blue-200' }
         : { text: 'Perlu Follow Up', color: 'bg-amber-100 text-amber-700 border-amber-200' },
       action: () => setView('creators')
     },
@@ -1933,8 +1974,8 @@ function Dashboard({ user, allUsers, setView, settings }) {
       label: 'Tim Visible', value: visibleMembers,
       sub: 'Anggota di area Anda',
       icon: Briefcase,
-      gradient: 'from-violet-500/15 to-indigo-500/15 text-violet-700',
-      badge: { text: 'Online', color: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+      gradient: 'from-violet-500/15 to-blue-500/15 text-violet-700',
+      badge: { text: 'Online', color: 'bg-blue-100 text-blue-700 border-blue-200' },
       action: () => user.role !== 'operasional' ? setView('users') : setView('leaderboard')
     }
   ];
@@ -1955,7 +1996,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
     },
     {
       label: 'Laporan Hari Ini', value: myReportedToday ? '✓' : '–',
-      icon: ClipboardList, iconBg: myReportedToday ? 'bg-indigo-100 text-indigo-600' : 'bg-amber-100 text-amber-600',
+      icon: ClipboardList, iconBg: myReportedToday ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600',
       sub: myReportedToday ? 'Sudah submit' : 'Belum submit',
       action: () => setView('daily-reports')
     },
@@ -1975,24 +2016,26 @@ function Dashboard({ user, allUsers, setView, settings }) {
 
   return (
     <div className="space-y-5 max-w-7xl">
-      {/* Hero Section */}
-      <div style={{ background: 'linear-gradient(135deg, #312E81 0%, #3730A3 50%, #312E81 100%)', color: '#FFFFFF' }}
-        className="relative overflow-hidden rounded-3xl p-6 sm:p-7 text-white shadow-xl shadow-indigo-900/20">
-        <div className="absolute -right-16 -top-16 w-72 h-72 bg-amber-400/10 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute right-32 bottom-0 w-40 h-40 bg-violet-300/10 rounded-full blur-2xl pointer-events-none"></div>
-        <div className="absolute right-8 top-8 w-2 h-2 bg-amber-300/40 rounded-full"></div>
-        <div className="absolute right-20 top-20 w-1 h-1 bg-amber-300/60 rounded-full"></div>
+      {/* Hero Section — navy gelap + glow biru elektrik (3D look) */}
+      <div style={{ background: 'linear-gradient(135deg, #070D1F 0%, #0B1B45 45%, #0A1230 100%)', color: '#FFFFFF', boxShadow: '0 24px 60px -20px rgba(37,99,235,0.45)' }}
+        className="relative overflow-hidden rounded-3xl p-6 sm:p-7 text-white shine-hover">
+        <div style={{ background: 'radial-gradient(circle, rgba(59,130,246,0.35) 0%, transparent 70%)' }} className="absolute -right-20 -top-24 w-96 h-96 rounded-full pointer-events-none"></div>
+        <div style={{ background: 'radial-gradient(circle, rgba(37,99,235,0.28) 0%, transparent 70%)' }} className="absolute right-40 -bottom-20 w-72 h-72 rounded-full pointer-events-none"></div>
+        <div style={{ background: 'radial-gradient(circle, rgba(96,165,250,0.18) 0%, transparent 70%)' }} className="absolute -left-16 top-1/2 w-64 h-64 rounded-full pointer-events-none"></div>
+        <div className="absolute right-8 top-8 w-2 h-2 bg-blue-400/70 rounded-full" style={{ boxShadow: '0 0 12px rgba(96,165,250,0.9)' }}></div>
+        <div className="absolute right-20 top-20 w-1 h-1 bg-blue-300/80 rounded-full" style={{ boxShadow: '0 0 8px rgba(147,197,253,0.9)' }}></div>
+        <div className="absolute left-1/2 bottom-6 w-1.5 h-1.5 bg-cyan-300/60 rounded-full" style={{ boxShadow: '0 0 10px rgba(103,232,249,0.8)' }}></div>
         <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-amber-300 text-[10px] uppercase font-bold tracking-[0.2em] flex items-center gap-1.5">
+              <span className="text-blue-300 text-[10px] uppercase font-bold tracking-[0.2em] flex items-center gap-1.5">
                 <Sparkle className="w-3 h-3" /> {greeting}
               </span>
             </div>
             <h1 className="font-display text-2xl sm:text-3xl font-bold leading-tight">
               {user.name.split(' ')[0]}, semangat hari ini!
             </h1>
-            <p className="text-indigo-100/90 text-sm mt-2 max-w-xl">
+            <p className="text-blue-100/90 text-sm mt-2 max-w-xl">
               {myTasks.length === 0
                 ? 'Tidak ada tugas tertunda. Saatnya cari peluang baru atau push konten viral.'
                 : overdue > 0
@@ -2001,7 +2044,8 @@ function Dashboard({ user, allUsers, setView, settings }) {
             </p>
             <div className="flex flex-wrap gap-2 mt-4">
               <button onClick={() => setView('tasks')}
-                className="bg-white text-indigo-800 hover:bg-amber-300 hover:text-indigo-900 text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md">
+                style={{ boxShadow: '0 10px 28px -8px rgba(37,99,235,0.7)' }}
+                className="bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5">
                 <CheckSquare className="w-3.5 h-3.5" /> Lihat Tugas
               </button>
               <button onClick={() => setView('daily-reports')}
@@ -2018,13 +2062,14 @@ function Dashboard({ user, allUsers, setView, settings }) {
           </div>
           {latest && (
             <button onClick={() => setView('announcements')}
-              className="bg-white/10 hover:bg-white/15 backdrop-blur-md rounded-2xl p-4 max-w-sm border border-white/15 text-left transition group">
-              <div className="text-[9px] uppercase font-bold tracking-wider text-amber-300 flex items-center gap-1.5">
+              style={{ boxShadow: '0 16px 44px -16px rgba(59,130,246,0.5)' }}
+              className="bg-white/10 hover:bg-white/15 backdrop-blur-md rounded-2xl p-4 max-w-sm border border-white/15 text-left transition group animate-float-slow">
+              <div className="text-[9px] uppercase font-bold tracking-wider text-blue-300 flex items-center gap-1.5">
                 <Megaphone className="w-3 h-3" /> Pengumuman Terbaru
               </div>
-              <div className="font-semibold text-sm mt-1.5 line-clamp-1 group-hover:text-amber-200 transition">{latest.title}</div>
-              <div className="text-[11px] text-indigo-100/80 mt-1 line-clamp-2">{latest.content}</div>
-              <div className="text-[10px] text-indigo-200/60 mt-2">— {latest.authorName}</div>
+              <div className="font-semibold text-sm mt-1.5 line-clamp-1 group-hover:text-blue-200 transition">{latest.title}</div>
+              <div className="text-[11px] text-blue-100/80 mt-1 line-clamp-2">{latest.content}</div>
+              <div className="text-[10px] text-blue-200/60 mt-2">— {latest.authorName}</div>
             </button>
           )}
         </div>
@@ -2042,7 +2087,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
             const Icon = t.icon;
             return (
               <button key={i} onClick={t.action}
-                className="bg-white rounded-2xl p-4 border border-slate-200/70 shadow-sm shadow-slate-200/40 hover:shadow-md hover:border-slate-300/80 hover:-translate-y-0.5 transition text-left group">
+                className="bg-white rounded-2xl p-4 border border-slate-200/70 shadow-sm shadow-slate-200/40 lift-3d hover:border-blue-200 text-left group">
                 <div className="flex items-center justify-between mb-2">
                   <div className={`w-9 h-9 rounded-xl ${t.iconBg} flex items-center justify-center`}>
                     <Icon className="w-4 h-4" />
@@ -2084,7 +2129,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
           const Icon = s.icon;
           return (
             <button key={i} onClick={s.action}
-              className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-sm shadow-slate-200/40 hover:shadow-md hover:border-slate-300/80 hover:-translate-y-0.5 transition text-left group">
+              className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-sm shadow-slate-200/40 lift-3d hover:border-blue-200 text-left group">
               <div className="flex items-start justify-between mb-3">
                 <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${s.gradient} flex items-center justify-center`}>
                   <Icon className="w-5 h-5" />
@@ -2112,11 +2157,11 @@ function Dashboard({ user, allUsers, setView, settings }) {
               <h3 className="font-display font-bold text-lg text-slate-900">Tugas Saya</h3>
               <p className="text-xs text-slate-500">Yang harus Anda kerjakan</p>
             </div>
-            <button onClick={() => setView('tasks')} className="text-xs text-indigo-700 hover:text-indigo-800 font-semibold">Lihat semua →</button>
+            <button onClick={() => setView('tasks')} className="text-xs text-blue-700 hover:text-blue-800 font-semibold">Lihat semua →</button>
           </div>
           {myTasks.length === 0 ? (
             <div className="text-center py-8 text-slate-400 text-sm">
-              <Check className="w-10 h-10 mx-auto mb-2 text-indigo-300" /> Tidak ada tugas terbuka. 🎉
+              <Check className="w-10 h-10 mx-auto mb-2 text-blue-300" /> Tidak ada tugas terbuka. 🎉
             </div>
           ) : (
             <div className="space-y-2">
@@ -2150,7 +2195,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
               <h3 className="font-display font-bold text-lg text-slate-900">Jadwal Mendatang</h3>
               <p className="text-xs text-slate-500">{upcomingSchedule.length} agenda</p>
             </div>
-            <button onClick={() => setView('schedule')} className="text-xs text-indigo-700 hover:text-indigo-800 font-semibold">Semua →</button>
+            <button onClick={() => setView('schedule')} className="text-xs text-blue-700 hover:text-blue-800 font-semibold">Semua →</button>
           </div>
           {upcomingSchedule.length === 0 ? (
             <div className="text-center py-6 text-slate-400 text-sm">
@@ -2187,16 +2232,16 @@ function Dashboard({ user, allUsers, setView, settings }) {
               <div className="bg-white rounded-2xl border border-slate-200/70 p-6 shadow-sm shadow-slate-200/40">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-display font-bold text-lg text-slate-900 flex items-center gap-2">
-                    <Pin className="w-5 h-5 text-indigo-600" /> Laporan Pinned
+                    <Pin className="w-5 h-5 text-blue-600" /> Laporan Pinned
                   </h3>
-                  <button onClick={() => setView('daily-reports')} className="text-xs text-indigo-700 font-semibold hover:text-indigo-800">Semua →</button>
+                  <button onClick={() => setView('daily-reports')} className="text-xs text-blue-700 font-semibold hover:text-blue-800">Semua →</button>
                 </div>
                 <div className="space-y-3">
                   {pinned.map(r => (
-                    <div key={r.id} className="p-3 rounded-lg border border-indigo-200 bg-indigo-50/30">
+                    <div key={r.id} className="p-3 rounded-lg border border-blue-200 bg-blue-50/30">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
                         <span className="font-semibold text-sm text-slate-900">{r.authorName}</span>
-                        {r.authorJobTitle && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{r.authorJobTitle}</span>}
+                        {r.authorJobTitle && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{r.authorJobTitle}</span>}
                         <span className="text-[10px] text-slate-500">· {fmtDate(r.date)}</span>
                       </div>
                       {(() => {
@@ -2232,7 +2277,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
                   <h3 className="font-display font-bold text-lg text-slate-900 flex items-center gap-2">
                     <CalendarDays className="w-5 h-5 text-blue-600" /> Agenda Hari Ini
                   </h3>
-                  <button onClick={() => setView('calendar')} className="text-xs text-indigo-700 font-semibold hover:text-indigo-800">Buka Kalender →</button>
+                  <button onClick={() => setView('calendar')} className="text-xs text-blue-700 font-semibold hover:text-blue-800">Buka Kalender →</button>
                 </div>
                 <div className="space-y-2">
                   {todayEvents.map(ev => (
@@ -2254,7 +2299,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
 
       <div className="bg-white rounded-2xl border border-slate-200/70 p-6 shadow-sm shadow-slate-200/40">
         <h3 className="font-display font-bold text-lg text-slate-900 flex items-center gap-2 mb-4">
-          <Activity className="w-5 h-5 text-indigo-600" /> Aktivitas Tim
+          <Activity className="w-5 h-5 text-blue-600" /> Aktivitas Tim
         </h3>
         {activities.length === 0 ? (
           <div className="text-center py-6 text-slate-400 text-sm">Belum ada aktivitas</div>
@@ -2423,7 +2468,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
   const areaOf = (series, max) => `${pointsOf(series, max)} ${xAt(n - 1).toFixed(1)},${CH - PADB} ${xAt(0).toFixed(1)},${CH - PADB}`;
 
   const isAll = scope === 'all';
-  const divColor = isAll ? '#4F46E5' : GMV_DIVISIONS[scope].color;
+  const divColor = isAll ? '#2563EB' : GMV_DIVISIONS[scope].color;
   const chartSeries = isAll ? totalSeries : seriesByDiv[scope];
   const chartMaxAll = Math.max(...seriesByDiv.mcn.map(s => s.value), ...seriesByDiv.tap.map(s => s.value), ...seriesByDiv.internal.map(s => s.value), 1);
   const chartMaxDiv = Math.max(...chartSeries.map(s => s.value), 1);
@@ -2436,7 +2481,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
     const pctTarget = grandTarget > 0 ? Math.round((grandTotal / grandTarget) * 100) : null;
     const share = (v) => grandTotal > 0 ? Math.round((v / grandTotal) * 100) : 0;
     cards = [
-      { label: 'GMV Bisnis Bln Ini', value: rpShort(grandTotal), sub: pctTarget !== null ? `${pctTarget}% dari target ${rpShort(grandTarget)}` : 'Belum ada target', accent: '#4F46E5', bg: '#EEF0FF', trend: ch },
+      { label: 'GMV Bisnis Bln Ini', value: rpShort(grandTotal), sub: pctTarget !== null ? `${pctTarget}% dari target ${rpShort(grandTarget)}` : 'Belum ada target', accent: '#2563EB', bg: '#EFF6FF', trend: ch },
       { label: 'MCN', value: rpShort(totals.mcn), sub: `${share(totals.mcn)}% kontribusi`, accent: '#10B981', bg: '#DCFCE7' },
       { label: 'TAP', value: rpShort(totals.tap), sub: `${share(totals.tap)}% kontribusi`, accent: '#F97316', bg: '#FFEDD5' },
       { label: 'Affiliator Internal', value: rpShort(totals.internal), sub: `${share(totals.internal)}% kontribusi`, accent: '#3B82F6', bg: '#DBEAFE' }
@@ -2451,7 +2496,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
     const proj = avg * dim;
     const pctTarget = tgt > 0 ? Math.round((tot / tgt) * 100) : null;
     cards = [
-      { label: 'GMV Bulan Ini', value: rpShort(tot), sub: pctTarget !== null ? `${pctTarget}% dari target ${rpShort(tgt)}` : 'Target belum di-set', accent: divColor, bg: '#EEF0FF', trend: ch },
+      { label: 'GMV Bulan Ini', value: rpShort(tot), sub: pctTarget !== null ? `${pctTarget}% dari target ${rpShort(tgt)}` : 'Target belum di-set', accent: divColor, bg: '#EFF6FF', trend: ch },
       { label: 'Rata-rata / Hari', value: rpShort(avg), sub: `${elapsed} hari berjalan`, accent: '#0EA5E9', bg: '#E0F2FE' },
       { label: 'Hari Terbaik', value: rpShort(best), sub: 'GMV tertinggi sebulan', accent: '#16A34A', bg: '#DCFCE7' },
       { label: 'Proyeksi Akhir Bln', value: rpShort(proj), sub: tgt > 0 ? (proj >= tgt ? 'On track ✓' : `Kurang ${rpShort(tgt - proj)}`) : 'Estimasi laju saat ini', accent: proj >= tgt && tgt > 0 ? '#16A34A' : '#B45309', bg: proj >= tgt && tgt > 0 ? '#DCFCE7' : '#FEF3C7' }
@@ -2483,15 +2528,15 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-5 border-b border-slate-100">
         <div>
           <h3 className="font-display font-bold text-lg text-slate-900 flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-indigo-600" /> Dashboard Bisnis
+            <BarChart3 className="w-5 h-5 text-blue-600" /> Dashboard Bisnis
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">GMV {isAll ? 'gabungan semua lini' : GMV_DIVISIONS[scope].label} · {monthLabel}</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {TABS.map(t => (
             <button key={t.id} onClick={() => setScope(t.id)}
-              style={scope === t.id ? { backgroundColor: '#4F46E5', color: '#fff', borderColor: '#4F46E5' } : {}}
-              className="text-xs font-bold px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-indigo-300 transition">
+              style={scope === t.id ? { backgroundColor: '#2563EB', color: '#fff', borderColor: '#2563EB' } : {}}
+              className="text-xs font-bold px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 transition">
               {t.label}
             </button>
           ))}
@@ -2507,7 +2552,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
         <div className="p-10 text-center">
           <BarChart3 className="w-12 h-12 mx-auto mb-3 text-slate-200" />
           <div className="text-sm text-slate-500 mb-3">Belum ada data GMV bulan ini.</div>
-          <button onClick={() => onNavigate('gmv')} className="text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-xl transition">
+          <button onClick={() => onNavigate('gmv')} className="text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-xl transition">
             Input GMV Sekarang
           </button>
         </div>
@@ -2537,7 +2582,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
           <div className="rounded-2xl border border-slate-200 p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm font-bold text-slate-700">Traffic GMV — {n} hari</div>
-              <button onClick={() => onNavigate('gmv')} className="text-xs text-indigo-700 hover:text-indigo-800 font-semibold">Detail →</button>
+              <button onClick={() => onNavigate('gmv')} className="text-xs text-blue-700 hover:text-blue-800 font-semibold">Detail →</button>
             </div>
             <svg viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" className="w-full" style={{ height: 200 }}>
               <defs>
@@ -2607,17 +2652,17 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
             <div className="rounded-2xl border border-slate-200 p-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="text-sm font-bold text-slate-700">Akun Affiliator · target harian vs realisasi</div>
-                <button onClick={() => onNavigate('affiliate-accounts')} className="text-xs text-indigo-700 hover:text-indigo-800 font-semibold">Kelola →</button>
+                <button onClick={() => onNavigate('affiliate-accounts')} className="text-xs text-blue-700 hover:text-blue-800 font-semibold">Kelola →</button>
               </div>
               {acctRows.length === 0 ? (
-                <div className="text-center py-5 text-sm text-slate-400">Belum ada akun affiliator. <button onClick={() => onNavigate('affiliate-accounts')} className="text-indigo-600 font-semibold">Tambah akun</button></div>
+                <div className="text-center py-5 text-sm text-slate-400">Belum ada akun affiliator. <button onClick={() => onNavigate('affiliate-accounts')} className="text-blue-600 font-semibold">Tambah akun</button></div>
               ) : (
                 <div className="space-y-3">
                   {acctRows.slice(0, 6).map(({ a, real, tgt, pic, pct }) => (
                     <div key={a.id}>
                       <div className="flex items-center justify-between mb-1.5">
                         <span className="text-sm font-bold text-slate-800 flex items-center gap-2 min-w-0">
-                          <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white grid place-items-center text-[11px] font-bold flex-shrink-0">{a.name.charAt(0).toUpperCase()}</span>
+                          <span className="w-6 h-6 rounded-lg bg-blue-600 text-white grid place-items-center text-[11px] font-bold flex-shrink-0">{a.name.charAt(0).toUpperCase()}</span>
                           <span className="truncate">{a.name}</span>
                           {pic && <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">· {pic.name.split(' ')[0]}</span>}
                         </span>
@@ -2626,7 +2671,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
                         </span>
                       </div>
                       <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: real >= tgt && tgt > 0 ? 'linear-gradient(90deg,#22C55E,#16A34A)' : 'linear-gradient(90deg,#818CF8,#4F46E5)' }}></div>
+                        <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: real >= tgt && tgt > 0 ? 'linear-gradient(90deg,#22C55E,#16A34A)' : 'linear-gradient(90deg,#60A5FA,#2563EB)' }}></div>
                       </div>
                     </div>
                   ))}
@@ -2798,7 +2843,7 @@ function SwotPanel({ analysis }) {
     <div className="rounded-2xl border border-slate-200 p-4">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <div>
-          <div className="text-sm font-bold text-slate-700 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-600" /> Evaluasi Otomatis — Format SWOT</div>
+          <div className="text-sm font-bold text-slate-700 flex items-center gap-2"><Sparkles className="w-4 h-4 text-blue-600" /> Evaluasi Otomatis — Format SWOT</div>
           <div className="text-[11px] text-slate-400 mt-0.5">{analysis.scopeLabel} · {fmtDate(analysis.start)} – {fmtDate(analysis.end)} · dihitung dari data nyata aplikasi</div>
         </div>
         <div className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-lg px-2.5 py-1">
@@ -2842,7 +2887,7 @@ async function exportBusinessPpt({ analysis, periodLabel, appName = 'Al-Kahfi Co
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: 'WIDE', width: 13.33, height: 7.5 });
   pptx.layout = 'WIDE';
-  const INDIGO = '4F46E5', DARK = '1E1B4B', SLATE = '475569', LIGHT = 'F6F5FE', GOLD = 'F59E0B';
+  const INDIGO = '2563EB', DARK = '0B1437', SLATE = '475569', LIGHT = 'F6F5FE', GOLD = 'F59E0B';
   const a = analysis;
   const rp = (n) => fmtRupiah(Math.round(n || 0)).replace('Rp ', 'Rp');
   const footer = (slide, page) => {
@@ -2943,7 +2988,7 @@ async function exportBusinessPpt({ analysis, periodLabel, appName = 'Al-Kahfi Co
       : { labels: [a.scopeLabel], values: [a.total] };
   s.addChart(pptx.ChartType.bar, [{ name: 'GMV', labels: barData.labels, values: barData.values }], {
     x: 0.5, y: 1.4, w: 12.3, h: 4.8, barDir: 'col',
-    chartColors: ['4F46E5', '10B981', 'F97316', '3B82F6', '8B5CF6', 'F59E0B', 'EC4899', '14B8A6'],
+    chartColors: ['2563EB', '10B981', 'F97316', '3B82F6', '8B5CF6', 'F59E0B', 'EC4899', '14B8A6'],
     chartColorsOpacity: 90, catAxisLabelColor: SLATE, valAxisLabelColor: SLATE,
     catAxisLabelFontSize: 10, valAxisLabelFontSize: 10, valGridLine: { color: 'E2E8F0', style: 'solid', size: 0.5 },
     showValue: true, dataLabelFormatCode: '#,##0', dataLabelFontSize: 9, dataLabelColor: SLATE, valAxisLabelFormatCode: '#,##0'
@@ -3049,15 +3094,15 @@ function PptExportModal({ scope, scopeLabel, dataBundle, appName, authorName, on
   return (
     <Modal title="Download Laporan PPT" onClose={onClose}>
       <div className="space-y-3">
-        <div className="bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 text-xs text-indigo-800">
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-xs text-blue-800">
           📊 Laporan presentasi profesional siap dipakai ke Owner: ringkasan eksekutif, grafik tren, perbandingan divisi/akun, analisis SWOT, masalah terbuka & rekomendasi. Fokus: <b>{scopeLabel}</b> (ikut tab yang sedang aktif).
         </div>
         <Field label="Pilih Periode">
           <div className="grid grid-cols-2 gap-2">
             {ranges.map(r => (
               <button key={r.id} onClick={() => setPicked(r.id)}
-                className={`text-left px-3 py-2.5 rounded-xl border-2 transition ${picked === r.id ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-slate-300'}`}>
-                <div className={`text-sm font-bold ${picked === r.id ? 'text-indigo-700' : 'text-slate-700'}`}>{r.label}</div>
+                className={`text-left px-3 py-2.5 rounded-xl border-2 transition ${picked === r.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                <div className={`text-sm font-bold ${picked === r.id ? 'text-blue-700' : 'text-slate-700'}`}>{r.label}</div>
                 <div className="text-[10px] text-slate-500 mt-0.5">{fmtDate(r.start)} – {fmtDate(r.end)}</div>
               </button>
             ))}
@@ -3082,7 +3127,7 @@ function DashboardEvalWidget(props) {
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
       <div className="flex items-center gap-2 mb-3">
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#6366F1,#8B5CF6)' }}>
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#3B82F6,#8B5CF6)' }}>
           <Sparkles className="w-5 h-5 text-white" />
         </div>
         <div>
@@ -3172,13 +3217,13 @@ function DashboardGmvWidget({ entries, targets, onOpen }) {
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center"><BarChart3 className="w-5 h-5 text-indigo-600" /></div>
+          <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center"><BarChart3 className="w-5 h-5 text-blue-600" /></div>
           <div>
             <h3 className="font-display font-bold text-slate-900">Target & GMV Bulan Ini</h3>
-            <p className="text-[11px] text-slate-500">Total gabungan: <b className="text-indigo-700">{fmtRupiah(grand)}</b></p>
+            <p className="text-[11px] text-slate-500">Total gabungan: <b className="text-blue-700">{fmtRupiah(grand)}</b></p>
           </div>
         </div>
-        <button onClick={onOpen} className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1">
+        <button onClick={onOpen} className="text-xs font-semibold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
           Detail <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -3223,8 +3268,8 @@ function TargetWidget({ targets, canManage, onManage }) {
   if (active.length === 0 && !canManage) return null;
 
   return (
-    <div style={{ background: 'linear-gradient(135deg, #3730A3 0%, #4F46E5 50%, #312E81 100%)', color: '#FFFFFF' }}
-      className="relative overflow-hidden rounded-3xl text-white p-6 shadow-xl shadow-indigo-900/20 border border-indigo-700/30">
+    <div style={{ background: 'linear-gradient(135deg, #13235B 0%, #2563EB 50%, #0B1437 100%)', color: '#FFFFFF' }}
+      className="relative overflow-hidden rounded-3xl text-white p-6 shadow-xl shadow-blue-900/20 border border-blue-700/30">
       {/* Decorative */}
       <div className="absolute -right-20 -top-20 w-72 h-72 bg-amber-300/10 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute right-1/3 -bottom-16 w-48 h-48 bg-violet-300/10 rounded-full blur-2xl pointer-events-none"></div>
@@ -3251,7 +3296,7 @@ function TargetWidget({ targets, canManage, onManage }) {
         {canManage && (
           <button onClick={onManage}
             style={{ backgroundColor: 'rgba(255, 255, 255, 0.12)', borderColor: 'rgba(255, 255, 255, 0.2)', color: '#FFFFFF' }}
-            className="hover:!bg-amber-400 hover:!text-indigo-900 backdrop-blur text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 border transition">
+            className="hover:!bg-amber-400 hover:!text-blue-900 backdrop-blur text-xs px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 border transition">
             <Edit2 className="w-3.5 h-3.5" /> Kelola Target
           </button>
         )}
@@ -3290,7 +3335,7 @@ function TargetCard({ target }) {
       <div className="flex items-start justify-between gap-2 mb-2">
         <div style={{ color: '#FFFFFF' }} className="font-semibold text-sm truncate flex-1">{target.title}</div>
         {pct >= 100 && (
-          <span style={{ backgroundColor: '#FCD34D', color: '#312E81' }}
+          <span style={{ backgroundColor: '#FCD34D', color: '#0B1437' }}
             className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase flex-shrink-0">✓ Done</span>
         )}
       </div>
@@ -3379,7 +3424,7 @@ function TargetsManagementModal({ user, targets, onSave, onClose }) {
         </div>
 
         <button onClick={() => { setEditing(null); setShowForm(true); }}
-          className="w-full border-2 border-dashed border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 text-indigo-700 py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2">
+          className="w-full border-2 border-dashed border-blue-300 hover:border-blue-500 hover:bg-blue-50 text-blue-700 py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2">
           <Plus className="w-4 h-4" /> Target Baru
         </button>
 
@@ -3401,7 +3446,7 @@ function TargetsManagementModal({ user, targets, onSave, onClose }) {
 
         {grouped.achieved.length > 0 && (
           <div>
-            <div className="text-xs font-bold text-indigo-700 uppercase mb-2">✅ Sudah Tercapai ({grouped.achieved.length})</div>
+            <div className="text-xs font-bold text-blue-700 uppercase mb-2">✅ Sudah Tercapai ({grouped.achieved.length})</div>
             <div className="space-y-2">
               {grouped.achieved.map(t => (
                 <TargetListItem key={t.id} target={t}
@@ -3488,10 +3533,10 @@ function TargetListItem({ target, archived, onEdit, onDelete, onUpdateProgress, 
             <div className="flex items-baseline gap-2">
               <span className="text-lg font-bold text-slate-900">{formatValue(target.currentValue || 0)}</span>
               <span className="text-xs text-slate-500">/ {formatValue(target.targetValue)}</span>
-              <span className="text-sm font-bold text-indigo-700 ml-auto">{pct}%</span>
+              <span className="text-sm font-bold text-blue-700 ml-auto">{pct}%</span>
             </div>
             <div className="w-full bg-slate-100 rounded-full h-2 mt-1 overflow-hidden">
-              <div className={`h-full transition-all ${pct >= 100 ? 'bg-indigo-500' : pct >= 75 ? 'bg-indigo-400' : pct >= 50 ? 'bg-amber-400' : pct >= 25 ? 'bg-orange-400' : 'bg-red-400'}`} style={{ width: `${pct}%` }}></div>
+              <div className={`h-full transition-all ${pct >= 100 ? 'bg-blue-500' : pct >= 75 ? 'bg-blue-400' : pct >= 50 ? 'bg-amber-400' : pct >= 25 ? 'bg-orange-400' : 'bg-red-400'}`} style={{ width: `${pct}%` }}></div>
             </div>
           </div>
         </div>
@@ -3500,7 +3545,7 @@ function TargetListItem({ target, archived, onEdit, onDelete, onUpdateProgress, 
           <input type="number" value={tempValue} onChange={e => setTempValue(e.target.value)}
             className="flex-1 px-2 py-1 border border-slate-300 rounded text-sm tabular-nums" />
           <button onClick={() => { onUpdateProgress(tempValue); setEditingProgress(false); }}
-            className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded font-semibold">Simpan</button>
+            className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-semibold">Simpan</button>
           <button onClick={() => { setTempValue(target.currentValue || 0); setEditingProgress(false); }}
             className="text-xs text-slate-500 hover:bg-slate-100 px-2 py-1 rounded">Batal</button>
         </div>
@@ -3515,7 +3560,7 @@ function TargetListItem({ target, archived, onEdit, onDelete, onUpdateProgress, 
         )}
         {target.status === 'active' && pct < 100 && !editingProgress && (
           <button onClick={onMarkAchieved}
-            className="text-[10px] px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded font-semibold">
+            className="text-[10px] px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded font-semibold">
             ✓ Tandai Tercapai
           </button>
         )}
@@ -3527,7 +3572,7 @@ function TargetListItem({ target, archived, onEdit, onDelete, onUpdateProgress, 
         )}
         {target.status !== 'active' && onReactivate && !editingProgress && (
           <button onClick={onReactivate}
-            className="text-[10px] px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded font-semibold">
+            className="text-[10px] px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded font-semibold">
             ↩ Aktifkan Lagi
           </button>
         )}
@@ -3604,14 +3649,14 @@ function TargetForm({ target, onSave, onClose }) {
         </Field>
 
         {/* Preview */}
-        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
-          <div className="text-[10px] uppercase font-bold text-indigo-700 mb-1">Preview Tampilan</div>
-          <div className="bg-indigo-700 rounded p-3 text-white">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <div className="text-[10px] uppercase font-bold text-blue-700 mb-1">Preview Tampilan</div>
+          <div className="bg-blue-700 rounded p-3 text-white">
             <div className="font-semibold text-sm">{form.title || 'Judul Target'}</div>
             <div className="flex items-baseline justify-between mt-1">
               <span className="text-xs">
                 <b>{form.formatType === 'currency' ? `Rp ${fmtNumber(form.currentValue || 0)}` : form.formatType === 'percent' ? `${form.currentValue || 0}%` : `${fmtNumber(form.currentValue || 0)} ${form.unit || ''}`}</b>
-                <span className="text-indigo-200"> / {form.formatType === 'currency' ? `Rp ${fmtNumber(form.targetValue || 0)}` : form.formatType === 'percent' ? `${form.targetValue || 0}%` : `${fmtNumber(form.targetValue || 0)} ${form.unit || ''}`}</span>
+                <span className="text-blue-200"> / {form.formatType === 'currency' ? `Rp ${fmtNumber(form.targetValue || 0)}` : form.formatType === 'percent' ? `${form.targetValue || 0}%` : `${fmtNumber(form.targetValue || 0)} ${form.unit || ''}`}</span>
               </span>
               <span className="font-display font-bold">
                 {form.targetValue > 0 ? Math.min(100, Math.round((Number(form.currentValue || 0) / Number(form.targetValue)) * 100)) : 0}%
@@ -3697,7 +3742,7 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
       <PageHeader title="Anggota Tim" subtitle={(user.role === 'manajer' || user.role === 'owner') ? 'Kelola semua Manajer, Leader, dan Tim Operasional' : 'Kelola Tim Operasional di bawah Anda'}
         action={
           <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
             <Plus className="w-4 h-4" /> Anggota Baru
           </button>
         } />
@@ -3722,7 +3767,7 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
                       <div className="flex-1 min-w-0">
                         <div className="font-semibold text-slate-900 truncate">{m.name}</div>
                         <div className="text-xs text-slate-500">@{m.username}</div>
-                        {displayJobTitle(m) && <div className="text-[10px] mt-1 inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{displayJobTitle(m)}</div>}
+                        {displayJobTitle(m) && <div className="text-[10px] mt-1 inline-block px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">{displayJobTitle(m)}</div>}
                         {leader && <div className="text-[10px] text-slate-500 mt-1">Leader: {leader.name}</div>}
                         {operasionalCount !== null && <div className="text-[10px] text-blue-600 mt-1">Memimpin {operasionalCount} operasional</div>}
                         {m.phone && <div className="text-[10px] text-slate-500 mt-0.5">📱 {m.phone}</div>}
@@ -3805,17 +3850,17 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
       <div className="space-y-3">
         <Field label="Nama Lengkap *">
           <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="Username *">
           <input type="text" value={form.username} onChange={e => setForm({ ...form, username: e.target.value.toLowerCase() })}
             disabled={isEdit && editing.id === currentUser.id}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 lowercase disabled:bg-slate-100" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 lowercase disabled:bg-slate-100" />
         </Field>
         <Field label="Peran *">
           <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
             disabled={isEdit && editing.id === currentUser.id && currentUser.role !== 'owner'}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white disabled:bg-slate-100">
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-100">
             {allowedRoles.map(r => <option key={r} value={r}>{ROLES[r].label}</option>)}
           </select>
         </Field>
@@ -3823,7 +3868,7 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
           <Field label="Leader Pengawas *">
             <select value={form.leaderId} onChange={e => setForm({ ...form, leaderId: e.target.value })}
               disabled={currentUser.role === 'leader'}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white disabled:bg-slate-100">
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-100">
               <option value="">- Pilih Leader -</option>
               {leaders.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
@@ -3831,7 +3876,7 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
         )}
         <Field label="Divisi / Tim *">
           <select value={form.division} onChange={e => setForm({ ...form, division: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
             {Object.entries(DIVISIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
           <div className="text-[11px] text-slate-500 mt-1">💡 Menu yang muncul untuk anggota ini menyesuaikan divisinya. Mis. Internal & TAP tidak melihat menu Creator.</div>
@@ -3839,7 +3884,7 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
         <Field label="Posisi / Jabatan">
           <input type="text" value={form.jobTitle} onChange={e => setForm({ ...form, jobTitle: e.target.value })}
             list="user-job-titles" placeholder="Pilih dari daftar atau ketik sendiri (mis. Creator Manager, Tim Ads)"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <datalist id="user-job-titles">
             {jobTitleOptions.map(jt => <option key={jt} value={jt} />)}
           </datalist>
@@ -3848,19 +3893,19 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
         <Field label="No. WhatsApp (opsional)">
           <input type="text" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
             placeholder="08xxxxxxxxxx"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="Gmail (untuk undangan Google Calendar)">
           <input type="email" value={form.gmail} onChange={e => setForm({ ...form, gmail: e.target.value })}
             placeholder="nama@gmail.com"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <div className="text-[11px] text-slate-500 mt-1">💡 Dipakai supaya anggota ini otomatis diundang ke agenda di Google Calendar. Anggota juga bisa isi sendiri di Profil.</div>
         </Field>
         {(currentUser.role === 'owner' || currentUser.role === 'manajer') && (
           <Field label="Akses Khusus">
-            <label className="flex items-start gap-2 cursor-pointer bg-indigo-50/60 border border-indigo-100 rounded-lg px-3 py-2.5">
+            <label className="flex items-start gap-2 cursor-pointer bg-blue-50/60 border border-blue-100 rounded-lg px-3 py-2.5">
               <input type="checkbox" checked={form.isSecretariat} onChange={e => setForm({ ...form, isSecretariat: e.target.checked })}
-                className="w-4 h-4 rounded accent-indigo-600 mt-0.5" />
+                className="w-4 h-4 rounded accent-blue-600 mt-0.5" />
               <span className="text-xs text-slate-700">
                 <b>Sekretariat / Asisten CEO</b> — bisa menambah & atur agenda kalender untuk <b>seluruh tim</b> (seperti Manajer, khusus untuk Kalender).
               </span>
@@ -3871,11 +3916,11 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
           <>
             <Field label="Password Awal *">
               <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </Field>
             <Field label="Konfirmasi Password *">
               <input type="password" value={form.confirmPassword} onChange={e => setForm({ ...form, confirmPassword: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </Field>
             <div className="text-[11px] text-slate-500 bg-slate-50 p-2 rounded">
               💡 Berikan password awal ke user. Mereka login pakai username + password ini.
@@ -3907,11 +3952,11 @@ function ResetPasswordModal({ target, onSave, onClose }) {
         </div>
         <Field label="Password Baru">
           <input type="password" value={pw} onChange={e => setPw(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="Konfirmasi">
           <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
         <FormActions onCancel={onClose} onSave={submit} saveLabel="Reset Password" />
@@ -4025,7 +4070,7 @@ function TasksView({ user, allUsers }) {
       <PageHeader title="Tugas Tim" subtitle="Kelola semua tugas dalam satu tempat"
         action={can.createTasks(user) || user.role === 'operasional' ? (
           <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
             <Plus className="w-4 h-4" /> Tugas Baru
           </button>
         ) : null} />
@@ -4035,7 +4080,7 @@ function TasksView({ user, allUsers }) {
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input type="text" placeholder="Cari tugas..." value={filter.search}
             onChange={e => setFilter({ ...filter, search: e.target.value })}
-            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })}
           className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
@@ -4081,7 +4126,7 @@ function TasksView({ user, allUsers }) {
                       </td>
                       <td className="p-3">
                         <button onClick={() => setViewing(t)} className="text-left w-full group">
-                          <div className="font-medium text-slate-800 group-hover:text-indigo-700 transition flex items-center gap-2">
+                          <div className="font-medium text-slate-800 group-hover:text-blue-700 transition flex items-center gap-2">
                             {t.title}
                             {t.comments && t.comments.length > 0 && (
                               <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5">
@@ -4108,7 +4153,7 @@ function TasksView({ user, allUsers }) {
                       </td>
                       <td className="p-3 text-right whitespace-nowrap">
                         <button onClick={() => setViewing(t)} title="Lihat detail & komentar"
-                          className="text-slate-400 hover:text-indigo-600 p-1">
+                          className="text-slate-400 hover:text-blue-600 p-1">
                           <MessageSquare className="w-4 h-4" />
                         </button>
                         {canEdit && (
@@ -4176,7 +4221,7 @@ function TasksView({ user, allUsers }) {
                     {Object.entries(TASK_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                   </select>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setViewing(t)} title="Detail & komentar" className="text-slate-400 hover:text-indigo-600 p-1.5">
+                    <button onClick={() => setViewing(t)} title="Detail & komentar" className="text-slate-400 hover:text-blue-600 p-1.5">
                       <MessageSquare className="w-4 h-4" />
                     </button>
                     {canEdit && (
@@ -4273,8 +4318,8 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
             </div>
           )}
           {task.status === 'done' && task.completedAt && (
-            <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
-              <div className="text-[10px] uppercase font-bold text-indigo-700">✅ Diselesaikan</div>
+            <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+              <div className="text-[10px] uppercase font-bold text-blue-700">✅ Diselesaikan</div>
               <div className="font-semibold text-slate-800 mt-0.5">{fmtDateTime(task.completedAt)}</div>
             </div>
           )}
@@ -4284,7 +4329,7 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
         <div className="flex gap-2 flex-wrap">
           {canEdit && (
             <button onClick={onEdit}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
               <Edit2 className="w-4 h-4" /> Edit Tugas
             </button>
           )}
@@ -4299,7 +4344,7 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
         {/* Comments section */}
         <div className="border-t border-slate-100 pt-4">
           <div className="flex items-center gap-2 mb-3">
-            <MessageSquare className="w-4 h-4 text-indigo-600" />
+            <MessageSquare className="w-4 h-4 text-blue-600" />
             <h4 className="font-display font-bold text-slate-900">Komentar ({comments.length})</h4>
           </div>
 
@@ -4323,14 +4368,14 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
                 const canDeleteComment = isMine || (user.role === 'manajer' || user.role === 'owner');
                 return (
                   <div key={c.id} className={`flex gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0 overflow-hidden">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0 overflow-hidden">
                       {c.authorAvatar
                         ? <img src={c.authorAvatar} alt="" className="w-full h-full object-cover" />
                         : c.authorName.charAt(0).toUpperCase()}
                     </div>
                     <div className={`max-w-[80%] ${isMine ? 'items-end' : ''} flex flex-col`}>
-                      <div className={`rounded-2xl px-3 py-2 ${isMine ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'}`}>
-                        <div className={`text-[10px] font-bold mb-0.5 flex items-center gap-1 ${isMine ? 'text-indigo-100' : 'text-slate-600'}`}>
+                      <div className={`rounded-2xl px-3 py-2 ${isMine ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'}`}>
+                        <div className={`text-[10px] font-bold mb-0.5 flex items-center gap-1 ${isMine ? 'text-blue-100' : 'text-slate-600'}`}>
                           {isMine ? 'Saya' : c.authorName}
                           {c.authorRole && <span className="opacity-70">· {ROLES[c.authorRole]?.label}</span>}
                         </div>
@@ -4362,11 +4407,11 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
                     submitComment();
                   }
                 }}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none text-sm bg-white" />
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-sm bg-white" />
               <div className="flex items-center justify-between mt-2">
                 <div className="text-[10px] text-slate-500">Ctrl+Enter untuk kirim cepat</div>
                 <button onClick={submitComment} disabled={!commentText.trim()}
-                  className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-xs px-4 py-1.5 rounded font-semibold flex items-center gap-1">
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-xs px-4 py-1.5 rounded font-semibold flex items-center gap-1">
                   <Send className="w-3 h-3" /> Kirim
                 </button>
               </div>
@@ -4396,7 +4441,7 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Ketik untuk
         onFocus={() => { setOpen(true); setQuery(''); }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder={placeholder}
-        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
       <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
       {open && (
         <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-52 overflow-y-auto scroll-thin">
@@ -4405,7 +4450,7 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Ketik untuk
           ) : filtered.map(o => (
             <button key={o.value} type="button"
               onMouseDown={(e) => { e.preventDefault(); onChange(o.value); setOpen(false); setQuery(''); }}
-              className={`w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 ${o.value === value ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-slate-700'}`}>
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 ${o.value === value ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-700'}`}>
               {o.label}
             </button>
           ))}
@@ -4430,11 +4475,11 @@ function TaskForm({ task, user, assignableUsers, onSave, onClose }) {
         <Field label="Judul Tugas *">
           <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
             placeholder="Mis. Bikin script live shopping Sabun A"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="Deskripsi">
           <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-            rows={3} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+            rows={3} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="PIC *">
@@ -4553,7 +4598,7 @@ function CreatorsView({ user, allUsers }) {
             <ExportCreatorsButton creators={filtered} />
             <ImportCsvButton onImported={load} user={user} managers={managers} />
             <button onClick={() => { setEditing(null); setShowForm(true); }}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
               <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Creator Baru</span><span className="sm:hidden">Baru</span>
             </button>
           </div>
@@ -4570,7 +4615,7 @@ function CreatorsView({ user, allUsers }) {
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input type="text" placeholder="Cari nama atau @tiktok..." value={filter.search}
             onChange={e => setFilter({ ...filter, search: e.target.value })}
-            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })}
           className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
@@ -4589,7 +4634,7 @@ function CreatorsView({ user, allUsers }) {
         <div className="mb-4 flex items-center gap-2 flex-wrap bg-white rounded-xl border border-slate-200 p-3">
           {selectedIds.length > 0 ? (
             <>
-              <span className="text-sm text-slate-600"><b className="text-indigo-700">{selectedIds.length}</b> creator diceklis</span>
+              <span className="text-sm text-slate-600"><b className="text-blue-700">{selectedIds.length}</b> creator diceklis</span>
               <button onClick={handleDeleteSelected}
                 className="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5">
                 <Trash2 className="w-4 h-4" /> Hapus Terpilih ({selectedIds.length})
@@ -4621,7 +4666,7 @@ function CreatorsView({ user, allUsers }) {
                     <input type="checkbox" title="Ceklis semua (hasil filter)"
                       checked={filtered.length > 0 && filtered.every(c => selectedIds.includes(c.id))}
                       onChange={e => setSelectedIds(e.target.checked ? filtered.map(c => c.id) : [])}
-                      className="w-4 h-4 accent-indigo-600 rounded cursor-pointer" />
+                      className="w-4 h-4 accent-blue-600 rounded cursor-pointer" />
                   </th>
                   <th className="text-left p-3 font-semibold">Creator</th>
                   <th className="text-left p-3 font-semibold">Kategori</th>
@@ -4634,10 +4679,10 @@ function CreatorsView({ user, allUsers }) {
               </thead>
               <tbody>
                 {filtered.map(c => (
-                  <tr key={c.id} className={`border-t border-slate-100 hover:bg-slate-50 ${selectedIds.includes(c.id) ? 'bg-indigo-50/50' : ''}`}>
+                  <tr key={c.id} className={`border-t border-slate-100 hover:bg-slate-50 ${selectedIds.includes(c.id) ? 'bg-blue-50/50' : ''}`}>
                     <td className="p-3">
                       <input type="checkbox" checked={selectedIds.includes(c.id)} onChange={() => toggleSelect(c.id)}
-                        className="w-4 h-4 accent-indigo-600 rounded cursor-pointer" />
+                        className="w-4 h-4 accent-blue-600 rounded cursor-pointer" />
                     </td>
                     <td className="p-3">
                       <div className="font-medium text-slate-800">{c.name}</div>
@@ -4781,9 +4826,9 @@ function CreatorManagementView({ user, allUsers }) {
         subtitle="Visual mapping: siapa mengelola siapa, dan performa per manager"
         action={can.editAppSettings(user) ? null : null} />
 
-      <div className="bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-200 rounded-xl p-5 mb-6">
+      <div className="bg-gradient-to-br from-blue-50 to-violet-50 border border-blue-200 rounded-xl p-5 mb-6">
         <div className="flex items-start gap-4">
-          <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
+          <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
             <Link2 className="w-6 h-6 text-white" />
           </div>
           <div className="flex-1">
@@ -4814,7 +4859,7 @@ function CreatorManagementView({ user, allUsers }) {
               <div key={manager.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 <div className="p-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold">
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white font-bold">
                       {manager.name.charAt(0).toUpperCase()}
                     </div>
                     <div>
@@ -4824,7 +4869,7 @@ function CreatorManagementView({ user, allUsers }) {
                   </div>
                   <div className="flex gap-5 text-xs">
                     <div><div className="text-slate-500">Creator</div><div className="font-bold text-slate-900 text-lg">{myCreators.length}</div></div>
-                    <div><div className="text-slate-500">Aktif</div><div className="font-bold text-indigo-700 text-lg">{aktif}</div></div>
+                    <div><div className="text-slate-500">Aktif</div><div className="font-bold text-blue-700 text-lg">{aktif}</div></div>
                     <div><div className="text-slate-500">Order</div><div className="font-bold text-slate-900 text-lg">{fmtNumber(totalOrders)}</div></div>
                     <div><div className="text-slate-500">GMV</div><div className="font-bold text-amber-700 text-lg">{fmtRupiah(totalGmv)}</div></div>
                   </div>
@@ -4851,7 +4896,7 @@ function CreatorManagementView({ user, allUsers }) {
                             <div className="font-semibold tabular-nums">{fmtNumber(c.totalOrders)} / {fmtRupiah(c.totalGmv)}</div>
                           </div>
                           {can.assignCreator(user) && (
-                            <button onClick={() => setReassigning(c)} className="text-xs px-3 py-1.5 bg-slate-100 hover:bg-indigo-100 hover:text-indigo-700 rounded-md font-semibold transition">
+                            <button onClick={() => setReassigning(c)} className="text-xs px-3 py-1.5 bg-slate-100 hover:bg-blue-100 hover:text-blue-700 rounded-md font-semibold transition">
                               Pindah Manager
                             </button>
                           )}
@@ -4894,10 +4939,10 @@ function CreatorManagementView({ user, allUsers }) {
             {managers.map(m => (
               <button key={m.id} onClick={() => handleReassign(m.id)}
                 className={`w-full flex items-center justify-between p-3 rounded-lg border transition ${
-                  reassigning.managerId === m.id ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-indigo-500 hover:bg-indigo-50'
+                  reassigning.managerId === m.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-500 hover:bg-blue-50'
                 }`}>
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm">
                     {m.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="text-left">
@@ -4905,7 +4950,7 @@ function CreatorManagementView({ user, allUsers }) {
                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${ROLES[m.role].color}`}>{ROLES[m.role].label}</span>
                   </div>
                 </div>
-                {reassigning.managerId === m.id && <Check className="w-5 h-5 text-indigo-600" />}
+                {reassigning.managerId === m.id && <Check className="w-5 h-5 text-blue-600" />}
               </button>
             ))}
           </div>
@@ -5002,7 +5047,7 @@ function ImportCsvButton({ onImported, user, managers }) {
       </button>
       <input ref={inputRef} type="file" accept=".csv" onChange={handleFile} className="hidden" />
       {result && (
-        <div className="fixed top-20 right-8 bg-indigo-600 text-white px-4 py-3 rounded-lg shadow-lg z-50 text-sm">
+        <div className="fixed top-20 right-8 bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg z-50 text-sm">
           ✅ {result.added} creator baru, {result.updated} di-update
         </div>
       )}
@@ -5127,7 +5172,7 @@ function ReportsView({ user, allUsers }) {
       <PageHeader title="Laporan Mingguan" subtitle="Pencapaian, kendala, dan rencana minggu depan"
         action={
           <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
             <Plus className="w-4 h-4" /> Laporan Baru
           </button>
         } />
@@ -5280,7 +5325,7 @@ function ReportForm({ report, onSave, onClose }) {
             ))}
             {attachments.length < 3 && (
               <button type="button" onClick={() => attRef.current?.click()} disabled={attBusy}
-                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 transition disabled:opacity-50">
+                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-blue-600 transition disabled:opacity-50">
                 <Paperclip className="w-4 h-4" />
                 <span className="text-[9px] font-semibold mt-0.5">{attBusy ? '...' : 'Upload'}</span>
               </button>
@@ -5364,7 +5409,7 @@ function ScheduleView({ user, allUsers }) {
       <PageHeader title="Jadwal Live & Piket" subtitle="Atur jadwal live shopping, piket admin, dan piket grup"
         action={can.manageSchedule(user) ? (
           <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
             <Plus className="w-4 h-4" /> Jadwal Baru
           </button>
         ) : null} />
@@ -5373,7 +5418,7 @@ function ScheduleView({ user, allUsers }) {
         <div className="bg-white rounded-lg border border-slate-200 p-1 flex">
           {[{ id: 'upcoming', label: 'Mendatang' }, { id: 'past', label: 'Sudah Lewat' }, { id: 'all', label: 'Semua' }].map(t => (
             <button key={t.id} onClick={() => setFilter({ ...filter, view: t.id })}
-              className={`px-3 py-1.5 rounded text-xs font-semibold transition ${filter.view === t.id ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+              className={`px-3 py-1.5 rounded text-xs font-semibold transition ${filter.view === t.id ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
               {t.label}
             </button>
           ))}
@@ -5455,7 +5500,7 @@ function ScheduleForm({ schedule, assignableAdmins, creators, onSave, onClose })
           <div className="grid grid-cols-3 gap-2">
             {Object.entries(SCHEDULE_TYPE).map(([k, v]) => (
               <button key={k} onClick={() => setForm({ ...form, type: k })}
-                className={`px-3 py-2 rounded-lg border-2 text-sm font-semibold transition ${form.type === k ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                className={`px-3 py-2 rounded-lg border-2 text-sm font-semibold transition ${form.type === k ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
                 <div className="text-lg">{v.icon}</div>
                 <div className="text-xs">{v.label}</div>
               </button>
@@ -5638,7 +5683,7 @@ function GmvView({ user, allUsers }) {
             )}
             {canInputAny && (
               <button onClick={() => { setEditing(null); setShowInput(true); }}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
                 <Plus className="w-4 h-4" /> Update GMV Hari Ini
               </button>
             )}
@@ -5651,7 +5696,7 @@ function GmvView({ user, allUsers }) {
         <div className="font-display font-bold text-slate-900 text-lg min-w-[160px] text-center">{monthLabel}</div>
         <button onClick={() => shiftMonth(1)} disabled={mKey >= monthKey()}
           className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 flex items-center justify-center"><ArrowRight className="w-4 h-4" /></button>
-        {mKey !== monthKey() && <button onClick={() => setMKey(monthKey())} className="text-xs text-indigo-600 font-semibold hover:underline ml-1">Bulan ini</button>}
+        {mKey !== monthKey() && <button onClick={() => setMKey(monthKey())} className="text-xs text-blue-600 font-semibold hover:underline ml-1">Bulan ini</button>}
       </div>
 
       {/* 3 Hero cards per divisi */}
@@ -5695,13 +5740,13 @@ function GmvView({ user, allUsers }) {
       <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-6 flex items-center justify-between">
         <div>
           <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Total GMV Gabungan · {monthLabel}</div>
-          <div className="font-display font-bold text-2xl text-indigo-700 mt-0.5">{fmtRupiah(monthTotals.mcn + monthTotals.tap + monthTotals.internal)}</div>
+          <div className="font-display font-bold text-2xl text-blue-700 mt-0.5">{fmtRupiah(monthTotals.mcn + monthTotals.tap + monthTotals.internal)}</div>
         </div>
         <Award className="w-10 h-10 text-amber-400" />
       </div>
 
       {/* Traffic per divisi */}
-      <h3 className="font-display font-bold text-slate-900 mb-3 flex items-center gap-2"><Activity className="w-5 h-5 text-indigo-600" /> Traffic Harian per Divisi</h3>
+      <h3 className="font-display font-bold text-slate-900 mb-3 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-600" /> Traffic Harian per Divisi</h3>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         {Object.entries(GMV_DIVISIONS).map(([div, cfg]) => {
           const series = gmvDailySeries(entries, div, mKey);
@@ -5826,32 +5871,32 @@ function GmvInputModal({ user, editing, onSave, onClose }) {
         <Field label="Divisi *">
           <select value={form.division} onChange={e => setForm({ ...form, division: e.target.value })}
             disabled={allowedDivs.length <= 1 && !editing}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100">
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100">
             {(editing ? Object.keys(GMV_DIVISIONS) : allowedDivs).map(d => <option key={d} value={d}>{GMV_DIVISIONS[d].label}</option>)}
           </select>
           {allowedDivs.length <= 1 && !editing && <div className="text-[11px] text-slate-500 mt-1">Anda hanya bisa input GMV divisi {GMV_DIVISIONS[allowedDivs[0]]?.label}.</div>}
         </Field>
         <Field label="Tanggal *">
           <input type="date" value={form.date} max={dayKey()} onChange={e => setForm({ ...form, date: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="GMV (Rp) *">
           <input type="text" inputMode="numeric" value={form.gmv}
             onChange={e => setForm({ ...form, gmv: e.target.value.replace(/[^\d]/g, '') })}
             placeholder="mis. 15000000"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
           {form.gmv && <div className="text-xs text-emerald-600 mt-1 font-semibold">{fmtRupiah(Number(form.gmv))}</div>}
         </Field>
         <Field label="Jumlah Order (opsional)">
           <input type="text" inputMode="numeric" value={form.orders}
             onChange={e => setForm({ ...form, orders: e.target.value.replace(/[^\d]/g, '') })}
             placeholder="mis. 120"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="Catatan (opsional)">
           <input type="text" value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}
             placeholder="mis. live bareng creator X"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-3 py-2">💡 Kalau tanggal & divisi sudah pernah diinput, data lama akan otomatis diperbarui (tidak dobel).</div>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
@@ -5874,7 +5919,7 @@ function GmvTargetModal({ monthLabel, current, onSave, onClose }) {
             <input type="text" inputMode="numeric" value={vals[div]}
               onChange={e => setVals({ ...vals, [div]: e.target.value.replace(/[^\d]/g, '') })}
               placeholder="mis. 500000000"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
             {vals[div] && <div className="text-xs text-emerald-600 mt-1 font-semibold">{fmtRupiah(Number(vals[div]))}</div>}
           </Field>
         ))}
@@ -5942,7 +5987,7 @@ function AccountTrendChart({ entries, accountId, mKey, dailyTarget }) {
         <div className="bg-slate-100 p-0.5 inline-flex rounded-lg">
           {[['week', 'Pekanan'], ['month', 'Bulanan']].map(([k, label]) => (
             <button key={k} onClick={() => setMode(k)}
-              style={mode === k ? { backgroundColor: '#4F46E5', color: '#fff' } : {}}
+              style={mode === k ? { backgroundColor: '#2563EB', color: '#fff' } : {}}
               className="px-3 py-1 rounded-md text-[11px] font-bold text-slate-600 transition">
               {label}
             </button>
@@ -5983,7 +6028,7 @@ function AccountTrendChart({ entries, accountId, mKey, dailyTarget }) {
         )}
         {series.map((s, i) => (
           (i % labelEvery === 0) ? (
-            <text key={`lbl-${s.date}`} x={xAt(i)} y={CH - 6} fontSize="9" fill={s.date === todayStr ? '#4F46E5' : '#94A3B8'} fontWeight={s.date === todayStr ? '800' : '500'} textAnchor="middle">
+            <text key={`lbl-${s.date}`} x={xAt(i)} y={CH - 6} fontSize="9" fill={s.date === todayStr ? '#2563EB' : '#94A3B8'} fontWeight={s.date === todayStr ? '800' : '500'} textAnchor="middle">
               {mode === 'week' ? new Date(s.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short' }) : Number(s.date.slice(8, 10))}
             </text>
           ) : null
@@ -6113,7 +6158,7 @@ function AffiliateAccountsView({ user, allUsers }) {
         action={
           <div className="flex gap-2 flex-wrap">
             {canManage && <button onClick={() => setShowGoal(true)} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2"><Target className="w-4 h-4" /> Goal Bulanan</button>}
-            {canManage && <button onClick={() => { setEditingAcct(null); setShowAcct(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2"><Plus className="w-4 h-4" /> Tambah Akun</button>}
+            {canManage && <button onClick={() => { setEditingAcct(null); setShowAcct(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2"><Plus className="w-4 h-4" /> Tambah Akun</button>}
           </div>
         } />
 
@@ -6122,7 +6167,7 @@ function AffiliateAccountsView({ user, allUsers }) {
         <button onClick={() => shiftMonth(-1)} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center"><ArrowLeft className="w-4 h-4" /></button>
         <div className="font-display font-bold text-slate-900 text-lg min-w-[150px] text-center">{monthLabel}</div>
         <button onClick={() => shiftMonth(1)} disabled={mKey >= monthKey()} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 flex items-center justify-center"><ArrowRight className="w-4 h-4" /></button>
-        {mKey !== monthKey() && <button onClick={() => setMKey(monthKey())} className="text-xs text-indigo-600 font-semibold hover:underline ml-1">Bulan ini</button>}
+        {mKey !== monthKey() && <button onClick={() => setMKey(monthKey())} className="text-xs text-blue-600 font-semibold hover:underline ml-1">Bulan ini</button>}
       </div>
 
       {/* Goal summary */}
@@ -6168,7 +6213,7 @@ function AffiliateAccountsView({ user, allUsers }) {
                     <div className="text-xs text-slate-500 mt-0.5">PIC: {pic?.name || '—'}</div>
                   </div>
                   <div className="flex gap-1">
-                    {canInput(a) && <button onClick={() => { setEditEntry(null); setInputAcct(a); }} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Input GMV</button>}
+                    {canInput(a) && <button onClick={() => { setEditEntry(null); setInputAcct(a); }} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Input GMV</button>}
                     {canManage && <button onClick={() => setTargetAcct(a)} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200">Set Target</button>}
                     {canManage && <button onClick={() => { setEditingAcct(a); setShowAcct(true); }} className="text-slate-400 hover:text-blue-600 p-1.5"><Edit2 className="w-4 h-4" /></button>}
                     {isOwnerMgr && <button onClick={() => deleteAcct(a)} className="text-slate-400 hover:text-red-600 p-1.5"><Trash2 className="w-4 h-4" /></button>}
@@ -6209,7 +6254,7 @@ function AffiliateAccountsView({ user, allUsers }) {
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-[10px] font-bold text-slate-400 uppercase">Traffic Harian</div>
                     <button onClick={() => setDetailAcct(detailAcct === a.id ? null : a.id)}
-                      className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1">
+                      className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
                       {detailAcct === a.id ? 'Tutup rincian' : 'Lihat rincian angka'} <ChevronDown className={`w-3.5 h-3.5 transition-transform ${detailAcct === a.id ? 'rotate-180' : ''}`} />
                     </button>
                   </div>
@@ -6258,7 +6303,7 @@ function AffiliateAccountsView({ user, allUsers }) {
                                       )}
                                       {canInput(a) && (
                                         <button onClick={() => { setEditEntry(e); setInputAcct(a); }} title="Edit GMV tanggal ini"
-                                          className="text-slate-300 hover:text-indigo-600 p-1"><Edit2 className="w-3.5 h-3.5" /></button>
+                                          className="text-slate-300 hover:text-blue-600 p-1"><Edit2 className="w-3.5 h-3.5" /></button>
                                       )}
                                       {canManage && (
                                         <button onClick={() => deleteEntry(e)} title="Hapus"
@@ -6269,11 +6314,11 @@ function AffiliateAccountsView({ user, allUsers }) {
                                 );
                               })}
                             </tbody>
-                            <tfoot className="bg-indigo-50/60 border-t border-indigo-100">
+                            <tfoot className="bg-blue-50/60 border-t border-blue-100">
                               <tr>
-                                <td className="px-3 py-2 text-xs font-bold text-indigo-800">Total {monthLabel}</td>
-                                <td className="px-3 py-2 text-right tabular-nums font-bold text-indigo-800">{fmtRupiah(actual)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums text-indigo-700 text-xs">{fmtNumber(acctEntries.reduce((s, e) => s + (Number(e.orders) || 0), 0))}</td>
+                                <td className="px-3 py-2 text-xs font-bold text-blue-800">Total {monthLabel}</td>
+                                <td className="px-3 py-2 text-right tabular-nums font-bold text-blue-800">{fmtRupiah(actual)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-blue-700 text-xs">{fmtNumber(acctEntries.reduce((s, e) => s + (Number(e.orders) || 0), 0))}</td>
                                 <td className="hidden sm:table-cell"></td>
                                 <td></td>
                               </tr>
@@ -6315,7 +6360,7 @@ function AccountFormModal({ editing, internalUsers, onSave, onClose }) {
         <Field label="Nama Akun *">
           <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
             placeholder="mis. alkahfihome"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="PIC (penanggung jawab)">
           <SearchableSelect
@@ -6367,17 +6412,17 @@ function AccountGmvInputModal({ account, initial, onSave, onClose }) {
       <div className="space-y-3">
         <Field label="Tanggal * (bisa pilih tanggal lewat yang belum terisi)">
           <input type="date" value={form.date} max={dayKey()} onChange={e => setForm({ ...form, date: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="GMV Tanggal Ini (Rp) *">
           <input type="text" inputMode="numeric" value={form.gmv} onChange={e => setForm({ ...form, gmv: e.target.value.replace(/[^\d]/g, '') })}
             placeholder="mis. 25000000"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
           {form.gmv && <div className="text-xs text-emerald-600 mt-1 font-semibold">{fmtRupiah(Number(form.gmv))}</div>}
         </Field>
         <Field label="Jumlah Order (opsional)">
           <input type="text" inputMode="numeric" value={form.orders} onChange={e => setForm({ ...form, orders: e.target.value.replace(/[^\d]/g, '') })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="Bukti GMV (screenshot, maks. 2)">
           <div className="flex items-center gap-2 flex-wrap">
@@ -6392,7 +6437,7 @@ function AccountGmvInputModal({ account, initial, onSave, onClose }) {
             ))}
             {proofs.length < 2 && (
               <button type="button" onClick={() => proofRef.current?.click()} disabled={proofBusy}
-                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 transition disabled:opacity-50">
+                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-blue-600 transition disabled:opacity-50">
                 <Camera className="w-4 h-4" />
                 <span className="text-[9px] font-semibold mt-0.5">{proofBusy ? '...' : 'Upload'}</span>
               </button>
@@ -6419,7 +6464,7 @@ function AccountTargetModal({ account, monthLabel, current, dim, onSave, onClose
         <Field label="Target GMV Bulan Ini (Rp)">
           <input type="text" inputMode="numeric" value={val} onChange={e => setVal(e.target.value.replace(/[^\d]/g, ''))}
             placeholder="mis. 800000000"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
           {num > 0 && <div className="text-xs text-emerald-600 mt-1 font-semibold">{fmtRupiah(num)}</div>}
         </Field>
         {num > 0 && (
@@ -6441,7 +6486,7 @@ function GoalModal({ monthLabel, current, onSave, onClose }) {
       <div className="space-y-3">
         <Field label="Goal Total Affiliator Internal Bulan Ini (Rp)">
           <input type="text" inputMode="numeric" value={val} onChange={e => setVal(e.target.value.replace(/[^\d]/g, ''))}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
           {num > 0 && <div className="text-xs text-emerald-600 mt-1 font-semibold">{fmtRupiah(num)}</div>}
         </Field>
         <div className="text-[11px] text-slate-500">Default 1 Miliar. Total target semua akun idealnya menutupi goal ini.</div>
@@ -6533,7 +6578,7 @@ function KpiView({ user, allUsers }) {
 
       {/* How KPI calculated */}
       {(() => { const w = normalizeKpiConfig(cfg).weights; return (
-        <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 mb-4 text-xs text-slate-600 leading-relaxed">
+        <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3 mb-4 text-xs text-slate-600 leading-relaxed">
           💡 KPI dihitung otomatis dari 5 komponen: <b>Kehadiran</b> ({w.attendance}) · <b>Disiplin Waktu</b> ({w.punctuality}, % absen tepat waktu) · <b>Tugas</b> ({w.tasks}, kualitas 70% + volume 30%) · <b>Laporan Harian</b> ({w.reports}) · <b>Capaian Target GMV</b> ({w.target}, untuk PIC akun / leader divisi GMV — yang tidak pegang target, bobotnya otomatis dialihkan ke Tugas & Laporan supaya adil). Target hari kerja: {cfg.workdays}/bulan.
         </div>
       ); })()}
@@ -6560,7 +6605,7 @@ function KpiView({ user, allUsers }) {
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold text-slate-900 truncate">{s.user.name}</div>
                   <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                    {displayJobTitle(s.user) && <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{displayJobTitle(s.user)}</span>}
+                    {displayJobTitle(s.user) && <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">{displayJobTitle(s.user)}</span>}
                     <span className={`text-[10px] px-2 py-0.5 rounded ${ROLES[s.user.role]?.color}`}>{ROLES[s.user.role]?.label}</span>
                     {s.user.division && DIVISIONS[s.user.division] && <span className={`text-[10px] px-2 py-0.5 rounded ${DIVISIONS[s.user.division].color}`}>{DIVISIONS[s.user.division].label}</span>}
                   </div>
@@ -6759,7 +6804,7 @@ function ProblemsView({ user, allUsers }) {
         <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
           {[['aktif', 'Aktif'], ['resolved', 'Selesai'], ['all', 'Semua']].map(([v, l]) => (
             <button key={v} onClick={() => setFilter({ ...filter, status: v })}
-              className={`px-3 py-1.5 rounded-md text-sm font-semibold transition ${filter.status === v ? 'bg-white shadow text-indigo-700' : 'text-slate-500'}`}>{l}</button>
+              className={`px-3 py-1.5 rounded-md text-sm font-semibold transition ${filter.status === v ? 'bg-white shadow text-blue-700' : 'text-slate-500'}`}>{l}</button>
           ))}
         </div>
         <select value={filter.urgency} onChange={e => setFilter({ ...filter, urgency: e.target.value })} className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
@@ -6843,30 +6888,30 @@ function ProblemFormModal({ user, onSave, onClose }) {
         <Field label="Masalahnya apa? *">
           <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
             placeholder="mis. GMV TAP turun drastis 3 hari berturut"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="Detail / kronologi">
           <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={3}
             placeholder="Jelaskan situasinya..."
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Urgensi *">
             <select value={form.urgency} onChange={e => setForm({ ...form, urgency: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
               {Object.entries(URGENCY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           </Field>
           <Field label="Divisi terkait">
             <select value={form.division} onChange={e => setForm({ ...form, division: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
               {Object.entries(DIVISIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           </Field>
         </div>
         <Field label="Terkait dengan">
           <select value={form.relatedType} onChange={e => setForm({ ...form, relatedType: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
             <option value="umum">Umum</option>
             <option value="tugas">Tugas</option>
             <option value="target GMV">Target GMV</option>
@@ -6912,29 +6957,29 @@ function RootCauseModal({ problem, onSave, onClose }) {
         <div className="text-xs text-slate-500">Tanya "kenapa?" berulang sampai ketemu akar sebenarnya — jangan berhenti di gejala. Isi minimal sampai ketemu akar (tidak harus 5).</div>
         {whyFields.map(([k, label], i) => (
           <div key={k} className="flex gap-2 items-start">
-            <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-1">{i + 1}</div>
+            <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-1">{i + 1}</div>
             <div className="flex-1">
               <label className="text-[11px] font-semibold text-slate-500">{label}</label>
               <input type="text" value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
         ))}
         <Field label="🎯 Akar Masalah Sebenarnya *">
           <textarea value={form.root} onChange={e => setForm({ ...form, root: e.target.value })} rows={2}
             placeholder="Kesimpulan: akar masalahnya adalah..."
-            className="w-full px-3 py-2 border-2 border-indigo-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-indigo-50/30" />
+            className="w-full px-3 py-2 border-2 border-blue-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none bg-blue-50/30" />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="🔧 Tindakan Perbaikan (sekarang) *">
             <textarea value={form.corrective} onChange={e => setForm({ ...form, corrective: e.target.value })} rows={2}
               placeholder="Yang dilakukan untuk memperbaiki"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </Field>
           <Field label="🛡️ Tindakan Pencegahan (ke depan)">
             <textarea value={form.preventive} onChange={e => setForm({ ...form, preventive: e.target.value })} rows={2}
               placeholder="Supaya tidak terulang (mis. bikin SOP)"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </Field>
         </div>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
@@ -6959,14 +7004,14 @@ function RootCauseViewModal({ problem, onClose }) {
           <div className="space-y-1">
             {whys.map((w, i) => (
               <div key={i} className="flex gap-2 items-start text-sm">
-                <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
+                <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
                 <span className="text-slate-700">{w}</span>
               </div>
             ))}
           </div>
         </div>
-        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
-          <div className="text-xs font-bold text-indigo-700 uppercase">🎯 Akar Masalah</div>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <div className="text-xs font-bold text-blue-700 uppercase">🎯 Akar Masalah</div>
           <div className="text-sm text-slate-800 mt-1">{rc.root}</div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -7045,11 +7090,11 @@ function MediaTasksView({ user, allUsers }) {
 
       <div className="bg-white rounded-lg border border-slate-200 p-1 inline-flex mb-4">
         <button onClick={() => setTab('antrian')}
-          className={`px-4 py-2 rounded text-sm font-semibold transition ${tab === 'antrian' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+          className={`px-4 py-2 rounded text-sm font-semibold transition ${tab === 'antrian' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
           📋 Antrian Kerja ({antrian.length})
         </button>
         <button onClick={() => setTab('selesai')}
-          className={`px-4 py-2 rounded text-sm font-semibold transition ${tab === 'selesai' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+          className={`px-4 py-2 rounded text-sm font-semibold transition ${tab === 'selesai' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
           ✅ Selesai ({selesai.length})
         </button>
       </div>
@@ -7161,7 +7206,7 @@ function SellersView({ user, allUsers }) {
     <div className="max-w-6xl">
       <PageHeader title="Database Seller" subtitle="Seller yang bergabung & bind via TikTok Affiliate Partner (TAP)"
         action={
-          <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+          <button onClick={openNew} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
             <Plus className="w-4 h-4" /> Seller Baru
           </button>
         } />
@@ -7170,7 +7215,7 @@ function SellersView({ user, allUsers }) {
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input type="text" placeholder="Cari seller / toko..." value={search} onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
       </div>
 
@@ -7213,21 +7258,21 @@ function SellersView({ user, allUsers }) {
           <div className="space-y-3">
             <Field label="Nama Seller / PIC *">
               <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </Field>
             <Field label="Nama Toko / Shop">
               <input type="text" value={form.shopName} onChange={e => setForm({ ...form, shopName: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Kategori Produk">
                 <input type="text" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
                   placeholder="mis. Fashion, F&B"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </Field>
               <Field label="Status">
                 <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="aktif">Aktif</option>
                   <option value="prospek">Prospek</option>
                   <option value="nonaktif">Nonaktif</option>
@@ -7238,20 +7283,20 @@ function SellersView({ user, allUsers }) {
               <Field label="Komisi (%)">
                 <input type="text" value={form.commission} onChange={e => setForm({ ...form, commission: e.target.value })}
                   placeholder="mis. 10%"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </Field>
               <Field label="No. WhatsApp">
                 <input type="text" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
                   placeholder="08xxx"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </Field>
             </div>
             <Field label="Catatan">
               <textarea value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} rows={2}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </Field>
             <div className="flex gap-2 pt-2">
-              <button onClick={save} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-semibold">Simpan</button>
+              <button onClick={save} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-semibold">Simpan</button>
               <button onClick={() => setShowForm(false)} className="px-4 py-2.5 border border-slate-300 rounded-lg font-medium hover:bg-slate-50">Batal</button>
             </div>
           </div>
@@ -7564,7 +7609,7 @@ function AttendanceView({ user, allUsers }) {
       {canManageAtt && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <button onClick={() => setShowSettings(true)}
-            className="flex items-center gap-2 bg-white border border-slate-300 hover:border-indigo-400 hover:text-indigo-700 text-slate-700 text-sm font-semibold px-3.5 py-2 rounded-xl transition">
+            className="flex items-center gap-2 bg-white border border-slate-300 hover:border-blue-400 hover:text-blue-700 text-slate-700 text-sm font-semibold px-3.5 py-2 rounded-xl transition">
             <Clock className="w-4 h-4" /> Atur Jam & Lokasi Kerja
           </button>
           <span className="text-xs text-slate-500">
@@ -7602,7 +7647,7 @@ function AttendanceView({ user, allUsers }) {
                 <div className="text-sm font-bold text-slate-800">
                   {my.flexible ? 'Fleksibel' : `${my.jamMasuk}–${my.jamPulang}`}
                 </div>
-                {(config.custom || {})[user.id] && <div className="text-[10px] text-indigo-600 font-semibold">jadwal khusus</div>}
+                {(config.custom || {})[user.id] && <div className="text-[10px] text-blue-600 font-semibold">jadwal khusus</div>}
               </div>
             );
           })()}
@@ -7611,10 +7656,10 @@ function AttendanceView({ user, allUsers }) {
         <div className="mt-4">
           <input type="text" value={note} onChange={e => setNote(e.target.value)}
             placeholder="Catatan (opsional, mis. lokasi: kantor / WFH / lapangan)"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm mb-3" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm mb-3" />
 
           <button onClick={() => doAbsen(nextType)} disabled={busy}
-            style={{ background: nextType === 'in' ? 'linear-gradient(135deg, #4F46E5, #4338CA)' : 'linear-gradient(135deg, #D97706, #B45309)' }}
+            style={{ background: nextType === 'in' ? 'linear-gradient(135deg, #2563EB, #1D4ED8)' : 'linear-gradient(135deg, #D97706, #B45309)' }}
             className="w-full text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition disabled:opacity-60">
             {config.selfieWajib !== false ? <Camera className="w-5 h-5" /> : <MapPin className="w-5 h-5" />}
             {busy ? 'Mengambil lokasi...' : (nextType === 'in' ? 'Absen Masuk Sekarang' : 'Absen Pulang Sekarang')}
@@ -7653,18 +7698,18 @@ function AttendanceView({ user, allUsers }) {
           <span className="text-xs text-slate-500 font-semibold">Filter:</span>
           {(user.role === 'owner' || user.role === 'manajer') && (
             <select value={filterDiv} onChange={e => setFilterDiv(e.target.value)}
-              className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="all">Semua divisi</option>
               {Object.entries(DIVISIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           )}
           <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
-            className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
             <option value="all">Semua anggota</option>
             {teamForFilter.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
           <button onClick={downloadRecap} disabled={visibleRecords.length === 0}
-            className="ml-auto bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+            className="ml-auto bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5">
             <FileDown className="w-4 h-4" /> Download Rekap ({visibleRecords.length})
           </button>
           {canManageAtt && (
@@ -7707,7 +7752,7 @@ function AttendanceView({ user, allUsers }) {
                   return (
                     <React.Fragment key={row.key}>
                       <tr onClick={() => setOpenRow(open ? null : row.key)}
-                        className={`border-t border-slate-100 cursor-pointer transition ${open ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}>
+                        className={`border-t border-slate-100 cursor-pointer transition ${open ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}>
                         <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{new Date(row.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-2 min-w-0">
@@ -7736,7 +7781,7 @@ function AttendanceView({ user, allUsers }) {
                         </td>
                       </tr>
                       {open && (
-                        <tr className="border-t border-indigo-100 bg-indigo-50/30">
+                        <tr className="border-t border-blue-100 bg-blue-50/30">
                           <td colSpan={7} className="px-4 py-3">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               {[['Masuk', row.inRec], ['Pulang', row.outRec]].map(([label, rec]) => (
@@ -7750,19 +7795,19 @@ function AttendanceView({ user, allUsers }) {
                                         <span className="ml-auto flex items-center gap-0.5">
                                           {rec.hasSelfie && (
                                             <button onClick={() => viewSelfie(rec)} disabled={selfieLoading === rec.id} title="Lihat selfie"
-                                              className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition disabled:opacity-50">
+                                              className="text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition disabled:opacity-50">
                                               <Camera className="w-4 h-4" />
                                             </button>
                                           )}
                                           {rec.latitude && (
                                             <a href={mapsLink(rec.latitude, rec.longitude)} target="_blank" rel="noreferrer" title="Buka Maps"
-                                              className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition">
+                                              className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition">
                                               <MapPin className="w-4 h-4" />
                                             </a>
                                           )}
                                           {canEditRec(rec) && (
                                             <button onClick={() => setEditing(rec)} title="Edit"
-                                              className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition">
+                                              className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition">
                                               <Edit2 className="w-4 h-4" />
                                             </button>
                                           )}
@@ -7784,7 +7829,7 @@ function AttendanceView({ user, allUsers }) {
                                           : <span className="text-emerald-600 font-semibold">Lokasi sesuai</span>}
                                         {rec.hasSelfie ? null : (config.selfieWajib !== false && <span className="text-slate-400">· tanpa selfie</span>)}
                                         <a href={mapsLink(rec.latitude, rec.longitude)} target="_blank" rel="noreferrer"
-                                          className="text-indigo-600 hover:underline inline-flex items-center gap-0.5">
+                                          className="text-blue-600 hover:underline inline-flex items-center gap-0.5">
                                           Buka Maps <ExternalLink className="w-3 h-3" />
                                         </a>
                                       </div>
@@ -7878,7 +7923,7 @@ function SelfieCaptureModal({ type, userName, onCapture, onClose }) {
   return (
     <Modal title={`📸 Selfie Absen ${type === 'in' ? 'Masuk' : 'Pulang'}`} onClose={() => { stopCam(); onClose(); }}>
       <div className="space-y-3">
-        <div className="text-xs text-slate-500 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+        <div className="text-xs text-slate-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
           Hai <b>{userName.split(' ')[0]}</b> — posisikan wajah di tengah, lalu ambil foto. Foto jadi bukti kehadiranmu.
         </div>
         <div className="relative rounded-2xl overflow-hidden bg-slate-900 aspect-[4/3]">
@@ -7900,13 +7945,13 @@ function SelfieCaptureModal({ type, userName, onCapture, onClose }) {
             <button onClick={() => setSnapshot(null)}
               className="flex-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold py-2.5 rounded-lg">↺ Ulangi</button>
             <button onClick={() => { stopCam(); onCapture(snapshot); }}
-              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2">
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2">
               <Check className="w-4 h-4" /> Gunakan & Lanjut Absen
             </button>
           </div>
         ) : (
           <button onClick={takePhoto} disabled={!ready}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
             <Camera className="w-5 h-5" /> Ambil Foto
           </button>
         )}
@@ -7952,16 +7997,16 @@ function AttendanceSettingsModal({ config, allUsers = [], onSave, onClose, getLo
         <div className="grid grid-cols-2 gap-3">
           <Field label="Jam Masuk">
             <input type="time" value={form.jamMasuk} onChange={e => setForm({ ...form, jamMasuk: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </Field>
           <Field label="Jam Pulang">
             <input type="time" value={form.jamPulang} onChange={e => setForm({ ...form, jamPulang: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </Field>
         </div>
         <Field label="Toleransi telat (menit)">
           <input type="number" min="0" value={form.toleransiMenit} onChange={e => setForm({ ...form, toleransiMenit: Number(e.target.value) })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <div className="text-[11px] text-slate-500 mt-1">Absen masuk lewat dari jam masuk + toleransi = ditandai "Terlambat".</div>
         </Field>
 
@@ -7969,15 +8014,15 @@ function AttendanceSettingsModal({ config, allUsers = [], onSave, onClose, getLo
         <div className="border-t border-slate-100 pt-4">
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={form.selfieWajib !== false} onChange={e => setForm({ ...form, selfieWajib: e.target.checked })}
-              className="w-4 h-4 rounded accent-indigo-600" />
-            <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Camera className="w-4 h-4 text-indigo-600" /> Wajib selfie saat absen</span>
+              className="w-4 h-4 rounded accent-blue-600" />
+            <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Camera className="w-4 h-4 text-blue-600" /> Wajib selfie saat absen</span>
           </label>
           <div className="text-[11px] text-slate-500 mt-1">Anggota harus ambil foto wajah sebelum absen masuk/pulang — mencegah titip absen. Foto otomatis dihapus setelah 60 hari.</div>
         </div>
 
         {/* Jadwal khusus per karyawan */}
         <div className="border-t border-slate-100 pt-4">
-          <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5 mb-1"><Clock className="w-4 h-4 text-indigo-600" /> Jam Kerja Khusus per Karyawan</div>
+          <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5 mb-1"><Clock className="w-4 h-4 text-blue-600" /> Jam Kerja Khusus per Karyawan</div>
           <div className="text-[11px] text-slate-500 mb-2">Untuk freelance / shift yang jamnya beda dari tim. Yang tidak diatur di sini ikut jam kerja tim di atas.</div>
 
           {customIds.length > 0 && (
@@ -7994,7 +8039,7 @@ function AttendanceSettingsModal({ config, allUsers = [], onSave, onClose, getLo
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer mb-2">
                       <input type="checkbox" checked={!!c.flexible} onChange={e => setCustom(id, 'flexible', e.target.checked)}
-                        className="w-4 h-4 rounded accent-indigo-600" />
+                        className="w-4 h-4 rounded accent-blue-600" />
                       <span className="text-xs text-slate-700"><b>Jam fleksibel</b> (freelance) — tidak pernah ditandai telat/pulang cepat</span>
                     </label>
                     {!c.flexible && (
@@ -8030,14 +8075,14 @@ function AttendanceSettingsModal({ config, allUsers = [], onSave, onClose, getLo
               {availableUsers.map(u => <option key={u.id} value={u.id}>{u.name}{u.jobTitle ? ` · ${u.jobTitle}` : ''}</option>)}
             </select>
             <button onClick={addCustom} disabled={!pickUserId}
-              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg">Tambah</button>
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg">Tambah</button>
           </div>
         </div>
 
         <div className="border-t border-slate-100 pt-4">
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={form.lokasiAktif} onChange={e => setForm({ ...form, lokasiAktif: e.target.checked })}
-              className="w-4 h-4 rounded accent-indigo-600" />
+              className="w-4 h-4 rounded accent-blue-600" />
             <span className="text-sm font-semibold text-slate-800">Aktifkan pengecekan lokasi kerja</span>
           </label>
           <div className="text-[11px] text-slate-500 mt-1">Kalau aktif, absen di luar radius lokasi kerja akan ditandai "Lokasi tidak sesuai".</div>
@@ -8048,7 +8093,7 @@ function AttendanceSettingsModal({ config, allUsers = [], onSave, onClose, getLo
             <Field label="Nama lokasi (mis. Kantor Al-Kahfi)">
               <input type="text" value={form.lokasiLabel} onChange={e => setForm({ ...form, lokasiLabel: e.target.value })}
                 placeholder="Kantor Al-Kahfi"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Latitude">
@@ -8061,7 +8106,7 @@ function AttendanceSettingsModal({ config, allUsers = [], onSave, onClose, getLo
               </Field>
             </div>
             <button onClick={pakaiLokasiSaya} disabled={locBusy}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg flex items-center justify-center gap-2">
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg flex items-center justify-center gap-2">
               <MapPin className="w-4 h-4" /> {locBusy ? 'Mengambil lokasi…' : 'Pakai lokasi saya sekarang'}
             </button>
             {locErr && <div className="text-xs text-red-600">{locErr}</div>}
@@ -8093,17 +8138,17 @@ function AttendanceEditModal({ record, config, toLocalInput, canManage, onSave, 
         </div>
         <Field label="Tanggal & Jam">
           <input type="datetime-local" value={dt} onChange={e => setDt(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <div className="text-[11px] text-slate-500 mt-1">Status "Terlambat/Pulang cepat" otomatis dihitung ulang dari jam baru.</div>
         </Field>
         <Field label="Catatan">
           <input type="text" value={note} onChange={e => setNote(e.target.value)}
             placeholder="mis. lupa absen, GPS error, dll"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         {record.locationMismatch && canManage && (
           <label className="flex items-center gap-2 cursor-pointer bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            <input type="checkbox" checked={clearLoc} onChange={e => setClearLoc(e.target.checked)} className="w-4 h-4 rounded accent-indigo-600" />
+            <input type="checkbox" checked={clearLoc} onChange={e => setClearLoc(e.target.checked)} className="w-4 h-4 rounded accent-blue-600" />
             <span className="text-xs text-amber-800">Tandai lokasi sudah benar (hapus peringatan "Lokasi tidak sesuai")</span>
           </label>
         )}
@@ -8147,7 +8192,7 @@ function LeaderboardView({ allUsers }) {
           const k = m.kpi;
           const isMumtaz = k.total >= targetScore;
           return (
-            <div key={m.id} className={`bg-white rounded-xl border p-4 flex items-center gap-4 ${i < 3 && k.total > 0 ? 'border-indigo-200 bg-gradient-to-r from-indigo-50/30 to-transparent' : 'border-slate-200'}`}>
+            <div key={m.id} className={`bg-white rounded-xl border p-4 flex items-center gap-4 ${i < 3 && k.total > 0 ? 'border-blue-200 bg-gradient-to-r from-blue-50/30 to-transparent' : 'border-slate-200'}`}>
               <div className={`w-12 h-12 rounded-full flex items-center justify-center font-display font-bold text-lg flex-shrink-0 ${
                 k.total > 0 && i === 0 ? 'bg-gradient-to-br from-amber-400 to-yellow-600 text-white' :
                 k.total > 0 && i === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-white' :
@@ -8158,7 +8203,7 @@ function LeaderboardView({ allUsers }) {
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-slate-900 truncate">{m.name}</div>
                 <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                  {displayJobTitle(m) && <span className="text-[10px] inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{displayJobTitle(m)}</span>}
+                  {displayJobTitle(m) && <span className="text-[10px] inline-block px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">{displayJobTitle(m)}</span>}
                   <span className={`text-[10px] inline-block px-2 py-0.5 rounded ${ROLES[m.role]?.color}`}>{ROLES[m.role]?.label}</span>
                   {m.division && DIVISIONS[m.division] && (
                     <span className={`text-[10px] inline-block px-2 py-0.5 rounded ${DIVISIONS[m.division].color}`}>{DIVISIONS[m.division].label}</span>
@@ -8228,7 +8273,7 @@ function AnnouncementsView({ user }) {
               </button>
             )}
             <button onClick={() => setShowForm(true)}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
               <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Buat Pengumuman</span><span className="sm:hidden">Buat</span>
             </button>
           </div>
@@ -8386,7 +8431,7 @@ function ContentIdeasView({ user, allUsers, settings }) {
         subtitle="Siapapun bisa usulkan ide. Manajer/Leader approve & assign ke tim konten."
         action={
           <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
             <Lightbulb className="w-4 h-4" /> Usulkan Ide
           </button>
         } />
@@ -8396,7 +8441,7 @@ function ContentIdeasView({ user, allUsers, settings }) {
         {Object.entries(CONTENT_STATUS).map(([k, v]) => (
           <button key={k} onClick={() => setFilter({ ...filter, status: filter.status === k ? 'all' : k })}
             className={`p-3 rounded-xl border-2 text-left transition ${
-              filter.status === k ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'
+              filter.status === k ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-slate-300'
             }`}>
             <div className="flex items-center gap-2">
               <span className={`w-2 h-2 rounded-full ${v.dot}`}></span>
@@ -8413,7 +8458,7 @@ function ContentIdeasView({ user, allUsers, settings }) {
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input type="text" placeholder="Cari judul atau deskripsi..." value={filter.search}
             onChange={e => setFilter({ ...filter, search: e.target.value })}
-            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         <select value={filter.format} onChange={e => setFilter({ ...filter, format: e.target.value })}
           className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
@@ -8461,7 +8506,7 @@ function ContentIdeasView({ user, allUsers, settings }) {
                     {idea.hashtags && <div className="bg-slate-50 p-2 rounded col-span-2"><b className="text-slate-700">Hashtags:</b> <span className="text-slate-600">{idea.hashtags}</span></div>}
                     {idea.references && (
                       <div className="bg-slate-50 p-2 rounded col-span-2">
-                        <b className="text-slate-700">Referensi:</b> <a href={idea.references} target="_blank" rel="noopener noreferrer" className="text-indigo-700 hover:underline inline-flex items-center gap-1">
+                        <b className="text-slate-700">Referensi:</b> <a href={idea.references} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline inline-flex items-center gap-1">
                           {idea.references} <ExternalLink className="w-3 h-3" />
                         </a>
                       </div>
@@ -8478,7 +8523,7 @@ function ContentIdeasView({ user, allUsers, settings }) {
                       </div>
                     )}
                     {idea.status === 'published' && idea.publishedUrl && (
-                      <div>🚀 Tayang: <a href={idea.publishedUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-700 hover:underline inline-flex items-center gap-1">{idea.publishedUrl} <ExternalLink className="w-3 h-3" /></a> · {fmtDate(idea.publishedAt)}</div>
+                      <div>🚀 Tayang: <a href={idea.publishedUrl} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline inline-flex items-center gap-1">{idea.publishedUrl} <ExternalLink className="w-3 h-3" /></a> · {fmtDate(idea.publishedAt)}</div>
                     )}
                     {idea.status === 'rejected' && idea.rejectionReason && (
                       <div className="text-red-600">❌ Alasan: {idea.rejectionReason}</div>
@@ -8493,7 +8538,7 @@ function ContentIdeasView({ user, allUsers, settings }) {
                     {idea.status === 'idea' && canApprove && (
                       <>
                         <button onClick={() => setAssigning(idea)}
-                          className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 rounded font-semibold flex items-center gap-1">
+                          className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded font-semibold flex items-center gap-1">
                           <Check className="w-3 h-3" /> Setujui & Assign
                         </button>
                         <button onClick={() => setRejecting(idea)}
@@ -8510,7 +8555,7 @@ function ContentIdeasView({ user, allUsers, settings }) {
                     )}
                     {idea.status === 'in_progress' && canExecute(idea) && (
                       <button onClick={() => setPublishing(idea)}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 rounded font-semibold">
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded font-semibold">
                         Tandai Sudah Tayang
                       </button>
                     )}
@@ -8551,7 +8596,7 @@ function ContentIdeaForm({ idea, creators, onSave, onClose }) {
         <Field label="Judul Ide *">
           <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
             placeholder="Mis. Review jujur skincare A pakai before-after"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Format Konten *">
@@ -8614,7 +8659,7 @@ function AssignIdeaModal({ idea, allUsers, onSave, onClose }) {
   return (
     <Modal title={`Setujui & Assign: "${idea.title}"`} onClose={onClose}>
       <div className="space-y-3">
-        <div className="bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs p-3 rounded-lg">
+        <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs p-3 rounded-lg">
           ✅ Status akan berubah dari "Ide" → "Disetujui". Tim yang ditugaskan akan lihat ide ini di dashboard mereka.
         </div>
         <Field label="Tugaskan ke Tim Konten *">
@@ -8643,7 +8688,7 @@ function PublishIdeaModal({ idea, onSave, onClose }) {
   return (
     <Modal title={`Tandai Tayang: "${idea.title}"`} onClose={onClose}>
       <div className="space-y-3">
-        <div className="bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs p-3 rounded-lg">
+        <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs p-3 rounded-lg">
           🚀 Status akan berubah ke "Sudah Tayang". Simpan link konten untuk tracking performance.
         </div>
         <Field label="Link Konten yang Tayang *">
@@ -8685,7 +8730,7 @@ function RejectIdeaModal({ idea, onSave, onClose }) {
 // ============ MASUKAN & BUG (feedback tim untuk aplikasi) ============
 const FEEDBACK_TYPES = {
   bug: { label: 'Bug / Error', color: 'bg-red-100 text-red-700', icon: '🐞' },
-  saran: { label: 'Saran / Ide', color: 'bg-indigo-100 text-indigo-700', icon: '💡' },
+  saran: { label: 'Saran / Ide', color: 'bg-blue-100 text-blue-700', icon: '💡' },
   lainnya: { label: 'Lainnya', color: 'bg-slate-100 text-slate-600', icon: '💬' }
 };
 const FEEDBACK_STATUS = {
@@ -8783,14 +8828,14 @@ function FeedbackView({ user, allUsers }) {
         <div className="flex flex-wrap gap-2 mb-3">
           {Object.entries(FEEDBACK_TYPES).map(([k, v]) => (
             <button key={k} onClick={() => setType(k)}
-              className={`text-sm font-semibold px-3.5 py-1.5 rounded-lg border transition ${type === k ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+              className={`text-sm font-semibold px-3.5 py-1.5 rounded-lg border transition ${type === k ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
               {v.icon} {v.label}
             </button>
           ))}
         </div>
         <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={3}
           placeholder={type === 'bug' ? 'Jelaskan bug-nya: apa yang terjadi, di halaman mana, langkahnya gimana…' : 'Tulis saran/masukanmu di sini…'}
-          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none text-sm" />
+          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-sm" />
         {/* Lampiran screenshot biar laporan tepat sasaran */}
         <div className="mt-2">
           <div className="flex items-center gap-2 flex-wrap">
@@ -8806,7 +8851,7 @@ function FeedbackView({ user, allUsers }) {
             ))}
             {images.length < 3 && (
               <button onClick={() => imgRef.current?.click()} disabled={imgBusy}
-                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 transition disabled:opacity-50">
+                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-blue-600 transition disabled:opacity-50">
                 <ImagePlus className="w-5 h-5" />
                 <span className="text-[9px] font-semibold mt-0.5">{imgBusy ? '...' : 'Foto'}</span>
               </button>
@@ -8819,9 +8864,9 @@ function FeedbackView({ user, allUsers }) {
         <div className="flex flex-col sm:flex-row gap-2 mt-2">
           <input type="text" value={page} onChange={e => setPage(e.target.value)}
             placeholder="Halaman terkait (opsional, mis. Absensi, Kalender)"
-            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
           <button onClick={submit} disabled={busy || !msg.trim()}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold px-5 py-2 rounded-lg text-sm flex items-center justify-center gap-2">
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold px-5 py-2 rounded-lg text-sm flex items-center justify-center gap-2">
             <MessageSquare className="w-4 h-4" /> {busy ? 'Mengirim…' : 'Kirim Masukan'}
           </button>
         </div>
@@ -8831,8 +8876,8 @@ function FeedbackView({ user, allUsers }) {
       <div className="flex flex-wrap gap-1.5 mb-4">
         {TABS.map(([k, label]) => (
           <button key={k} onClick={() => setFilter(k)}
-            style={filter === k ? { backgroundColor: '#4F46E5', color: '#fff', borderColor: '#4F46E5' } : {}}
-            className="text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-indigo-300 transition">
+            style={filter === k ? { backgroundColor: '#2563EB', color: '#fff', borderColor: '#2563EB' } : {}}
+            className="text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 transition">
             {label} ({counts[k]})
           </button>
         ))}
@@ -8912,9 +8957,9 @@ function FeedbackView({ user, allUsers }) {
                         onChange={e => setReplyText(p => ({ ...p, [item.id]: e.target.value }))}
                         onKeyDown={e => { if (e.key === 'Enter') addReply(item.id); }}
                         placeholder="Tulis balasan…"
-                        className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                        className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                       <button onClick={() => addReply(item.id)} disabled={!(replyText[item.id] || '').trim()}
-                        className="bg-slate-100 hover:bg-indigo-100 hover:text-indigo-700 disabled:opacity-40 text-slate-600 font-semibold px-3 py-1.5 rounded-lg text-sm transition">
+                        className="bg-slate-100 hover:bg-blue-100 hover:text-blue-700 disabled:opacity-40 text-slate-600 font-semibold px-3 py-1.5 rounded-lg text-sm transition">
                         Balas
                       </button>
                     </div>
@@ -9055,12 +9100,12 @@ function SettingsView({ user, settings, onSave }) {
         <h3 className="font-display font-bold text-slate-900">Identitas Aplikasi</h3>
         <Field label="Nama Aplikasi *">
           <input type="text" value={form.appName} onChange={e => setForm({ ...form, appName: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
         <Field label="Subtitle / Tagline">
           <input type="text" value={form.appSubtitle} onChange={e => setForm({ ...form, appSubtitle: e.target.value })}
             placeholder="Mis. MCN TAP · Masjid Affiliate"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </Field>
       </div>
 
@@ -9083,7 +9128,7 @@ function SettingsView({ user, settings, onSave }) {
             <div className="grid grid-cols-6 gap-2">
               {EMOJI_OPTIONS.map(e => (
                 <button key={e} onClick={() => setForm({ ...form, logoEmoji: e })}
-                  className={`p-3 text-2xl rounded-lg border-2 transition ${form.logoEmoji === e ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                  className={`p-3 text-2xl rounded-lg border-2 transition ${form.logoEmoji === e ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
                   {e}
                 </button>
               ))}
@@ -9098,14 +9143,14 @@ function SettingsView({ user, settings, onSave }) {
         ) : (
           <div className="space-y-3">
             <div className="flex items-center gap-4">
-              <div className="w-20 h-20 bg-gradient-to-br from-indigo-600 to-violet-700 rounded-xl flex items-center justify-center text-3xl overflow-hidden flex-shrink-0">
+              <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-violet-700 rounded-xl flex items-center justify-center text-3xl overflow-hidden flex-shrink-0">
                 {form.logoImage
                   ? <img src={form.logoImage} alt="" className="w-full h-full object-cover" />
                   : <span className="text-white opacity-50">?</span>}
               </div>
               <div className="flex-1 space-y-2">
                 <button onClick={() => fileRef.current?.click()} disabled={uploading}
-                  className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
                   <ImagePlus className="w-4 h-4" /> {uploading ? 'Memproses...' : (form.logoImage ? 'Ganti Foto' : 'Pilih Foto Logo')}
                 </button>
                 <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
@@ -9147,7 +9192,7 @@ function SettingsView({ user, settings, onSave }) {
                   <input type="text" value={form.customRoles[role]}
                     placeholder={DEFAULT_ROLE_LABELS[role]}
                     onChange={e => setForm({ ...form, customRoles: { ...form.customRoles, [role]: e.target.value } })}
-                    className="w-full px-3 py-2 mt-1 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+                    className="w-full px-3 py-2 mt-1 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
                 </div>
               </div>
             );
@@ -9171,7 +9216,7 @@ function SettingsView({ user, settings, onSave }) {
         <div className="space-y-2">
           {form.jobTitles.map((jt, idx) => (
             <div key={idx} className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-indigo-50 text-indigo-700 flex items-center justify-center text-xs font-bold flex-shrink-0">{idx + 1}</div>
+              <div className="w-8 h-8 rounded bg-blue-50 text-blue-700 flex items-center justify-center text-xs font-bold flex-shrink-0">{idx + 1}</div>
               <input type="text" value={jt}
                 onChange={e => {
                   const newList = [...form.jobTitles];
@@ -9179,7 +9224,7 @@ function SettingsView({ user, settings, onSave }) {
                   setForm({ ...form, jobTitles: newList });
                 }}
                 placeholder="Mis. Creator Manager"
-                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
               <button onClick={() => setForm({ ...form, jobTitles: form.jobTitles.filter((_, i) => i !== idx) })}
                 title="Hapus posisi ini"
                 className="text-slate-400 hover:text-red-600 p-2 flex-shrink-0">
@@ -9188,7 +9233,7 @@ function SettingsView({ user, settings, onSave }) {
             </div>
           ))}
           <button onClick={() => setForm({ ...form, jobTitles: [...form.jobTitles, ''] })}
-            className="w-full border-2 border-dashed border-slate-300 hover:border-indigo-500 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 py-2.5 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2">
+            className="w-full border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-600 hover:text-blue-700 py-2.5 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2">
             <Plus className="w-4 h-4" /> Tambah Posisi Baru
           </button>
         </div>
@@ -9201,7 +9246,7 @@ function SettingsView({ user, settings, onSave }) {
       <div className="bg-white rounded-2xl border border-slate-200/70 p-6 shadow-sm shadow-slate-200/40 space-y-4">
         <div>
           <h3 className="font-display font-bold text-slate-900 flex items-center gap-2">
-            <Database className="w-4 h-4 text-indigo-600" /> Backup &amp; Keamanan Data
+            <Database className="w-4 h-4 text-blue-600" /> Backup &amp; Keamanan Data
           </h3>
           <p className="text-xs text-slate-500 mt-1">Download cadangan semua data tim (anggota, tugas, GMV, creator, laporan, dll) jadi 1 file. Simpan rutin di Google Drive/laptop sebagai jaring pengaman.</p>
         </div>
@@ -9212,7 +9257,7 @@ function SettingsView({ user, settings, onSave }) {
 
         <div className="grid sm:grid-cols-2 gap-3">
           <button onClick={doExport} disabled={backupBusy}
-            className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white py-3 rounded-xl font-semibold text-sm transition shadow-sm">
+            className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-3 rounded-xl font-semibold text-sm transition shadow-sm">
             <Download className="w-4 h-4" /> {backupBusy ? 'Memproses…' : 'Export Semua Data (.json)'}
           </button>
 
@@ -9241,7 +9286,7 @@ function SettingsView({ user, settings, onSave }) {
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
         <div className="text-xs font-semibold text-slate-600 uppercase mb-3">Preview</div>
         <div className="flex items-center gap-3">
-          <div className="w-14 h-14 bg-gradient-to-br from-indigo-600 to-violet-700 rounded-xl flex items-center justify-center text-2xl overflow-hidden">
+          <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-violet-700 rounded-xl flex items-center justify-center text-2xl overflow-hidden">
             {logoMode === 'image' && form.logoImage
               ? <img src={form.logoImage} alt="" className="w-full h-full object-cover" />
               : form.logoEmoji}
@@ -9253,16 +9298,16 @@ function SettingsView({ user, settings, onSave }) {
               <span className="text-[10px] px-2 py-0.5 rounded bg-violet-100 text-violet-800">{form.customRoles.owner || DEFAULT_ROLE_LABELS.owner}</span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800">{form.customRoles.manajer || DEFAULT_ROLE_LABELS.manajer}</span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-800">{form.customRoles.leader || DEFAULT_ROLE_LABELS.leader}</span>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-100 text-indigo-800">{form.customRoles.operasional || DEFAULT_ROLE_LABELS.operasional}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-800">{form.customRoles.operasional || DEFAULT_ROLE_LABELS.operasional}</span>
             </div>
           </div>
         </div>
       </div>
 
       <div className="flex items-center justify-end gap-3 sticky bottom-0 bg-slate-50 pb-2">
-        {saved && <span className="text-sm text-indigo-700 font-semibold">✓ Tersimpan</span>}
+        {saved && <span className="text-sm text-blue-700 font-semibold">✓ Tersimpan</span>}
         <button onClick={submit}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg font-semibold shadow-md">
+          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-semibold shadow-md">
           Simpan Pengaturan
         </button>
       </div>
@@ -9351,7 +9396,7 @@ function TodosView({ user, allUsers }) {
       <PageHeader title="To-Do List" subtitle="Tugas semua anggota tim — terbuka untuk dilihat, supaya tim tahu siapa sedang mengerjakan apa"
         action={
           <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
             <Plus className="w-4 h-4" /> To-Do Baru
           </button>
         } />
@@ -9360,11 +9405,11 @@ function TodosView({ user, allUsers }) {
       <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4 flex items-center gap-3 flex-wrap">
         <span className="text-xs font-semibold text-slate-500 uppercase">Lihat To-Do:</span>
         <button onClick={() => setFilter({ owner: user.id })}
-          className={`text-xs px-3 py-1.5 rounded font-semibold transition ${filter.owner === user.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+          className={`text-xs px-3 py-1.5 rounded font-semibold transition ${filter.owner === user.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
           Saya
         </button>
         <button onClick={() => setFilter({ owner: 'all' })}
-          className={`text-xs px-3 py-1.5 rounded font-semibold transition ${filter.owner === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+          className={`text-xs px-3 py-1.5 rounded font-semibold transition ${filter.owner === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
           Semua Anggota
         </button>
         <div className="h-5 w-px bg-slate-200"></div>
@@ -9380,7 +9425,7 @@ function TodosView({ user, allUsers }) {
           </select>
         </div>
         {filter.owner !== user.id && filter.owner !== 'all' && (
-          <span className="text-xs text-indigo-700 font-semibold flex items-center gap-1">
+          <span className="text-xs text-blue-700 font-semibold flex items-center gap-1">
             Filter: {visibleOwners.find(o => o.id === filter.owner)?.name}
             <button onClick={() => setFilter({ owner: user.id })} className="text-slate-400 hover:text-red-600">
               <X className="w-3 h-3" />
@@ -9396,7 +9441,7 @@ function TodosView({ user, allUsers }) {
             onDragOver={e => handleDragOver(e, key)}
             onDragLeave={handleDragLeave}
             onDrop={e => handleDrop(e, key)}
-            className={`rounded-xl border-2 transition ${dragOver === key ? 'border-indigo-500 bg-indigo-50' : `${def.border} ${def.bg}`}`}>
+            className={`rounded-xl border-2 transition ${dragOver === key ? 'border-blue-500 bg-blue-50' : `${def.border} ${def.bg}`}`}>
             <div className={`p-3 border-b ${def.border} flex items-center justify-between`}>
               <div className="flex items-center gap-2">
                 <h3 className="font-display font-bold text-slate-800">{def.label}</h3>
@@ -9422,13 +9467,13 @@ function TodosView({ user, allUsers }) {
                       {/* Owner header */}
                       <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-100">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <div className="w-5 h-5 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-[9px] font-bold text-white overflow-hidden flex-shrink-0">
+                          <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[9px] font-bold text-white overflow-hidden flex-shrink-0">
                             {ownerUser?.avatarImage
                               ? <img src={ownerUser.avatarImage} alt="" className="w-full h-full object-cover" />
                               : todo.ownerName.charAt(0).toUpperCase()}
                           </div>
                           <span className="text-[10px] font-semibold text-slate-700 truncate">{todo.ownerName}</span>
-                          {isMine && <span className="text-[9px] text-indigo-600 font-semibold flex-shrink-0">(Saya)</span>}
+                          {isMine && <span className="text-[9px] text-blue-600 font-semibold flex-shrink-0">(Saya)</span>}
                           {ownerUser?.jobTitle && <span className="text-[9px] text-slate-400 truncate">· {ownerUser.jobTitle}</span>}
                         </div>
                         {canEdit && (
@@ -9708,7 +9753,7 @@ function DailyReportsView({ user, allUsers }) {
               <FileDown className="w-4 h-4" /> Download Laporan
             </button>
             <button onClick={() => { setEditing(null); setShowForm(true); }}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
               <Plus className="w-4 h-4" /> Laporan Hari Ini
             </button>
           </div>
@@ -9716,12 +9761,12 @@ function DailyReportsView({ user, allUsers }) {
 
       {/* User template info */}
       {myAssignedTemplate && (
-        <div className="bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-200 rounded-xl p-3 mb-4 flex items-center gap-3">
-          <ClipboardList className="w-5 h-5 text-indigo-700 flex-shrink-0" />
+        <div className="bg-gradient-to-r from-blue-50 to-violet-50 border border-blue-200 rounded-xl p-3 mb-4 flex items-center gap-3">
+          <ClipboardList className="w-5 h-5 text-blue-700 flex-shrink-0" />
           <div className="text-sm">
-            <span className="text-indigo-800">Template laporan untuk Anda:</span>
-            <b className="text-indigo-900 ml-1">{myAssignedTemplate.name}</b>
-            <span className="text-indigo-700 text-xs ml-2">({myAssignedTemplate.fields.length} field)</span>
+            <span className="text-blue-800">Template laporan untuk Anda:</span>
+            <b className="text-blue-900 ml-1">{myAssignedTemplate.name}</b>
+            <span className="text-blue-700 text-xs ml-2">({myAssignedTemplate.fields.length} field)</span>
           </div>
         </div>
       )}
@@ -9735,7 +9780,7 @@ function DailyReportsView({ user, allUsers }) {
               onChange={e => setFilter({ ...filter, date: e.target.value || 'all' })}
               className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm" />
             <button onClick={() => setFilter({ ...filter, date: 'all' })}
-              className={`text-xs px-3 py-1.5 rounded font-semibold ${filter.date === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+              className={`text-xs px-3 py-1.5 rounded font-semibold ${filter.date === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
               Semua
             </button>
           </div>
@@ -9766,13 +9811,13 @@ function DailyReportsView({ user, allUsers }) {
                 {reps.map(r => {
                   const fields = getReportFields(r);
                   return (
-                    <div key={r.id} className={`bg-white rounded-xl border ${r.pinToDashboard ? 'border-indigo-300 ring-2 ring-indigo-100' : 'border-slate-200'} p-4`}>
+                    <div key={r.id} className={`bg-white rounded-xl border ${r.pinToDashboard ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'} p-4`}>
                       <div className="flex items-start justify-between mb-2 gap-3 flex-wrap">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-semibold text-slate-900">{r.authorName}</span>
                             <span className={`text-[10px] px-2 py-0.5 rounded ${ROLES[r.authorRole]?.color || ''}`}>{ROLES[r.authorRole]?.label}</span>
-                            {r.authorJobTitle && <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{r.authorJobTitle}</span>}
+                            {r.authorJobTitle && <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">{r.authorJobTitle}</span>}
                           </div>
                           <div className="text-[10px] text-slate-500 mt-0.5">
                             {fmtDateTime(r.submittedAt)}
@@ -9782,7 +9827,7 @@ function DailyReportsView({ user, allUsers }) {
                         <div className="flex gap-1">
                           {canManage && (
                             <button onClick={() => handleTogglePin(r)} title={r.pinToDashboard ? 'Unpin dari dashboard' : 'Pin ke dashboard'}
-                              className={`p-1 ${r.pinToDashboard ? 'text-indigo-600' : 'text-slate-400 hover:text-indigo-600'}`}>
+                              className={`p-1 ${r.pinToDashboard ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}>
                               <Pin className="w-4 h-4" />
                             </button>
                           )}
@@ -9925,7 +9970,7 @@ function DownloadRangeModal({ filterableAuthors, reportsCount, onDownload, onClo
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {presets.map(p => (
               <button key={p.id} onClick={() => applyPreset(p.id)}
-                className={`text-xs px-2 py-2 rounded-lg font-semibold transition ${preset === p.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                className={`text-xs px-2 py-2 rounded-lg font-semibold transition ${preset === p.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
                 {p.label}
               </button>
             ))}
@@ -9937,13 +9982,13 @@ function DownloadRangeModal({ filterableAuthors, reportsCount, onDownload, onClo
             <input type="date" value={form.start}
               onChange={e => { setForm({ ...form, start: e.target.value }); setPreset('custom'); }}
               max={form.end}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </Field>
           <Field label="Tanggal Akhir *">
             <input type="date" value={form.end}
               onChange={e => { setForm({ ...form, end: e.target.value }); setPreset('custom'); }}
               min={form.start}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </Field>
         </div>
 
@@ -9991,7 +10036,7 @@ function DynamicFieldDisplay({ field }) {
     return (
       <div>
         <div className="text-[10px] font-bold text-slate-500 uppercase">{field.label}</div>
-        <a href={field.value} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-700 hover:underline inline-flex items-center gap-1 break-all">
+        <a href={field.value} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-700 hover:underline inline-flex items-center gap-1 break-all">
           {field.value} <ExternalLink className="w-3 h-3 flex-shrink-0" />
         </a>
       </div>
@@ -10008,7 +10053,7 @@ function DynamicFieldDisplay({ field }) {
 
 // Dynamic field input - render input based on type
 function DynamicFieldInput({ field, value, onChange }) {
-  const common = "w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500";
+  const common = "w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
   return (
     <Field label={`${field.label}${field.required ? ' *' : ''}`}>
       {field.helpText && <div className="text-[11px] text-slate-500 mb-1 -mt-1">{field.helpText}</div>}
@@ -10043,7 +10088,7 @@ function DynamicFieldInput({ field, value, onChange }) {
           {(field.options || []).map(opt => (
             <label key={opt} className="flex items-center gap-2.5 px-3 py-2 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition">
               <input type="radio" name={field.id} checked={value === opt} onChange={() => onChange(opt)}
-                className="w-4 h-4 accent-indigo-600" />
+                className="w-4 h-4 accent-blue-600" />
               <span className="text-sm text-slate-700">{opt}</span>
             </label>
           ))}
@@ -10058,7 +10103,7 @@ function DynamicFieldInput({ field, value, onChange }) {
               <label key={opt} className="flex items-center gap-2.5 px-3 py-2 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition">
                 <input type="checkbox" checked={checked}
                   onChange={() => onChange(checked ? arr.filter(x => x !== opt) : [...arr, opt])}
-                  className="w-4 h-4 accent-indigo-600 rounded" />
+                  className="w-4 h-4 accent-blue-600 rounded" />
                 <span className="text-sm text-slate-700">{opt}</span>
               </label>
             );
@@ -10180,12 +10225,12 @@ function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
         )}
 
         {activeTemplate ? (
-          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-sm">
-            <div className="flex items-center gap-2 text-indigo-800">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+            <div className="flex items-center gap-2 text-blue-800">
               <ClipboardList className="w-4 h-4" />
               <b>{activeTemplate.name}</b>
             </div>
-            {activeTemplate.description && <div className="text-xs text-indigo-700 mt-1">{activeTemplate.description}</div>}
+            {activeTemplate.description && <div className="text-xs text-blue-700 mt-1">{activeTemplate.description}</div>}
           </div>
         ) : (
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
@@ -10215,7 +10260,7 @@ function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
             ))}
             {attachments.length < 3 && (
               <button type="button" onClick={() => attRef.current?.click()} disabled={attBusy}
-                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 transition disabled:opacity-50">
+                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-blue-600 transition disabled:opacity-50">
                 <Paperclip className="w-4 h-4" />
                 <span className="text-[9px] font-semibold mt-0.5">{attBusy ? '...' : 'Upload'}</span>
               </button>
@@ -10227,13 +10272,13 @@ function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
         </Field>
 
         {canPin && (
-          <label className="flex items-start gap-2 bg-indigo-50 border border-indigo-200 p-3 rounded-lg cursor-pointer">
+          <label className="flex items-start gap-2 bg-blue-50 border border-blue-200 p-3 rounded-lg cursor-pointer">
             <input type="checkbox" checked={form.pinToDashboard}
               onChange={e => setForm({ ...form, pinToDashboard: e.target.checked })}
               className="mt-0.5" />
             <div>
-              <div className="text-sm font-semibold text-indigo-800">📌 Tampilkan di Dashboard Tim</div>
-              <div className="text-xs text-indigo-700">Laporan ini akan di-pin sebagai highlight di dashboard semua anggota.</div>
+              <div className="text-sm font-semibold text-blue-800">📌 Tampilkan di Dashboard Tim</div>
+              <div className="text-xs text-blue-700">Laporan ini akan di-pin sebagai highlight di dashboard semua anggota.</div>
             </div>
           </label>
         )}
@@ -10294,7 +10339,7 @@ function TemplateManagementModal({ user, allUsers, templates, onSave, onClose })
         </div>
 
         <button onClick={() => { setEditing(null); setShowBuilder(true); }}
-          className="w-full border-2 border-dashed border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 text-indigo-700 py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2">
+          className="w-full border-2 border-dashed border-blue-300 hover:border-blue-500 hover:bg-blue-50 text-blue-700 py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2">
           <Plus className="w-4 h-4" /> Buat Template Baru
         </button>
 
@@ -10444,7 +10489,7 @@ function TemplateBuilderModal({ template, allUsers, existingTemplates, onSave, o
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Field Form ({form.fields.length})</label>
             {form.fields.length === 0 && (
-              <button onClick={loadDefaults} className="text-xs text-indigo-700 hover:text-indigo-800 font-semibold">
+              <button onClick={loadDefaults} className="text-xs text-blue-700 hover:text-blue-800 font-semibold">
                 Mulai dari template default →
               </button>
             )}
@@ -10459,7 +10504,7 @@ function TemplateBuilderModal({ template, allUsers, existingTemplates, onSave, o
                 onMoveDown={() => moveField(idx, 1)} />
             ))}
             <button onClick={addField}
-              className="w-full border-2 border-dashed border-slate-300 hover:border-indigo-500 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 py-2.5 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2">
+              className="w-full border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-600 hover:text-blue-700 py-2.5 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2">
               <Plus className="w-4 h-4" /> Tambah Field
             </button>
           </div>
@@ -10476,7 +10521,7 @@ function TemplateBuilderModal({ template, allUsers, existingTemplates, onSave, o
                 <input type="checkbox" checked={form.assignedUserIds.includes(u.id)}
                   onChange={() => toggleAssignee(u.id)} />
                 <span className="text-sm flex-1">{u.name}</span>
-                {u.jobTitle && <span className="text-[10px] px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded">{u.jobTitle}</span>}
+                {u.jobTitle && <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{u.jobTitle}</span>}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${ROLES[u.role].color}`}>{ROLES[u.role].label}</span>
               </label>
             ))}
@@ -10650,7 +10695,7 @@ function CalendarView({ user, allUsers }) {
         action={
           canManage ? (
             <button onClick={() => { setEditing(null); setShowForm(true); }}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
               <Plus className="w-4 h-4" /> Agenda Baru
             </button>
           ) : null
@@ -10691,8 +10736,8 @@ function CalendarView({ user, allUsers }) {
               ) : (
                 <div key={cell.key}
                   onClick={() => { if (!canManage) return; setEditing({ date: cell.dateStr }); setShowForm(true); }}
-                  className={`min-h-[100px] p-2 border-b border-r border-slate-100 ${canManage ? 'cursor-pointer hover:bg-slate-50' : ''} ${cell.isToday ? 'bg-indigo-50/50' : ''}`}>
-                  <div className={`text-xs font-bold mb-1 ${cell.isToday ? 'inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600 text-white' : 'text-slate-700'}`}>
+                  className={`min-h-[100px] p-2 border-b border-r border-slate-100 ${canManage ? 'cursor-pointer hover:bg-slate-50' : ''} ${cell.isToday ? 'bg-blue-50/50' : ''}`}>
+                  <div className={`text-xs font-bold mb-1 ${cell.isToday ? 'inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white' : 'text-slate-700'}`}>
                     {cell.dayNum}
                   </div>
                   <div className="space-y-1">
@@ -10723,7 +10768,7 @@ function CalendarView({ user, allUsers }) {
               <div className="space-y-2">
                 {upcomingEvents.map(e => (
                   <button key={e.id} onClick={() => setViewing(e)}
-                    className="w-full text-left p-2 rounded-lg border border-slate-100 hover:border-indigo-500 hover:bg-indigo-50 transition">
+                    className="w-full text-left p-2 rounded-lg border border-slate-100 hover:border-blue-500 hover:bg-blue-50 transition">
                     <div className="flex items-center gap-1 text-[10px] text-slate-500 mb-1">
                       <span>{EVENT_TYPE[e.type]?.icon}</span>
                       <span className="font-semibold">{fmtDate(e.date)}{e.time && ` · ${e.time}`}</span>
@@ -10785,7 +10830,7 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
             {Object.entries(EVENT_TYPE).map(([k, v]) => (
               <button key={k} onClick={() => setForm({ ...form, type: k })}
-                className={`px-2 py-2 rounded-lg border-2 text-xs font-semibold transition ${form.type === k ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                className={`px-2 py-2 rounded-lg border-2 text-xs font-semibold transition ${form.type === k ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
                 <div className="text-lg">{v.icon}</div>
                 <div>{v.label}</div>
               </button>
@@ -10825,7 +10870,7 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
           <div className="flex items-center gap-2 mb-2">
             <button type="button"
               onClick={() => setForm({ ...form, attendeeIds: selectableUsers.map(u => u.id) })}
-              className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition">
+              className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition">
               ✓ Centang Semua {canAll ? 'Tim' : 'Anggota Saya'}
             </button>
             <button type="button"
@@ -10937,7 +10982,7 @@ function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
             <div className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1"><MapPin className="w-3 h-3" /> Lokasi</div>
             <div className="text-slate-800 mt-1 text-sm">
               {event.location.startsWith('http') ? (
-                <a href={event.location} target="_blank" rel="noopener noreferrer" className="text-indigo-700 hover:underline inline-flex items-center gap-1">{event.location} <ExternalLink className="w-3 h-3" /></a>
+                <a href={event.location} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline inline-flex items-center gap-1">{event.location} <ExternalLink className="w-3 h-3" /></a>
               ) : event.location}
             </div>
           </div>
@@ -10963,7 +11008,7 @@ function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
         </div>
 
         {/* Action buttons */}
-        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 p-4 rounded-lg space-y-2">
+        <div className="bg-gradient-to-br from-blue-50 to-blue-50 border border-blue-200 p-4 rounded-lg space-y-2">
           <div className="text-sm font-semibold text-slate-800">Tambahkan ke kalender:</div>
           {event.attendeeEmails && event.attendeeEmails.length > 0 && (
             <div className="text-[11px] text-blue-800 bg-white/70 border border-blue-100 rounded-lg px-2.5 py-1.5">
@@ -10972,11 +11017,11 @@ function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
           )}
           <div className="flex gap-2 flex-wrap">
             <a href={googleCalendarUrl} target="_blank" rel="noopener noreferrer"
-              className="flex-1 bg-white border border-slate-300 hover:border-indigo-500 hover:bg-indigo-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
+              className="flex-1 bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
               <CalendarDays className="w-4 h-4" /> Google Calendar {event.attendeeEmails?.length ? '+ Undang Tim' : ''}
             </a>
             <button onClick={downloadICS}
-              className="flex-1 bg-white border border-slate-300 hover:border-indigo-500 hover:bg-indigo-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
+              className="flex-1 bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
               <FileDown className="w-4 h-4" /> Download .ics
             </button>
           </div>
@@ -10986,7 +11031,7 @@ function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
           {canEdit && (
             <>
               <button onClick={onEdit}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center justify-center gap-2">
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center justify-center gap-2">
                 <Edit2 className="w-4 h-4" /> Edit
               </button>
               <button onClick={onDelete}
@@ -11090,14 +11135,14 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
         {/* Avatar section */}
         <div className="flex items-center gap-5 pb-5 border-b border-slate-100">
           <div className="relative">
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-3xl overflow-hidden border-4 border-white shadow-lg">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white font-bold text-3xl overflow-hidden border-4 border-white shadow-lg">
               {form.avatarImage
                 ? <img src={form.avatarImage} alt="" className="w-full h-full object-cover" />
                 : form.name.charAt(0).toUpperCase()}
             </div>
             <button onClick={() => fileRef.current?.click()} disabled={uploading}
               title="Ganti foto profil"
-              className="absolute -bottom-1 -right-1 w-8 h-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full flex items-center justify-center shadow-lg disabled:opacity-50">
+              className="absolute -bottom-1 -right-1 w-8 h-8 bg-blue-600 hover:bg-blue-700 text-white rounded-full flex items-center justify-center shadow-lg disabled:opacity-50">
               <ImagePlus className="w-4 h-4" />
             </button>
             <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
@@ -11107,7 +11152,7 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
             <div className="text-sm text-slate-500">@{user.username}</div>
             <div className="flex items-center gap-2 mt-2 flex-wrap">
               <span className={`text-xs px-2 py-0.5 rounded ${ROLES[user.role].color}`}>{ROLES[user.role].label}</span>
-              {user.jobTitle && <span className="text-xs px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{user.jobTitle}</span>}
+              {user.jobTitle && <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">{user.jobTitle}</span>}
             </div>
             {form.avatarImage && (
               <button onClick={() => setForm({ ...form, avatarImage: null })}
@@ -11123,24 +11168,24 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
         <div className="space-y-3">
           <Field label="Nama Lengkap *">
             <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </Field>
           <Field label="No. WhatsApp">
             <input type="text" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
               placeholder="08xxxxxxxxxx"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </Field>
           <Field label="Gmail (untuk undangan Google Calendar)">
             <input type="email" value={form.gmail} onChange={e => setForm({ ...form, gmail: e.target.value })}
               placeholder="nama@gmail.com"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             <div className="text-[11px] text-slate-500 mt-1">💡 Isi Gmail-mu supaya otomatis diundang ke agenda tim di Google Calendar.</div>
           </Field>
           {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
           <div className="flex items-center justify-end gap-3">
-            {saved && <span className="text-sm text-indigo-700 font-semibold">✓ Profil tersimpan</span>}
+            {saved && <span className="text-sm text-blue-700 font-semibold">✓ Profil tersimpan</span>}
             <button onClick={submitProfile}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-semibold">
+              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-semibold">
               Simpan Profil
             </button>
           </div>
@@ -11157,7 +11202,7 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
         <div className="border-t border-slate-100 pt-5">
           {!showPwSection ? (
             <button onClick={() => setShowPwSection(true)}
-              className="w-full flex items-center justify-center gap-2 bg-white border border-slate-300 hover:border-indigo-500 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 py-2.5 rounded-lg font-semibold text-sm">
+              className="w-full flex items-center justify-center gap-2 bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-700 hover:text-blue-700 py-2.5 rounded-lg font-semibold text-sm">
               <Lock className="w-4 h-4" /> Ganti Password
             </button>
           ) : (
@@ -11173,7 +11218,7 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
                 <div className="relative">
                   <input type={showOldPw ? 'text' : 'password'} value={pwForm.oldPw}
                     onChange={e => setPwForm({ ...pwForm, oldPw: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 pr-10" />
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10" />
                   <button type="button" onClick={() => setShowOldPw(!showOldPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
                     {showOldPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -11183,7 +11228,7 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
                 <div className="relative">
                   <input type={showNewPw ? 'text' : 'password'} value={pwForm.newPw}
                     onChange={e => setPwForm({ ...pwForm, newPw: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 pr-10" />
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10" />
                   <button type="button" onClick={() => setShowNewPw(!showNewPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
                     {showNewPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -11192,13 +11237,13 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
               <Field label="Konfirmasi Password Baru *">
                 <input type={showNewPw ? 'text' : 'password'} value={pwForm.confirmPw}
                   onChange={e => setPwForm({ ...pwForm, confirmPw: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </Field>
               {pwError && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{pwError}</div>}
               <div className="flex items-center justify-end gap-3">
-                {pwSaved && <span className="text-sm text-indigo-700 font-semibold">✓ Password berhasil diubah</span>}
+                {pwSaved && <span className="text-sm text-blue-700 font-semibold">✓ Password berhasil diubah</span>}
                 <button onClick={submitPassword}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-semibold">
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-semibold">
                   Ganti Password
                 </button>
               </div>
@@ -11240,7 +11285,7 @@ function PageHeader({ title, subtitle, action }) {
   );
 }
 function MiniStat({ label, value, color = 'emerald' }) {
-  const map = { emerald: 'text-indigo-700', blue: 'text-blue-700', amber: 'text-amber-700' };
+  const map = { emerald: 'text-blue-700', blue: 'text-blue-700', amber: 'text-amber-700' };
   return (
     <div className="bg-white rounded-2xl border border-slate-200/70 p-4 shadow-sm shadow-slate-200/40">
       <div className="text-xs text-slate-500 uppercase tracking-wide font-semibold">{label}</div>
@@ -11274,7 +11319,7 @@ function FormActions({ onCancel, onSave, disabled, saveLabel = 'Simpan' }) {
   return (
     <div className="flex gap-2 pt-2">
       <button onClick={onSave} disabled={disabled}
-        className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-semibold py-2.5 rounded-lg transition">
+        className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-semibold py-2.5 rounded-lg transition">
         {saveLabel}
       </button>
       <button onClick={onCancel} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg font-semibold">Batal</button>
