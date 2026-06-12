@@ -11,3 +11,4 @@ dist/
 # Log & cache
 *.log
 .vite/
+vite.config.js.timestamp-*.mjs
