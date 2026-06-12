@@ -11,7 +11,7 @@ import {
   GripVertical, MapPin, ArrowRight, ArrowLeft, BarChart3, Pin, MessageSquare,
   Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle,
   Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2,
-  Database, Camera, Paperclip, Presentation
+  Database, Camera, Paperclip, Presentation, Calculator
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -336,7 +336,7 @@ const BACKUP_KEYS = [
   'sellers:all', 'attendance:all', 'attendance:config', 'activities:all', 'announcements:all', 'schedule:all', 'calendar:all',
   'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all', 'content-ideas:all',
   'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all',
-  'attendance:selfie-index'
+  'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history'
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
@@ -356,10 +356,10 @@ const DIVISIONS = {
 // Fitur apa yang relevan untuk tiap divisi (selain menu umum yang dipakai semua).
 // Owner & Manajer selalu lihat semua. Divisi 'manajemen' juga lihat semua.
 const DIVISION_FEATURES = {
-  manajemen: ['creators', 'creator-management', 'sellers', 'gmv', 'affiliate-accounts'],
+  manajemen: ['creators', 'creator-management', 'sellers', 'gmv', 'affiliate-accounts', 'tap-commission'],
   internal:  ['gmv', 'affiliate-accounts'],
   mcn:       ['creators', 'creator-management', 'gmv'],
-  tap:       ['sellers', 'gmv'],
+  tap:       ['sellers', 'gmv', 'tap-commission'],
   media:     ['media-tasks'],
   event:     [],
   mabit:     [],
@@ -400,6 +400,53 @@ const dayKey = (d = new Date()) => {
 };
 const daysInMonth = (mKey) => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m, 0).getDate(); };
 const DEFAULT_AFFILIATE_GOAL = 1000000000; // target Affiliator Internal default 1 Miliar/bulan
+
+// ====== KALKULATOR PEMBAGIAN KOMISI TAP (berbasis tier harga — brief tim TAP) ======
+const DEFAULT_TAP_TIERS = [
+  { id: 't1', name: 'Tier 1', min: 0,      max: 50000,  agency: 1, minRaise: 4, minAff: 3 },
+  { id: 't2', name: 'Tier 2', min: 50001,  max: 100000, agency: 2, minRaise: 5, minAff: 3 },
+  { id: 't3', name: 'Tier 3', min: 100001, max: 200000, agency: 3, minRaise: 6, minAff: 3 },
+  { id: 't4', name: 'Tier 4', min: 200001, max: 300000, agency: 4, minRaise: 7, minAff: 3 }
+];
+// Hitung pembagian: agency dari tier harga, affiliator = sisa raise seller
+function computeTapCommission(price, raise, tiers = DEFAULT_TAP_TIERS) {
+  const sorted = [...tiers].sort((a, b) => a.min - b.min);
+  let tier = sorted.find(t => price >= t.min && price <= t.max);
+  const maxRange = Math.max(...sorted.map(t => t.max));
+  const outOfRange = price > maxRange;
+  if (!tier) tier = outOfRange ? sorted[sorted.length - 1] : sorted[0];
+
+  const agencyPct = Number(tier.agency) || 0;
+  const affPct = raise - agencyPct;
+  const minAff = Number(tier.minAff) || 3;
+  const minRaise = Number(tier.minRaise) || (agencyPct + minAff);
+
+  // Status kelayakan sesuai aturan brief (bagian 11)
+  let status;
+  if (raise < agencyPct) status = { level: 'tidak-layak', label: 'Tidak Layak', color: 'bg-red-100 text-red-700', detail: 'Raise seller di bawah jatah agency.' };
+  else if (raise === agencyPct) status = { level: 'tidak-layak', label: 'Tidak Layak — Affiliator 0%', color: 'bg-red-100 text-red-700', detail: 'Raise habis untuk agency, affiliator tidak dapat apa-apa.' };
+  else if (affPct < 2) status = { level: 'kurang', label: 'Kurang Menarik', color: 'bg-orange-100 text-orange-700', detail: `Affiliator hanya dapat ${affPct}% — kurang menarik untuk dijual.` };
+  else if (affPct < minAff) status = { level: 'cukup', label: 'Cukup, Belum Ideal', color: 'bg-amber-100 text-amber-700', detail: `Affiliator dapat ${affPct}% — bisa jalan, tapi belum standar.` };
+  else if (raise >= minRaise) status = { level: 'ideal', label: 'Ideal — Layak Kerja Sama', color: 'bg-emerald-100 text-emerald-700', detail: 'Memenuhi standar minimum raise tier ini.' };
+  else status = { level: 'ideal', label: 'Ideal', color: 'bg-emerald-100 text-emerald-700', detail: `Affiliator sudah ≥${minAff}%.` };
+
+  // Rekomendasi otomatis (bagian 12)
+  let rekomendasi;
+  if (status.level === 'tidak-layak' || status.level === 'kurang') {
+    rekomendasi = `Raise seller belum memenuhi standar ${tier.name}. Disarankan renegosiasi raise minimal menjadi ${minRaise}% agar affiliator mendapat minimal ${minAff}%.`;
+  } else if (status.level === 'cukup') {
+    rekomendasi = 'Raise seller sudah cukup, tetapi belum ideal. Bisa diterima jika produk memiliki potensi GMV tinggi.';
+  } else {
+    rekomendasi = 'Raise seller sudah memenuhi standar TAP. Produk layak diproses untuk kerja sama.';
+  }
+
+  return {
+    tier, outOfRange, agencyPct, affPct,
+    minRaise, minAff, status, rekomendasi,
+    nominalAgency: Math.round(price * agencyPct / 100),
+    nominalAff: Math.round(price * Math.max(affPct, 0) / 100)
+  };
+}
 
 // ====== KPI POIN (v2 — adil per peran & divisi) ======
 // 5 komponen: Kehadiran (hadir) · Disiplin (tepat waktu) · Tugas (kualitas+volume) · Laporan Harian · Capaian Target GMV.
@@ -641,6 +688,7 @@ export default function App() {
             {view === 'creators' && <CreatorsView user={currentUser} allUsers={allUsers} />}
             {view === 'creator-management' && <CreatorManagementView user={currentUser} allUsers={allUsers} />}
             {view === 'sellers' && <SellersView user={currentUser} allUsers={allUsers} />}
+            {view === 'tap-commission' && <TapCommissionView user={currentUser} />}
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
             {view === 'affiliate-accounts' && <AffiliateAccountsView user={currentUser} allUsers={allUsers} />}
             {view === 'kpi' && <KpiView user={currentUser} allUsers={allUsers} />}
@@ -1247,6 +1295,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'creators', label: 'Database Creator', icon: Users, show: canAccessFeature(user, 'creators') },
         { id: 'creator-management', label: 'Pengelolaan Creator', icon: Network, show: canAccessFeature(user, 'creator-management') },
         { id: 'sellers', label: 'Database Seller', icon: Briefcase, show: canAccessFeature(user, 'sellers') },
+        { id: 'tap-commission', label: 'Kalkulator Komisi', icon: Calculator, show: canAccessFeature(user, 'tap-commission') },
         { id: 'content-ideas', label: 'Bank Ide Konten', icon: Lightbulb, show: true },
         { id: 'media-tasks', label: 'Eksekusi Konten', icon: Clapperboard, show: canAccessFeature(user, 'media-tasks') }
       ]
@@ -7307,6 +7356,367 @@ function SellersView({ user, allUsers }) {
 }
 
 // ============ ABSENSI (Attendance + Lokasi GPS) ============
+// ============ KALKULATOR PEMBAGIAN KOMISI TAP ============
+function TapCommissionView({ user }) {
+  const [tab, setTab] = useState('calc'); // calc | history | tiers
+  const [tiers, setTiers] = useState(DEFAULT_TAP_TIERS);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ seller: '', product: '', price: '', raise: '' });
+  const [result, setResult] = useState(null);
+  const [savedMsg, setSavedMsg] = useState(false);
+
+  const canManage = user.role === 'owner' || user.role === 'manajer' || (user.role === 'leader' && (user.division || '') === 'tap');
+
+  const load = async () => {
+    const t = await storage.get('tap-commission:tiers');
+    if (Array.isArray(t) && t.length > 0) setTiers(t);
+    setHistory(await storage.getList('tap-commission:history'));
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const price = Number(String(form.price).replace(/[^\d]/g, '')) || 0;
+  const raiseRaw = String(form.raise).replace(',', '.');
+  const raise = Number(raiseRaw) || 0;
+  const isDecimal = raise > 0 && raise % 1 !== 0;
+  const maxRange = Math.max(...tiers.map(t => Number(t.max) || 0));
+
+  const hitung = () => {
+    if (price <= 0 || raise <= 0) return;
+    setResult({ ...computeTapCommission(price, Math.round(raise * 100) / 100, tiers), price, raise, seller: form.seller.trim(), product: form.product.trim() });
+  };
+
+  const simpanRiwayat = async () => {
+    if (!result) return;
+    const item = {
+      id: uid(), date: dayKey(),
+      seller: result.seller || '-', product: result.product || '-',
+      price: result.price, raise: result.raise,
+      tierName: result.tier.name, agencyPct: result.agencyPct, affPct: result.affPct,
+      statusLabel: result.status.label, statusLevel: result.status.level,
+      outOfRange: result.outOfRange,
+      byName: user.name, createdAt: new Date().toISOString()
+    };
+    const list = await storage.getList('tap-commission:history');
+    list.unshift(item);
+    await storage.set('tap-commission:history', list.slice(0, 500));
+    await logActivity(`menyimpan simulasi komisi TAP: ${item.product} (${item.tierName})`, user.name);
+    setSavedMsg(true); setTimeout(() => setSavedMsg(false), 2500);
+    load();
+  };
+
+  const hapusRiwayat = async (it) => {
+    if (!confirm(`Hapus simulasi "${it.product}" (${fmtDate(it.date)})?`)) return;
+    await storage.set('tap-commission:history', (await storage.getList('tap-commission:history')).filter(x => x.id !== it.id));
+    load();
+  };
+
+  const saveTiers = async (next) => {
+    await storage.set('tap-commission:tiers', next);
+    setTiers(next);
+    await logActivity('mengubah pengaturan tier komisi TAP', user.name);
+  };
+
+  const TABS = [
+    { id: 'calc', label: 'Kalkulator', icon: Calculator },
+    { id: 'history', label: `Riwayat (${history.length})`, icon: ClipboardList },
+    ...(canManage ? [{ id: 'tiers', label: 'Pengaturan Tier', icon: Settings }] : [])
+  ];
+
+  const statusColorOf = (lvl) => lvl === 'ideal' ? 'bg-emerald-100 text-emerald-700' : lvl === 'cukup' ? 'bg-amber-100 text-amber-700' : lvl === 'kurang' ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700';
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat kalkulator komisi...</div>;
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="Kalkulator Komisi TAP"
+        subtitle="Pembagian raise komisi seller → agency & affiliator, berbasis tier harga produk (bukan pukul rata 2%)." />
+
+      {/* Tabs */}
+      <div className="flex flex-wrap gap-1.5 mb-5">
+        {TABS.map(t => {
+          const Icon = t.icon;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              style={tab === t.id ? { backgroundColor: '#2563EB', color: '#fff', borderColor: '#2563EB' } : {}}
+              className="text-sm font-bold px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-blue-300 transition flex items-center gap-2">
+              <Icon className="w-4 h-4" /> {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ===== TAB KALKULATOR ===== */}
+      {tab === 'calc' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+          {/* Form input */}
+          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5 space-y-3">
+            <h3 className="font-display font-bold text-slate-900">Data Produk & Raise</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Nama Seller">
+                <input type="text" value={form.seller} onChange={e => setForm({ ...form, seller: e.target.value })}
+                  placeholder="mis. Toko Berkah" className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </Field>
+              <Field label="Nama Produk">
+                <input type="text" value={form.product} onChange={e => setForm({ ...form, product: e.target.value })}
+                  placeholder="mis. Gamis Premium" className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </Field>
+            </div>
+            <Field label="Harga Produk (Rp) *">
+              <input type="text" inputMode="numeric" value={form.price}
+                onChange={e => setForm({ ...form, price: e.target.value.replace(/[^\d]/g, '') })}
+                placeholder="mis. 150000" className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {price > 0 && (
+                <div className={`text-xs mt-1 font-semibold ${price > maxRange ? 'text-orange-600' : 'text-emerald-600'}`}>
+                  {fmtRupiah(price)} · {price > maxRange ? `⚠ Di luar range TAP (maks ${fmtRupiah(maxRange)}) — perlu approval manual` : '✓ Masuk range TAP'}
+                </div>
+              )}
+            </Field>
+            <Field label="Raise Komisi dari Seller (%) *">
+              <input type="text" inputMode="decimal" value={form.raise}
+                onChange={e => setForm({ ...form, raise: e.target.value.replace(/[^\d.,]/g, '') })}
+                placeholder="mis. 6" className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {isDecimal && (
+                <div className="text-xs mt-1 text-orange-600 font-semibold">⚠ Gunakan angka persen bulat agar pembagian mudah diterapkan ke seller & affiliator.</div>
+              )}
+            </Field>
+            <button onClick={hitung} disabled={price <= 0 || raise <= 0}
+              style={{ boxShadow: '0 10px 26px -8px rgba(37,99,235,0.6)' }}
+              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:shadow-none text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2">
+              <Calculator className="w-4 h-4" /> Hitung Pembagian
+            </button>
+
+            {/* Ringkasan tier standar */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden mt-2">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 text-[10px] uppercase text-slate-500">
+                  <tr>
+                    <th className="text-left px-2.5 py-1.5 font-bold">Tier</th>
+                    <th className="text-left px-2.5 py-1.5 font-bold">Harga</th>
+                    <th className="text-right px-2.5 py-1.5 font-bold">Agency</th>
+                    <th className="text-right px-2.5 py-1.5 font-bold">Min. Raise</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tiers.map(t => (
+                    <tr key={t.id} className={`border-t border-slate-100 ${result && result.tier.id === t.id ? 'bg-blue-50 font-bold' : ''}`}>
+                      <td className="px-2.5 py-1.5">{t.name}</td>
+                      <td className="px-2.5 py-1.5 text-slate-500">{fmtRupiah(t.min)} – {fmtRupiah(t.max)}</td>
+                      <td className="px-2.5 py-1.5 text-right tabular-nums">{t.agency}%</td>
+                      <td className="px-2.5 py-1.5 text-right tabular-nums">{t.minRaise}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Hasil */}
+          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5">
+            <h3 className="font-display font-bold text-slate-900 mb-3">Hasil Pembagian</h3>
+            {!result ? (
+              <div className="text-center py-14 text-slate-400 text-sm">
+                <Calculator className="w-10 h-10 mx-auto mb-2 text-slate-200" />
+                Isi harga produk & raise seller, lalu klik <b>Hitung</b>.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {result.outOfRange && (
+                  <div className="bg-orange-50 border border-orange-200 text-orange-800 text-xs rounded-xl px-3 py-2.5 font-semibold">
+                    ⚠ Harga di luar range TAP saat ini (maks {fmtRupiah(maxRange)}). Perhitungan pakai standar tier tertinggi — perlu approval manual.
+                  </div>
+                )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs px-2.5 py-1 rounded-full font-bold bg-blue-100 text-blue-700">{result.tier.name}</span>
+                  <span className="text-xs px-2.5 py-1 rounded-full font-bold bg-slate-100 text-slate-600">Raise {result.raise}%</span>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${result.status.color}`}>{result.status.label}</span>
+                </div>
+
+                {/* Bar pembagian visual */}
+                <div>
+                  <div className="flex justify-between text-[11px] font-bold mb-1">
+                    <span className="text-blue-700">Agency {result.agencyPct}%</span>
+                    <span className={result.affPct >= result.minAff ? 'text-emerald-700' : 'text-red-600'}>Affiliator {Math.max(result.affPct, 0)}%</span>
+                  </div>
+                  <div className="h-3.5 rounded-full overflow-hidden flex bg-slate-100">
+                    {result.raise > 0 && <div style={{ width: `${Math.min(result.agencyPct / result.raise * 100, 100)}%`, background: 'linear-gradient(90deg,#2563EB,#1D4ED8)' }} className="h-full"></div>}
+                    {result.affPct > 0 && <div style={{ width: `${result.affPct / result.raise * 100}%`, background: result.affPct >= result.minAff ? 'linear-gradient(90deg,#34D399,#10B981)' : 'linear-gradient(90deg,#FB923C,#F97316)' }} className="h-full"></div>}
+                  </div>
+                </div>
+
+                {/* Nominal per order */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+                    <div className="text-[10px] font-bold text-blue-600 uppercase">Nominal Agency / order</div>
+                    <div className="font-display font-bold text-lg text-blue-800 tabular-nums">{fmtRupiah(result.nominalAgency)}</div>
+                    <div className="text-[10px] text-blue-500">{fmtRupiah(result.price)} × {result.agencyPct}%</div>
+                  </div>
+                  <div className={`rounded-xl p-3 border ${result.affPct >= result.minAff ? 'bg-emerald-50 border-emerald-100' : 'bg-orange-50 border-orange-100'}`}>
+                    <div className={`text-[10px] font-bold uppercase ${result.affPct >= result.minAff ? 'text-emerald-600' : 'text-orange-600'}`}>Nominal Affiliator / order</div>
+                    <div className={`font-display font-bold text-lg tabular-nums ${result.affPct >= result.minAff ? 'text-emerald-800' : 'text-orange-700'}`}>{fmtRupiah(result.nominalAff)}</div>
+                    <div className={`text-[10px] ${result.affPct >= result.minAff ? 'text-emerald-500' : 'text-orange-500'}`}>{fmtRupiah(result.price)} × {Math.max(result.affPct, 0)}%</div>
+                  </div>
+                </div>
+
+                {/* Rekomendasi */}
+                <div className={`text-sm rounded-xl px-3.5 py-3 border leading-relaxed ${result.status.level === 'ideal' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : result.status.level === 'cukup' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                  <b>Rekomendasi:</b> {result.rekomendasi}
+                  <div className="text-[11px] opacity-75 mt-1">{result.status.detail}</div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button onClick={simpanRiwayat}
+                    className="flex-1 bg-white border border-blue-300 hover:bg-blue-50 text-blue-700 font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-2">
+                    <Download className="w-4 h-4" /> Simpan ke Riwayat
+                  </button>
+                  {savedMsg && <span className="text-xs text-emerald-600 font-bold">✓ Tersimpan</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== TAB RIWAYAT ===== */}
+      {tab === 'history' && (
+        history.length === 0 ? (
+          <EmptyState icon={ClipboardList} text="Belum ada simulasi tersimpan. Hitung di tab Kalkulator lalu klik 'Simpan ke Riwayat'." />
+        ) : (
+          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[760px]">
+                <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="text-left px-4 py-2.5 font-bold">Tanggal</th>
+                    <th className="text-left px-3 py-2.5 font-bold">Seller</th>
+                    <th className="text-left px-3 py-2.5 font-bold">Produk</th>
+                    <th className="text-right px-3 py-2.5 font-bold">Harga</th>
+                    <th className="text-right px-3 py-2.5 font-bold">Raise</th>
+                    <th className="text-left px-3 py-2.5 font-bold">Tier</th>
+                    <th className="text-right px-3 py-2.5 font-bold">Agency</th>
+                    <th className="text-right px-3 py-2.5 font-bold">Affiliator</th>
+                    <th className="text-left px-3 py-2.5 font-bold">Status</th>
+                    <th className="px-2 py-2.5 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map(it => (
+                    <tr key={it.id} className="border-t border-slate-100 hover:bg-slate-50">
+                      <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap">{fmtDate(it.date)}</td>
+                      <td className="px-3 py-2.5 text-slate-700">{it.seller}</td>
+                      <td className="px-3 py-2.5 font-semibold text-slate-900">{it.product}{it.outOfRange && <span className="ml-1 text-[10px] text-orange-600 font-bold" title="Di luar range TAP">⚠</span>}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-700">{fmtRupiah(it.price)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-bold text-slate-800">{it.raise}%</td>
+                      <td className="px-3 py-2.5"><span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-blue-100 text-blue-700">{it.tierName}</span></td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-blue-700 font-bold">{it.agencyPct}%</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-bold" style={{ color: it.affPct >= 3 ? '#047857' : '#C2410C' }}>{Math.max(it.affPct, 0)}%</td>
+                      <td className="px-3 py-2.5"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${statusColorOf(it.statusLevel)}`}>{it.statusLabel}</span></td>
+                      <td className="px-2 py-2.5">
+                        {(canManage || it.byName === user.name) && (
+                          <button onClick={() => hapusRiwayat(it)} className="text-slate-300 hover:text-red-600 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400">{history.length} simulasi tersimpan · sinkron untuk semua tim TAP.</div>
+          </div>
+        )
+      )}
+
+      {/* ===== TAB PENGATURAN TIER ===== */}
+      {tab === 'tiers' && canManage && (
+        <TapTierSettings tiers={tiers} onSave={saveTiers} />
+      )}
+    </div>
+  );
+}
+
+// Pengaturan tier (owner/manajer/leader TAP)
+function TapTierSettings({ tiers, onSave }) {
+  const [list, setList] = useState(tiers.map(t => ({ ...t })));
+  const [saved, setSaved] = useState(false);
+  const setVal = (i, key, val) => {
+    const next = [...list];
+    next[i] = { ...next[i], [key]: key === 'name' ? val : Number(String(val).replace(/[^\d]/g, '')) || 0 };
+    setList(next);
+  };
+  const addTier = () => {
+    const last = list[list.length - 1];
+    setList([...list, { id: uid(), name: `Tier ${list.length + 1}`, min: (last?.max || 0) + 1, max: (last?.max || 0) + 100000, agency: (last?.agency || 0) + 1, minRaise: (last?.minRaise || 0) + 1, minAff: 3 }]);
+  };
+  const removeTier = (i) => { if (list.length <= 1) return; setList(list.filter((_, x) => x !== i)); };
+  const resetDefault = () => { if (confirm('Kembalikan ke standar default brief TAP?')) setList(DEFAULT_TAP_TIERS.map(t => ({ ...t }))); };
+  const submit = async () => {
+    await onSave([...list].sort((a, b) => a.min - b.min));
+    setSaved(true); setTimeout(() => setSaved(false), 2500);
+  };
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+        <div>
+          <h3 className="font-display font-bold text-slate-900">Pengaturan Tier Harga</h3>
+          <p className="text-xs text-slate-500 mt-0.5">Standar pembagian: tier harga menentukan jatah agency. Minimum raise dibuat agar affiliator tetap dapat minimal 3%.</p>
+        </div>
+        <button onClick={resetDefault} className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1"><RotateCcw className="w-3 h-3" /> Reset ke Default</button>
+      </div>
+      <div className="space-y-3">
+        {list.map((t, i) => (
+          <div key={t.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">Nama Tier</div>
+                <input type="text" value={t.name} onChange={e => setVal(i, 'name', e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold" />
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">Harga Min (Rp)</div>
+                <input type="text" inputMode="numeric" value={t.min} onChange={e => setVal(i, 'min', e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm tabular-nums" />
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">Harga Maks (Rp)</div>
+                <input type="text" inputMode="numeric" value={t.max} onChange={e => setVal(i, 'max', e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm tabular-nums" />
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">Agency (%)</div>
+                <input type="text" inputMode="numeric" value={t.agency} onChange={e => setVal(i, 'agency', e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm tabular-nums" />
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">Min. Raise (%)</div>
+                <input type="text" inputMode="numeric" value={t.minRaise} onChange={e => setVal(i, 'minRaise', e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm tabular-nums" />
+              </div>
+              <div className="flex items-end gap-1">
+                <div className="flex-1">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">Min. Affiliator (%)</div>
+                  <input type="text" inputMode="numeric" value={t.minAff} onChange={e => setVal(i, 'minAff', e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm tabular-nums" />
+                </div>
+                <button onClick={() => removeTier(i)} title="Hapus tier" className="text-slate-400 hover:text-red-600 p-1.5 mb-0.5"><Trash2 className="w-4 h-4" /></button>
+              </div>
+            </div>
+          </div>
+        ))}
+        <button onClick={addTier}
+          className="w-full border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-600 hover:text-blue-700 py-2.5 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2">
+          <Plus className="w-4 h-4" /> Tambah Tier
+        </button>
+      </div>
+      <div className="flex items-center justify-end gap-3 mt-4">
+        {saved && <span className="text-sm text-emerald-600 font-bold">✓ Tersimpan & langsung berlaku</span>}
+        <button onClick={submit}
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl font-bold shadow-md">Simpan Pengaturan</button>
+      </div>
+    </div>
+  );
+}
+
 function AttendanceView({ user, allUsers }) {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
