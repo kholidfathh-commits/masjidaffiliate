@@ -365,6 +365,16 @@ const DIVISION_FEATURES = {
   mabit:     [],
   keuangan:  ['gmv']
 };
+// Label jabatan yang ditampilkan di kartu anggota:
+// Manajer/Owner = tidak perlu (perannya sudah jabatan) · Leader = otomatis "Leader <Divisi>" · Staff = jobTitle kalau diisi.
+const LEADER_DIV_SHORT = { mcn: 'MCN', tap: 'TAP', internal: 'Affiliator', media: 'Media', event: 'Event', mabit: 'Mabit', keuangan: 'Keuangan', manajemen: 'Manajemen' };
+function displayJobTitle(u) {
+  if (!u) return null;
+  if (u.role === 'owner' || u.role === 'manajer') return null;
+  if (u.role === 'leader') return `Leader ${LEADER_DIV_SHORT[u.division] || ''}`.trim();
+  return u.jobTitle?.trim() || null;
+}
+
 // Cek apakah user boleh lihat fitur khusus tertentu (berdasarkan role + divisi)
 function canAccessFeature(user, feature) {
   if (user.role === 'owner' || user.role === 'manajer') return true;
@@ -2816,19 +2826,15 @@ function SwotPanel({ analysis }) {
   );
 }
 
-// ====== EXPORT LAPORAN PPT PROFESIONAL (pptxgenjs via CDN) ======
-let _pptxPromise = null;
-function loadPptxGen() {
-  if (window.PptxGenJS) return Promise.resolve(window.PptxGenJS);
-  if (_pptxPromise) return _pptxPromise;
-  _pptxPromise = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/PptxGenJS/3.12.0/pptxgen.bundle.min.js';
-    s.onload = () => resolve(window.PptxGenJS);
-    s.onerror = () => { _pptxPromise = null; reject(new Error('Gagal memuat library PPT — cek koneksi internet, lalu coba lagi.')); };
-    document.head.appendChild(s);
-  });
-  return _pptxPromise;
+// ====== EXPORT LAPORAN PPT PROFESIONAL ======
+// pptxgenjs ikut ter-bundle aplikasi (dynamic import, dimuat saat tombol diklik) — tidak bergantung CDN.
+async function loadPptxGen() {
+  try {
+    const mod = await import('pptxgenjs');
+    return mod.default || mod;
+  } catch (e) {
+    throw new Error('Gagal memuat modul PPT. Muat ulang halaman (Cmd+Shift+R) lalu coba lagi.');
+  }
 }
 
 async function exportBusinessPpt({ analysis, periodLabel, appName = 'Al-Kahfi Corp', authorName = '' }) {
@@ -3716,8 +3722,7 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
                       <div className="flex-1 min-w-0">
                         <div className="font-semibold text-slate-900 truncate">{m.name}</div>
                         <div className="text-xs text-slate-500">@{m.username}</div>
-                        {m.jobTitle ? <div className="text-[10px] mt-1 inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{m.jobTitle}</div>
-                          : <div className="text-[10px] mt-1 inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-400">Jabatan belum diisi</div>}
+                        {displayJobTitle(m) && <div className="text-[10px] mt-1 inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{displayJobTitle(m)}</div>}
                         {leader && <div className="text-[10px] text-slate-500 mt-1">Leader: {leader.name}</div>}
                         {operasionalCount !== null && <div className="text-[10px] text-blue-600 mt-1">Memimpin {operasionalCount} operasional</div>}
                         {m.phone && <div className="text-[10px] text-slate-500 mt-0.5">📱 {m.phone}</div>}
@@ -5895,6 +5900,100 @@ function acctDailySeries(entries, accountId, mKey) {
   return series;
 }
 
+// Grafik garis GMV harian per akun (gaya Dashboard Bisnis) — bisa diatur Pekanan / Bulanan
+function AccountTrendChart({ entries, accountId, mKey, dailyTarget }) {
+  const [mode, setMode] = useState('month'); // 'week' | 'month'
+  const today = new Date();
+  const todayStr = dayKey();
+
+  const days = [];
+  if (mode === 'week') {
+    const dw = today.getDay();
+    const mon = new Date(today); mon.setDate(today.getDate() - dw + (dw === 0 ? -6 : 1));
+    for (let i = 0; i < 7; i++) { const x = new Date(mon); x.setDate(mon.getDate() + i); days.push(dayKey(x)); }
+  } else {
+    const dim = daysInMonth(mKey);
+    for (let i = 1; i <= dim; i++) days.push(`${mKey}-${String(i).padStart(2, '0')}`);
+  }
+  const series = days.map(dk => ({
+    date: dk,
+    value: entries.filter(e => e.accountId === accountId && e.date === dk).reduce((s, e) => s + (Number(e.gmv) || 0), 0)
+  }));
+
+  const CW = 720, CH = 190, PADL = 8, PADR = 8, PADT = 18, PADB = 22;
+  const n = series.length;
+  const max = Math.max(...series.map(s => s.value), dailyTarget || 0, 1);
+  const xAt = (i) => PADL + (n <= 1 ? 0 : (i / (n - 1)) * (CW - PADL - PADR));
+  const yAt = (v) => CH - PADB - (v / max) * (CH - PADT - PADB);
+  const pts = series.map((s, i) => `${xAt(i).toFixed(1)},${yAt(s.value).toFixed(1)}`).join(' ');
+  const area = `${pts} ${xAt(n - 1).toFixed(1)},${CH - PADB} ${xAt(0).toFixed(1)},${CH - PADB}`;
+  const labelEvery = mode === 'week' ? 1 : Math.ceil(n / 15);
+  const total = series.reduce((s, x) => s + x.value, 0);
+  const filled = series.filter(s => s.value > 0).length;
+  const lastIdx = (() => { let li = -1; series.forEach((s, i) => { if (s.value > 0) li = i; }); return li; })();
+
+  return (
+    <div className="border border-slate-200 rounded-xl p-3">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+        <div className="text-[11px] text-slate-500">
+          Total {mode === 'week' ? 'pekan ini' : 'bulan ini'}: <b className="text-slate-800">{fmtRupiah(total)}</b>
+          {filled > 0 && <span> · rata-rata {fmtRupiah(Math.round(total / filled))}/hari aktif</span>}
+        </div>
+        <div className="bg-slate-100 p-0.5 inline-flex rounded-lg">
+          {[['week', 'Pekanan'], ['month', 'Bulanan']].map(([k, label]) => (
+            <button key={k} onClick={() => setMode(k)}
+              style={mode === k ? { backgroundColor: '#4F46E5', color: '#fff' } : {}}
+              className="px-3 py-1 rounded-md text-[11px] font-bold text-slate-600 transition">
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" className="w-full" style={{ height: 190 }}>
+        <defs>
+          <linearGradient id={`acctArea-${accountId}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#3B82F6" stopOpacity="0.18" />
+            <stop offset="1" stopColor="#3B82F6" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0, 0.25, 0.5, 0.75, 1].map((f, i) => {
+          const y = PADT + f * (CH - PADT - PADB);
+          return <line key={i} x1={PADL} y1={y} x2={CW - PADR} y2={y} stroke="#EEF0F4" strokeWidth="1" />;
+        })}
+        {dailyTarget > 0 && (
+          <>
+            <line x1={PADL} y1={yAt(dailyTarget)} x2={CW - PADR} y2={yAt(dailyTarget)} stroke="#F59E0B" strokeWidth="1.6" strokeDasharray="6 5" />
+            <text x={PADL + 4} y={yAt(dailyTarget) - 4} fontSize="10" fill="#B45309" fontWeight="700">Target harian {fmtRupiah(dailyTarget)}</text>
+          </>
+        )}
+        <polygon points={area} fill={`url(#acctArea-${accountId})`} />
+        <polyline points={pts} fill="none" stroke="#3B82F6" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+        {series.map((s, i) => (
+          s.value > 0 ? (
+            <circle key={s.date} cx={xAt(i)} cy={yAt(s.value)} r={i === lastIdx ? 4 : 2.5}
+              fill={dailyTarget > 0 ? (s.value >= dailyTarget ? '#10B981' : '#EF4444') : '#3B82F6'}>
+              <title>{`${fmtDate(s.date)}: ${fmtRupiah(s.value)}`}</title>
+            </circle>
+          ) : null
+        ))}
+        {lastIdx >= 0 && (
+          <text x={Math.min(xAt(lastIdx), CW - 90)} y={Math.max(yAt(series[lastIdx].value) - 8, 12)} fontSize="11" fontWeight="700" fill="#1E293B">
+            {fmtRupiah(series[lastIdx].value)}
+          </text>
+        )}
+        {series.map((s, i) => (
+          (i % labelEvery === 0) ? (
+            <text key={`lbl-${s.date}`} x={xAt(i)} y={CH - 6} fontSize="9" fill={s.date === todayStr ? '#4F46E5' : '#94A3B8'} fontWeight={s.date === todayStr ? '800' : '500'} textAnchor="middle">
+              {mode === 'week' ? new Date(s.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short' }) : Number(s.date.slice(8, 10))}
+            </text>
+          ) : null
+        ))}
+      </svg>
+      <div className="text-[10px] text-slate-400 mt-1">🟢 capai target harian · 🔴 di bawah target · garis putus-putus = target harian. Arahkan kursor ke titik untuk lihat nominal.</div>
+    </div>
+  );
+}
+
 function AffiliateAccountsView({ user, allUsers }) {
   const [accounts, setAccounts] = useState([]);
   const [entries, setEntries] = useState([]);
@@ -5908,6 +6007,7 @@ function AffiliateAccountsView({ user, allUsers }) {
   const [targetAcct, setTargetAcct] = useState(null);
   const [showGoal, setShowGoal] = useState(false);
   const [detailAcct, setDetailAcct] = useState(null); // akun yang rincian hariannya dibuka
+  const [lightbox, setLightbox] = useState(null);     // lihat bukti GMV besar
 
   const load = async () => {
     setAccounts(await storage.getList('affiliate-accounts:all'));
@@ -6116,7 +6216,12 @@ function AffiliateAccountsView({ user, allUsers }) {
                   <MiniBarChart series={series} color="#3B82F6" />
                 </div>
 
-                {/* Rincian angka per tanggal — biar nominal kelihatan jelas, bukan cuma diagram */}
+                {/* Rincian: grafik harian (pekanan/bulanan) + angka per tanggal */}
+                {detailAcct === a.id && (
+                  <div className="mt-3">
+                    <AccountTrendChart entries={entries} accountId={a.id} mKey={mKey} dailyTarget={dailyTarget} />
+                  </div>
+                )}
                 {detailAcct === a.id && (() => {
                   const acctEntries = entries
                     .filter(e => e.accountId === a.id && (e.date || '').startsWith(mKey))
@@ -6147,6 +6252,10 @@ function AffiliateAccountsView({ user, allUsers }) {
                                     <td className="px-3 py-2 text-right tabular-nums text-slate-600">{e.orders ? fmtNumber(e.orders) : '–'}</td>
                                     <td className="px-3 py-2 text-xs text-slate-400 hidden sm:table-cell">{e.inputByName || '–'}</td>
                                     <td className="px-2 py-2 text-right whitespace-nowrap">
+                                      {(e.proofs || []).length > 0 && (
+                                        <button onClick={() => setLightbox({ src: e.proofs[0], title: `Bukti GMV ${a.name} · ${fmtDate(e.date)}`, extra: e.proofs })} title={`Lihat bukti (${e.proofs.length} foto)`}
+                                          className="text-emerald-500 hover:text-emerald-700 p-1"><Camera className="w-3.5 h-3.5" /></button>
+                                      )}
                                       {canInput(a) && (
                                         <button onClick={() => { setEditEntry(e); setInputAcct(a); }} title="Edit GMV tanggal ini"
                                           className="text-slate-300 hover:text-indigo-600 p-1"><Edit2 className="w-3.5 h-3.5" /></button>
@@ -6185,6 +6294,7 @@ function AffiliateAccountsView({ user, allUsers }) {
       {inputAcct && <AccountGmvInputModal account={inputAcct} initial={editEntry} onSave={saveEntry} onClose={() => { setInputAcct(null); setEditEntry(null); }} />}
       {targetAcct && <AccountTargetModal account={targetAcct} monthLabel={monthLabel} current={Number(targetAcct.targets?.[mKey]) || 0} dim={dim} onSave={(v) => saveTarget(targetAcct.id, v)} onClose={() => setTargetAcct(null)} />}
       {showGoal && <GoalModal monthLabel={monthLabel} current={goal} onSave={saveGoal} onClose={() => setShowGoal(false)} />}
+      {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.title} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
@@ -6233,11 +6343,24 @@ function AccountGmvInputModal({ account, initial, onSave, onClose }) {
     orders: initial?.orders ? String(initial.orders) : '',
     note: initial?.note || ''
   });
+  const [proofs, setProofs] = useState(initial?.proofs || []);
+  const [proofBusy, setProofBusy] = useState(false);
+  const proofRef = useRef();
   const [error, setError] = useState('');
+  const addProofs = async (files) => {
+    setProofBusy(true);
+    try {
+      const picked = Array.from(files).slice(0, 2 - proofs.length);
+      const next = [];
+      for (const f of picked) next.push(await compressImageFile(f, { maxDim: 1000, quality: 0.68 }));
+      setProofs(prev => [...prev, ...next].slice(0, 2));
+    } catch (e) { alert(e.message || 'Gagal memproses gambar.'); }
+    setProofBusy(false);
+  };
   const submit = () => {
     const gmv = Number(String(form.gmv).replace(/[^\d]/g, ''));
     if (!gmv || gmv <= 0) return setError('GMV harus diisi.');
-    onSave({ accountId: account.id, accountName: account.name, date: form.date, gmv, orders: Number(String(form.orders).replace(/[^\d]/g, '')) || 0, note: form.note.trim() });
+    onSave({ accountId: account.id, accountName: account.name, date: form.date, gmv, orders: Number(String(form.orders).replace(/[^\d]/g, '')) || 0, note: form.note.trim(), proofs });
   };
   return (
     <Modal title={`${initial ? 'Edit' : 'Input'} GMV — ${account.name}`} onClose={onClose}>
@@ -6255,6 +6378,29 @@ function AccountGmvInputModal({ account, initial, onSave, onClose }) {
         <Field label="Jumlah Order (opsional)">
           <input type="text" inputMode="numeric" value={form.orders} onChange={e => setForm({ ...form, orders: e.target.value.replace(/[^\d]/g, '') })}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </Field>
+        <Field label="Bukti GMV (screenshot, maks. 2)">
+          <div className="flex items-center gap-2 flex-wrap">
+            {proofs.map((img, i) => (
+              <div key={i} className="relative">
+                <img src={img} alt={`Bukti ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                <button onClick={() => setProofs(proofs.filter((_, x) => x !== i))}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+            {proofs.length < 2 && (
+              <button type="button" onClick={() => proofRef.current?.click()} disabled={proofBusy}
+                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 transition disabled:opacity-50">
+                <Camera className="w-4 h-4" />
+                <span className="text-[9px] font-semibold mt-0.5">{proofBusy ? '...' : 'Upload'}</span>
+              </button>
+            )}
+            <input ref={proofRef} type="file" accept="image/*" multiple className="hidden"
+              onChange={e => { addProofs(e.target.files); e.target.value = ''; }} />
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">💡 Screenshot dashboard TikTok sebagai bukti — laporan jadi tervalidasi.</div>
         </Field>
         <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-3 py-2">💡 Kalau tanggal ini sudah diisi, data lama otomatis diperbarui. Progres goal bulanan & Dashboard Bisnis ikut ter-update otomatis.</div>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
@@ -6414,7 +6560,7 @@ function KpiView({ user, allUsers }) {
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold text-slate-900 truncate">{s.user.name}</div>
                   <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                    {s.user.jobTitle && <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{s.user.jobTitle}</span>}
+                    {displayJobTitle(s.user) && <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{displayJobTitle(s.user)}</span>}
                     <span className={`text-[10px] px-2 py-0.5 rounded ${ROLES[s.user.role]?.color}`}>{ROLES[s.user.role]?.label}</span>
                     {s.user.division && DIVISIONS[s.user.division] && <span className={`text-[10px] px-2 py-0.5 rounded ${DIVISIONS[s.user.division].color}`}>{DIVISIONS[s.user.division].label}</span>}
                   </div>
@@ -7323,6 +7469,27 @@ function AttendanceView({ user, allUsers }) {
     return list;
   }, [records, user, allUsers, filterUser, filterDiv]);
 
+  // Rekap harian: gabungkan absen masuk & pulang per orang per tanggal → 1 baris rapi
+  const [openRow, setOpenRow] = useState(null);
+  const dailyRows = useMemo(() => {
+    const map = {};
+    visibleRecords.forEach(r => {
+      const d = (r.timestamp || '').slice(0, 10);
+      const k = `${d}|${r.userId}`;
+      if (!map[k]) map[k] = { key: k, date: d, userId: r.userId, userName: r.userName, division: r.division, ins: [], outs: [] };
+      (r.type === 'in' ? map[k].ins : map[k].outs).push(r);
+    });
+    return Object.values(map).map(g => {
+      g.ins.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+      g.outs.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+      const inRec = g.ins[0] || null;
+      const outRec = g.outs.length ? g.outs[g.outs.length - 1] : null;
+      const durMin = inRec && outRec ? Math.max(0, Math.round((new Date(outRec.timestamp) - new Date(inRec.timestamp)) / 60000)) : null;
+      return { ...g, inRec, outRec, durMin };
+    }).sort((a, b) => b.date.localeCompare(a.date) || a.userName.localeCompare(b.userName));
+  }, [visibleRecords]);
+  const fmtDur = (m) => m == null ? '–' : `${Math.floor(m / 60)}j ${String(m % 60).padStart(2, '0')}m`;
+
   const canSeeOthers = user.role === 'owner' || user.role === 'manajer' || user.role === 'leader';
   const teamForFilter = useMemo(() => {
     if (user.role === 'owner' || user.role === 'manajer') return allUsers;
@@ -7509,97 +7676,136 @@ function AttendanceView({ user, allUsers }) {
         </div>
       )}
 
-      {/* Riwayat absensi */}
+      {/* Riwayat absensi — tabel rekap harian (Tanggal · Nama · Masuk · Pulang · Durasi · Status) */}
       <h3 className="font-display font-bold text-slate-900 mb-3">Riwayat Absensi</h3>
       {visibleRecords.length === 0 ? (
         <EmptyState icon={MapPin} text="Belum ada data absensi." />
       ) : (
-        <div className="space-y-3">
-          {visibleRecords.map(r => (
-            <div key={r.id} className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
-              <div className="p-4 flex items-start gap-3">
-                <div className="relative flex-shrink-0">
-                  <Avatar person={allUsers.find(u => u.id === r.userId) || { name: r.userName }} size="lg" />
-                  <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center border-2 border-white ${r.type === 'in' ? 'bg-emerald-500' : 'bg-amber-500'}`}>
-                    {r.type === 'in'
-                      ? <ArrowRight className="w-3 h-3 text-white" />
-                      : <ArrowLeft className="w-3 h-3 text-white" />}
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-slate-900 text-sm">{r.userName}</span>
-                    {r.jobTitle && <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{r.jobTitle}</span>}
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${r.type === 'in' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                      {r.type === 'in' ? 'MASUK' : 'PULANG'}
-                    </span>
-                    {r.division && DIVISIONS[r.division] && (
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${DIVISIONS[r.division].color}`}>{DIVISIONS[r.division].label}</span>
-                    )}
-                    {r.late && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-100 text-red-700">Terlambat {r.lateBy ? `${r.lateBy}m` : ''}</span>
-                    )}
-                    {r.earlyLeave && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-700">Pulang cepat {r.earlyBy ? `${r.earlyBy}m` : ''}</span>
-                    )}
-                    {r.locationMismatch && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-100 text-rose-700">Lokasi tidak sesuai{r.distanceM != null ? ` ±${r.distanceM}m` : ''}</span>
-                    )}
-                    {r.editedBy && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Diedit oleh ${r.editedBy}`}>diedit</span>
-                    )}
-                    {r.hasSelfie ? (
-                      <button onClick={() => viewSelfie(r)} disabled={selfieLoading === r.id}
-                        className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-100 text-indigo-700 hover:bg-indigo-200 inline-flex items-center gap-1 transition disabled:opacity-60">
-                        <Camera className="w-3 h-3" /> {selfieLoading === r.id ? 'Memuat…' : 'Lihat Selfie'}
-                      </button>
-                    ) : (config.selfieWajib !== false && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-400" title="Absen ini tanpa foto selfie">tanpa selfie</span>
-                    ))}
-                    <div className="ml-auto flex items-center gap-1 flex-shrink-0">
-                      {canEditRec(r) && (
-                        <button onClick={() => setEditing(r)} title="Edit absensi ini"
-                          className="text-slate-300 hover:text-indigo-600 p-1">
-                          <Edit2 className="w-4 h-4" />
-                        </button>
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[680px]">
+              <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="text-left px-4 py-2.5 font-bold">Tanggal</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Nama</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Masuk</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Pulang</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Durasi</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Status</th>
+                  <th className="px-2 py-2.5 w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {dailyRows.map(row => {
+                  const open = openRow === row.key;
+                  const anyMismatch = (row.inRec?.locationMismatch || row.outRec?.locationMismatch);
+                  const chips = [];
+                  if (row.inRec?.late) chips.push({ t: `Telat ${row.inRec.lateBy || ''}m`, c: 'bg-red-100 text-red-700' });
+                  if (row.outRec?.earlyLeave) chips.push({ t: `Pulang cepat ${row.outRec.earlyBy || ''}m`, c: 'bg-amber-100 text-amber-700' });
+                  if (anyMismatch) chips.push({ t: 'Lokasi ✗', c: 'bg-rose-100 text-rose-700' });
+                  if (chips.length === 0 && row.inRec) chips.push({ t: row.outRec ? '✓ Tepat waktu' : 'Belum pulang', c: row.outRec ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700' });
+                  return (
+                    <React.Fragment key={row.key}>
+                      <tr onClick={() => setOpenRow(open ? null : row.key)}
+                        className={`border-t border-slate-100 cursor-pointer transition ${open ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}>
+                        <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{new Date(row.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Avatar person={allUsers.find(u => u.id === row.userId) || { name: row.userName }} size="sm" />
+                            <span className="font-semibold text-slate-900 truncate">{row.userName}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          {row.inRec ? (
+                            <span className={`font-semibold tabular-nums ${row.inRec.late ? 'text-red-600' : 'text-emerald-700'}`}>{fmtTime(row.inRec.timestamp)}</span>
+                          ) : <span className="text-slate-300">–</span>}
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          {row.outRec ? (
+                            <span className={`font-semibold tabular-nums ${row.outRec.earlyLeave ? 'text-amber-600' : 'text-slate-700'}`}>{fmtTime(row.outRec.timestamp)}</span>
+                          ) : <span className="text-slate-300">–</span>}
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-600 tabular-nums whitespace-nowrap">{fmtDur(row.durMin)}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {chips.map((ch, i) => <span key={i} className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${ch.c}`}>{ch.t}</span>)}
+                          </div>
+                        </td>
+                        <td className="px-2 py-2.5 text-center">
+                          <ChevronDown className={`w-4 h-4 text-slate-400 inline-block transition-transform ${open ? 'rotate-180' : ''}`} />
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr className="border-t border-indigo-100 bg-indigo-50/30">
+                          <td colSpan={7} className="px-4 py-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {[['Masuk', row.inRec], ['Pulang', row.outRec]].map(([label, rec]) => (
+                                <div key={label} className="bg-white rounded-xl border border-slate-200 p-3">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${label === 'Masuk' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{label.toUpperCase()}</span>
+                                    {rec ? (
+                                      <>
+                                        <span className="text-sm font-bold text-slate-800 tabular-nums">{fmtTime(rec.timestamp)}</span>
+                                        {rec.editedBy && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" title={`Diedit oleh ${rec.editedBy}`}>diedit</span>}
+                                        <span className="ml-auto flex items-center gap-0.5">
+                                          {rec.hasSelfie && (
+                                            <button onClick={() => viewSelfie(rec)} disabled={selfieLoading === rec.id} title="Lihat selfie"
+                                              className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition disabled:opacity-50">
+                                              <Camera className="w-4 h-4" />
+                                            </button>
+                                          )}
+                                          {rec.latitude && (
+                                            <a href={mapsLink(rec.latitude, rec.longitude)} target="_blank" rel="noreferrer" title="Buka Maps"
+                                              className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition">
+                                              <MapPin className="w-4 h-4" />
+                                            </a>
+                                          )}
+                                          {canEditRec(rec) && (
+                                            <button onClick={() => setEditing(rec)} title="Edit"
+                                              className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition">
+                                              <Edit2 className="w-4 h-4" />
+                                            </button>
+                                          )}
+                                          {canDeleteRec(rec) && (
+                                            <button onClick={() => deleteRecord(rec)} title="Hapus"
+                                              className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition">
+                                              <Trash2 className="w-4 h-4" />
+                                            </button>
+                                          )}
+                                        </span>
+                                      </>
+                                    ) : <span className="text-xs text-slate-400">belum ada data</span>}
+                                  </div>
+                                  {rec && (
+                                    <div className="mt-1.5 space-y-0.5">
+                                      <div className="text-[11px] text-slate-500 flex items-center gap-1 flex-wrap">
+                                        {rec.locationMismatch
+                                          ? <span className="text-rose-600 font-semibold">Lokasi tidak sesuai{rec.distanceM != null ? ` (±${rec.distanceM}m dari lokasi kerja)` : ''}</span>
+                                          : <span className="text-emerald-600 font-semibold">Lokasi sesuai</span>}
+                                        {rec.hasSelfie ? null : (config.selfieWajib !== false && <span className="text-slate-400">· tanpa selfie</span>)}
+                                        <a href={mapsLink(rec.latitude, rec.longitude)} target="_blank" rel="noreferrer"
+                                          className="text-indigo-600 hover:underline inline-flex items-center gap-0.5">
+                                          Buka Maps <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                      </div>
+                                      {rec.note && <div className="text-[11px] text-slate-600 italic">"{rec.note}"</div>}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
                       )}
-                      {canDeleteRec(r) && (
-                        <button onClick={() => deleteRecord(r)} title="Hapus absensi ini"
-                          className="text-slate-300 hover:text-red-600 p-1">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-xs text-slate-500 mt-0.5">{fmtDate(r.timestamp)} · {fmtTime(r.timestamp)}</div>
-                  {r.address && (
-                    <div className="text-xs text-slate-700 mt-1 flex items-start gap-1">
-                      <MapPin className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0 mt-0.5" />
-                      <span>{r.address}</span>
-                    </div>
-                  )}
-                  {r.note && <div className="text-xs text-slate-600 mt-1 italic">"{r.note}"</div>}
-                  <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1 flex-wrap">
-                    {r.latitude?.toFixed(5)}, {r.longitude?.toFixed(5)}
-                    {r.accuracy ? <span>· ±{r.accuracy}m</span> : null}
-                    <a href={mapsLink(r.latitude, r.longitude)} target="_blank" rel="noreferrer"
-                      className="text-indigo-600 hover:underline inline-flex items-center gap-0.5 ml-1">
-                      Buka Maps <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                </div>
-              </div>
-              {/* Peta */}
-              {r.latitude && r.longitude && (
-                <iframe
-                  title={`peta-${r.id}`}
-                  src={osmEmbed(r.latitude, r.longitude)}
-                  className="w-full h-44 border-0 border-t border-slate-100"
-                  loading="lazy"
-                />
-              )}
-            </div>
-          ))}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400">
+            Klik baris untuk lihat detail: lokasi sesuai/tidak, link Maps, selfie, edit & hapus.
+          </div>
         </div>
       )}
 
@@ -7952,7 +8158,7 @@ function LeaderboardView({ allUsers }) {
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-slate-900 truncate">{m.name}</div>
                 <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                  {m.jobTitle && <span className="text-[10px] inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{m.jobTitle}</span>}
+                  {displayJobTitle(m) && <span className="text-[10px] inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{displayJobTitle(m)}</span>}
                   <span className={`text-[10px] inline-block px-2 py-0.5 rounded ${ROLES[m.role]?.color}`}>{ROLES[m.role]?.label}</span>
                   {m.division && DIVISIONS[m.division] && (
                     <span className={`text-[10px] inline-block px-2 py-0.5 rounded ${DIVISIONS[m.division].color}`}>{DIVISIONS[m.division].label}</span>
