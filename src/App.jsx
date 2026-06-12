@@ -336,8 +336,7 @@ const BACKUP_KEYS = [
   'sellers:all', 'attendance:all', 'attendance:config', 'activities:all', 'announcements:all', 'schedule:all', 'calendar:all',
   'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all', 'content-ideas:all',
   'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all',
-  'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history',
-  'daily-tasks:all', 'daily-tasks:log'
+  'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history'
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
@@ -685,7 +684,6 @@ export default function App() {
           <div className="p-4 sm:p-6 lg:p-8 animate-fade-in" key={view}>
             {view === 'dashboard' && <Dashboard user={currentUser} allUsers={allUsers} setView={setView} settings={settings} />}
             {view === 'tasks' && <TasksView user={currentUser} allUsers={allUsers} />}
-            {view === 'daily-tasks' && <DailyTasksView user={currentUser} allUsers={allUsers} />}
             {view === 'todos' && <TodosView user={currentUser} allUsers={allUsers} />}
             {view === 'creators' && <CreatorsView user={currentUser} allUsers={allUsers} />}
             {view === 'creator-management' && <CreatorManagementView user={currentUser} allUsers={allUsers} />}
@@ -1285,8 +1283,8 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       label: 'Operasional',
       items: [
         { id: 'tasks', label: 'Tiket', icon: CheckSquare, show: true },
-        { id: 'daily-tasks', label: 'Tugas Harian', icon: CheckCircle2, show: true },
         { id: 'todos', label: 'To-Do List', icon: KanbanSquare, show: true },
+        { id: 'daily-reports', label: 'Laporan Harian', icon: ClipboardList, show: true },
         { id: 'attendance', label: 'Absensi', icon: MapPin, show: true },
         { id: 'calendar', label: 'Kalender Tim', icon: CalendarDays, show: true },
         { id: 'problems', label: 'Masalah & Solusi', icon: AlertCircle, show: true }
@@ -1310,7 +1308,6 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'affiliate-accounts', label: 'Akun Affiliator', icon: Target, show: canAccessFeature(user, 'affiliate-accounts') },
         { id: 'kpi', label: 'KPI Tim', icon: Award, show: true },
         { id: 'reports', label: 'Laporan Mingguan', icon: FileText, show: true },
-        { id: 'daily-reports', label: 'Laporan Harian', icon: ClipboardList, show: true },
         { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, show: true }
       ]
     },
@@ -2165,7 +2162,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
       {canAccessFeature(user, 'gmv') && (
         <BusinessDashboard gmvEntries={gmvEntries} gmvTargets={gmvTargets}
           affAccounts={affAccounts} affEntries={affEntries} allUsers={allUsers} onNavigate={setView}
-          problems={problems} attendance={attendanceRecs} reports={dailyReports} settings={settings} user={user} />
+          problems={problems} attendance={attendanceRecs} reports={dailyReports} tasks={tasks} settings={settings} user={user} />
       )}
 
       {/* KPI Saya + Masalah Aktif */}
@@ -2473,7 +2470,7 @@ function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTar
 }
 
 // ============ DASHBOARD BISNIS (Keseluruhan + per-divisi MCN/TAP/Affiliator) ============
-function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, onNavigate, problems = [], attendance = [], reports = [], settings, user }) {
+function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, onNavigate, problems = [], attendance = [], reports = [], tasks = [], settings, user }) {
   const [scope, setScope] = useState('all'); // all | mcn | tap | internal
   const [affGoal, setAffGoal] = useState(DEFAULT_AFFILIATE_GOAL);
   const [showPpt, setShowPpt] = useState(false);
@@ -2518,18 +2515,9 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
     return { today, prev, diff, pct };
   };
 
-  // chart geometry
-  const CW = 720, CH = 200, PADL = 6, PADR = 6, PADT = 14, PADB = 6;
-  const xAt = (i) => PADL + (n <= 1 ? 0 : (i / (n - 1)) * (CW - PADL - PADR));
-  const yAt = (v, max) => CH - PADB - (max <= 0 ? 0 : (v / max) * (CH - PADT - PADB));
-  const pointsOf = (series, max) => series.map((s, i) => `${xAt(i).toFixed(1)},${yAt(s.value, max).toFixed(1)}`).join(' ');
-  const areaOf = (series, max) => `${pointsOf(series, max)} ${xAt(n - 1).toFixed(1)},${CH - PADB} ${xAt(0).toFixed(1)},${CH - PADB}`;
-
   const isAll = scope === 'all';
   const divColor = isAll ? '#2563EB' : GMV_DIVISIONS[scope].color;
   const chartSeries = isAll ? totalSeries : seriesByDiv[scope];
-  const chartMaxAll = Math.max(...seriesByDiv.mcn.map(s => s.value), ...seriesByDiv.tap.map(s => s.value), ...seriesByDiv.internal.map(s => s.value), 1);
-  const chartMaxDiv = Math.max(...chartSeries.map(s => s.value), 1);
   const hasData = grandTotal > 0;
 
   // stat cards per scope
@@ -2574,7 +2562,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
   // Analisis SWOT bulan berjalan untuk tab/fokus yang aktif
   const monthStart = `${mKey}-01`;
   const monthEnd = `${mKey}-${String(dim).padStart(2, '0')}`;
-  const dataBundle = { gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers };
+  const dataBundle = { gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, tasks };
   const analysis = useMemo(
     () => analyzeBusiness({ scope, start: monthStart, end: monthEnd, ...dataBundle }),
     [scope, gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, mKey]
@@ -2636,44 +2624,28 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
             ))}
           </div>
 
-          {/* chart */}
+          {/* chart — kurva interaktif (hover/sentuh untuk lihat nilai) */}
           <div className="rounded-2xl border border-slate-200 p-4">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-sm font-bold text-slate-700">Traffic GMV — {n} hari</div>
+              <div className="text-sm font-bold text-slate-700">Traffic GMV — {n} hari <span className="text-[10px] font-semibold text-slate-400 ml-1">arahkan kursor / sentuh grafik</span></div>
               <button onClick={() => onNavigate('gmv')} className="text-xs text-blue-700 hover:text-blue-800 font-semibold">Detail →</button>
             </div>
-            <svg viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" className="w-full" style={{ height: 200 }}>
-              <defs>
-                <linearGradient id="bdArea" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stopColor={divColor} stopOpacity="0.18" />
-                  <stop offset="1" stopColor={divColor} stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              {[0, 0.25, 0.5, 0.75, 1].map((f, i) => {
-                const y = PADT + f * (CH - PADT - PADB);
-                return <line key={i} x1={PADL} y1={y} x2={CW - PADR} y2={y} stroke="#EEF0F4" strokeWidth="1" />;
-              })}
-              {isAll ? (
-                <>
-                  <polyline points={pointsOf(seriesByDiv.mcn, chartMaxAll)} fill="none" stroke="#10B981" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                  <polyline points={pointsOf(seriesByDiv.tap, chartMaxAll)} fill="none" stroke="#F97316" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                  <polyline points={pointsOf(seriesByDiv.internal, chartMaxAll)} fill="none" stroke="#3B82F6" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                </>
-              ) : (
-                <>
-                  {(() => { const tgt = Number(targets[scope]) || 0; if (tgt <= 0) return null; const dailyTgt = tgt / dim; const y = yAt(dailyTgt, chartMaxDiv); return (<><line x1={PADL} y1={y} x2={CW - PADR} y2={y} stroke="#F59E0B" strokeWidth="1.6" strokeDasharray="6 5" /><text x={PADL + 4} y={y - 4} fontSize="11" fill="#B45309" fontWeight="700">Target harian</text></>); })()}
-                  <polygon points={areaOf(chartSeries, chartMaxDiv)} fill="url(#bdArea)" />
-                  <polyline points={pointsOf(chartSeries, chartMaxDiv)} fill="none" stroke={divColor} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                  {chartSeries.length > 0 && <circle cx={xAt(n - 1)} cy={yAt(chartSeries[n - 1].value, chartMaxDiv)} r="4.5" fill={divColor} />}
-                </>
-              )}
-            </svg>
-            {isAll && (
-              <div className="flex gap-4 justify-center mt-3 flex-wrap">
-                <span className="flex items-center gap-2 text-xs text-slate-600 font-semibold"><i className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#10B981' }}></i>MCN</span>
-                <span className="flex items-center gap-2 text-xs text-slate-600 font-semibold"><i className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#F97316' }}></i>TAP</span>
-                <span className="flex items-center gap-2 text-xs text-slate-600 font-semibold"><i className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#3B82F6' }}></i>Affiliator Internal</span>
-              </div>
+            {isAll ? (
+              <>
+                <InteractiveLineChart height={200} lines={[
+                  { label: 'MCN', color: '#10B981', series: seriesByDiv.mcn },
+                  { label: 'TAP', color: '#F97316', series: seriesByDiv.tap },
+                  { label: 'Affiliator', color: '#3B82F6', series: seriesByDiv.internal }
+                ]} />
+                <div className="flex gap-4 justify-center mt-3 flex-wrap">
+                  <span className="flex items-center gap-2 text-xs text-slate-600 font-semibold"><i className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#10B981' }}></i>MCN</span>
+                  <span className="flex items-center gap-2 text-xs text-slate-600 font-semibold"><i className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#F97316' }}></i>TAP</span>
+                  <span className="flex items-center gap-2 text-xs text-slate-600 font-semibold"><i className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#3B82F6' }}></i>Affiliator Internal</span>
+                </div>
+              </>
+            ) : (
+              <InteractiveLineChart height={200} series={chartSeries} color={divColor}
+                targetDaily={(Number(targets[scope]) || 0) > 0 ? Math.round((Number(targets[scope]) || 0) / dim) : 0} />
             )}
           </div>
 
@@ -2759,7 +2731,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
 }
 
 // ====== ANALISIS BISNIS OTOMATIS — format SWOT (berbasis data nyata aplikasi) ======
-function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, affAccounts = [], affEntries = [], problems = [], attendance = [], reports = [], allUsers = [] }) {
+function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, affAccounts = [], affEntries = [], problems = [], attendance = [], reports = [], allUsers = [], tasks = [] }) {
   const inRange = (d) => d && d >= start && d <= end;
   const dayList = [];
   {
@@ -2836,6 +2808,17 @@ function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, af
   const reportRate = repExpected > 0 ? Math.round(repDays / repExpected * 100) : null;
   const openProblems = problems.filter(p => p.status !== 'resolved');
   const urgentProblems = openProblems.filter(p => p.urgency === 'kritis' || p.urgency === 'tinggi');
+  const resolvedInRange = problems.filter(p => p.status === 'resolved' && inRange((p.resolvedAt || '').slice(0, 10)));
+
+  // Aktivitas tim dalam periode (untuk laporan owner)
+  const team = {
+    attCount: attIn.length,
+    attPeople: new Set(attIn.map(r => r.userId)).size,
+    onTimeRate: attIn.length > 0 ? Math.round(attIn.filter(r => !r.late).length / attIn.length * 100) : null,
+    reportCount: reports.filter(r => inRange(r.date)).length,
+    tasksDone: tasks.filter(t => t.status === 'done' && inRange((t.completedAt || '').slice(0, 10))).length,
+    tasksOverdue: tasks.filter(t => t.status !== 'done' && t.deadline && new Date(t.deadline) < new Date()).length
+  };
 
   // Kontribusi divisi (scope all)
   const shares = divs.map(d => ({ div: d, label: GMV_DIVISIONS[d].label, value: byDiv[d], share: total > 0 ? Math.round(byDiv[d] / total * 100) : 0 })).sort((a, b) => b.value - a.value);
@@ -2879,7 +2862,8 @@ function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, af
   return {
     scope, scopeLabel, start, end, total, target, pacePct, growthPct, prevTotal, prevStart, prevEnd,
     series, byDiv, shares, accRows, best, avgPerDay, projection, remainingDays, needPerDay,
-    lateRate, reportRate, openProblems, zeroDays,
+    lateRate, reportRate, openProblems, urgentProblems, resolvedInRange, team, zeroDays,
+    targetOfDiv, expectedSoFar,
     swot: {
       strengths: fallback(S, 'Belum ada kekuatan menonjol terdeteksi dari data periode ini — perbanyak input data agar analisis tajam.').slice(0, 4),
       weaknesses: fallback(W, 'Tidak ada kelemahan signifikan terdeteksi pada periode ini.').slice(0, 4),
@@ -2940,173 +2924,277 @@ async function loadPptxGen() {
   }
 }
 
-async function exportBusinessPpt({ analysis, periodLabel, appName = 'Al-Kahfi Corp', authorName = '' }) {
+async function exportBusinessPpt({ analysis, dataBundle, periodLabel, appName = 'Al-Kahfi Corp', authorName = '' }) {
   const PptxGenJS = await loadPptxGen();
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: 'WIDE', width: 13.33, height: 7.5 });
   pptx.layout = 'WIDE';
-  const INDIGO = '2563EB', DARK = '0B1437', SLATE = '475569', LIGHT = 'F6F5FE', GOLD = 'F59E0B';
+  const BLUE = '2563EB', DARK = '0B1437', SLATE = '475569', GOLD = 'F59E0B';
   const a = analysis;
   const rp = (n) => fmtRupiah(Math.round(n || 0)).replace('Rp ', 'Rp');
-  const footer = (slide, page) => {
-    slide.addText(`${appName} · Laporan ${periodLabel} · ${a.scopeLabel}`, { x: 0.5, y: 7.05, w: 8, h: 0.35, fontSize: 9, color: '94A3B8' });
-    slide.addText(`${page}`, { x: 12.3, y: 7.05, w: 0.6, h: 0.35, fontSize: 9, color: '94A3B8', align: 'right' });
-  };
+  // Analisis pembanding: periode sebelumnya + rincian per divisi (kalau keseluruhan)
+  const prev = analyzeBusiness({ scope: a.scope, start: a.prevStart, end: a.prevEnd, ...dataBundle });
+  const divAnalyses = a.scope === 'all'
+    ? ['mcn', 'tap', 'internal'].map(d => analyzeBusiness({ scope: d, start: a.start, end: a.end, ...dataBundle }))
+    : [];
 
-  // ---- 1. COVER ----
+  let pageNo = 1;
+  const footer = (slide) => {
+    pageNo += 1;
+    slide.addText(`${appName} · Laporan ${periodLabel} · ${a.scopeLabel} · ${fmtDate(a.start)}–${fmtDate(a.end)}`, { x: 0.5, y: 7.08, w: 9, h: 0.32, fontSize: 9, color: '94A3B8' });
+    slide.addText(`${pageNo}`, { x: 12.3, y: 7.08, w: 0.6, h: 0.32, fontSize: 9, color: '94A3B8', align: 'right' });
+  };
+  const heading = (slide, no, title) => {
+    slide.addText([
+      { text: `${no}  `, options: { fontSize: 26, bold: true, color: BLUE } },
+      { text: title, options: { fontSize: 26, bold: true, color: DARK } }
+    ], { x: 0.5, y: 0.38, w: 12.3, h: 0.6 });
+    slide.addShape('rect', { x: 0.5, y: 1.02, w: 1.6, h: 0.06, fill: { color: BLUE } });
+  };
+  const headRow = (cols) => cols.map(c => ({ text: c, options: { bold: true, color: 'FFFFFF', fill: { color: BLUE }, fontSize: 11 } }));
+  const statusTxt = (an) => an.target <= 0 ? ['Tanpa target', '94A3B8'] : an.pacePct >= 100 ? ['On track ✓', '047857'] : an.pacePct >= 85 ? ['Hampir on track', 'B45309'] : ['Tertinggal', 'B91C1C'];
+
+  // ===== COVER =====
   let s = pptx.addSlide();
   s.background = { color: DARK };
-  s.addShape('rect', { x: 0, y: 0, w: 0.25, h: 7.5, fill: { color: GOLD } });
-  s.addText(appName.toUpperCase(), { x: 0.9, y: 1.5, w: 11.5, h: 0.5, fontSize: 16, color: GOLD, bold: true, charSpacing: 4 });
-  s.addText(`Laporan ${periodLabel}`, { x: 0.9, y: 2.1, w: 11.5, h: 1.1, fontSize: 44, color: 'FFFFFF', bold: true });
-  s.addText(a.scopeLabel, { x: 0.9, y: 3.2, w: 11.5, h: 0.7, fontSize: 26, color: 'C7D2FE' });
-  s.addText(`Periode: ${fmtDate(a.start)} – ${fmtDate(a.end)}`, { x: 0.9, y: 4.1, w: 11.5, h: 0.45, fontSize: 16, color: 'E2E8F0' });
-  s.addText([
-    { text: 'Disusun otomatis oleh sistem manajemen tim', options: { fontSize: 12, color: '94A3B8' } },
-    { text: authorName ? `\nDiunduh oleh: ${authorName} · ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}` : '', options: { fontSize: 12, color: '94A3B8' } }
-  ], { x: 0.9, y: 6.3, w: 11, h: 0.8 });
+  s.addShape('rect', { x: 0, y: 0, w: 0.25, h: 7.5, fill: { color: BLUE } });
+  s.addText(appName.toUpperCase(), { x: 0.9, y: 1.4, w: 11.5, h: 0.5, fontSize: 16, color: '60A5FA', bold: true, charSpacing: 4 });
+  s.addText(`Laporan ${periodLabel} untuk Owner`, { x: 0.9, y: 2.0, w: 11.5, h: 1.1, fontSize: 42, color: 'FFFFFF', bold: true });
+  s.addText(a.scopeLabel, { x: 0.9, y: 3.1, w: 11.5, h: 0.65, fontSize: 26, color: 'BFDBFE' });
+  s.addText(`Periode: ${fmtDate(a.start)} – ${fmtDate(a.end)}`, { x: 0.9, y: 3.95, w: 11.5, h: 0.45, fontSize: 16, color: 'E2E8F0' });
+  s.addText('Pola laporan: Fakta → Penyebab → Dampak → Solusi → Target berikutnya', { x: 0.9, y: 4.6, w: 11.5, h: 0.4, fontSize: 13, italic: true, color: '93C5FD' });
+  s.addText(`Disusun otomatis oleh sistem${authorName ? ` · Diunduh oleh ${authorName}` : ''} · ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+    { x: 0.9, y: 6.5, w: 11.5, h: 0.4, fontSize: 11, color: '94A3B8' });
 
-  // ---- 2. RINGKASAN EKSEKUTIF ----
+  // ===== 1. RINGKASAN EKSEKUTIF =====
   s = pptx.addSlide();
-  s.addText('Ringkasan Eksekutif', { x: 0.5, y: 0.4, w: 12, h: 0.6, fontSize: 28, bold: true, color: DARK });
-  s.addShape('rect', { x: 0.5, y: 1.05, w: 1.6, h: 0.06, fill: { color: INDIGO } });
+  heading(s, '1', 'Ringkasan Eksekutif');
   const kpis = [
     { label: 'TOTAL GMV', value: rp(a.total), sub: a.target > 0 ? `${Math.round(a.total / a.target * 100)}% dari target ${rp(a.target)}` : 'Target belum di-set' },
+    { label: 'PACE VS JALUR TARGET', value: a.pacePct !== null ? `${a.pacePct}%` : '—', sub: a.pacePct !== null ? (a.pacePct >= 100 ? 'Di depan jalur ✓' : `Tertinggal ${rp(Math.max(a.expectedSoFar - a.total, 0))}`) : 'Tanpa target' },
     { label: 'VS PERIODE SEBELUMNYA', value: a.growthPct !== null ? `${a.growthPct > 0 ? '+' : ''}${a.growthPct}%` : '—', sub: `Sebelumnya ${rp(a.prevTotal)}` },
-    { label: 'RATA-RATA / HARI', value: rp(a.avgPerDay), sub: `Hari terbaik: ${a.best.date ? fmtDate(a.best.date) : '—'} (${rp(a.best.value)})` },
-    { label: 'PROYEKSI AKHIR PERIODE', value: rp(a.projection), sub: a.target > 0 ? (a.projection >= a.target ? 'On track mencapai target ✓' : `Selisih ${rp(a.target - a.projection)} dari target`) : '—' }
+    { label: 'PROYEKSI AKHIR PERIODE', value: rp(a.projection), sub: a.target > 0 ? (a.projection >= a.target ? 'Diproyeksi capai target ✓' : `Selisih ${rp(a.target - a.projection)}`) : '—' }
   ];
   kpis.forEach((k, i) => {
     const x = 0.5 + i * 3.16;
-    s.addShape('roundRect', { x, y: 1.5, w: 2.96, h: 1.9, fill: { color: 'FFFFFF' }, line: { color: 'E2E8F0', width: 1 }, rectRadius: 0.08, shadow: { type: 'outer', blur: 6, offset: 2, angle: 90, color: 'CBD5E1', opacity: 0.4 } });
-    s.addText(k.label, { x: x + 0.2, y: 1.7, w: 2.6, h: 0.3, fontSize: 10, bold: true, color: SLATE, charSpacing: 1 });
-    s.addText(k.value, { x: x + 0.2, y: 2.05, w: 2.6, h: 0.6, fontSize: 21, bold: true, color: DARK });
-    s.addText(k.sub, { x: x + 0.2, y: 2.7, w: 2.6, h: 0.55, fontSize: 10, color: SLATE });
+    s.addShape('roundRect', { x, y: 1.35, w: 2.96, h: 1.85, fill: { color: 'FFFFFF' }, line: { color: 'E2E8F0', width: 1 }, rectRadius: 0.08, shadow: { type: 'outer', blur: 6, offset: 2, angle: 90, color: 'CBD5E1', opacity: 0.4 } });
+    s.addText(k.label, { x: x + 0.2, y: 1.52, w: 2.6, h: 0.3, fontSize: 9.5, bold: true, color: SLATE, charSpacing: 1 });
+    s.addText(k.value, { x: x + 0.2, y: 1.86, w: 2.6, h: 0.6, fontSize: 21, bold: true, color: DARK });
+    s.addText(k.sub, { x: x + 0.2, y: 2.5, w: 2.6, h: 0.55, fontSize: 10, color: SLATE });
   });
-  // Kontribusi divisi / akun
+  // Fakta utama (narasi singkat untuk owner)
+  const fakta = [];
+  fakta.push(`FAKTA: GMV ${a.scopeLabel.toLowerCase()} periode ini ${rp(a.total)}${a.target > 0 ? ` dari target ${rp(a.target)} (pace ${a.pacePct}%)` : ''}, ${a.growthPct !== null ? `${a.growthPct >= 0 ? 'tumbuh' : 'turun'} ${Math.abs(a.growthPct)}% dibanding periode sebelumnya` : 'belum ada pembanding periode sebelumnya'}.`);
+  if (a.scope === 'all' && a.shares[0]) fakta.push(`Kontributor terbesar: ${a.shares[0].label} (${a.shares[0].share}%). Hari terbaik ${a.best.date ? fmtDate(a.best.date) : '—'} dengan ${rp(a.best.value)}.`);
+  fakta.push(a.pacePct !== null && a.pacePct < 100 && a.remainingDays > 0
+    ? `Untuk mengejar target dibutuhkan rata-rata ${rp(a.needPerDay)}/hari selama ${a.remainingDays} hari tersisa (laju sekarang ${rp(a.avgPerDay)}/hari).`
+    : `Pertahankan laju ${rp(a.avgPerDay)}/hari sampai akhir periode.`);
+  s.addShape('roundRect', { x: 0.5, y: 3.5, w: 12.33, h: 2.9, fill: { color: 'F8FAFC' }, line: { color: 'E2E8F0', width: 1 }, rectRadius: 0.08 });
+  s.addText(fakta.map(t => ({ text: t, options: { bullet: { code: '2022', indent: 12 }, fontSize: 13.5, color: '334155', paraSpaceAfter: 10 } })),
+    { x: 0.75, y: 3.7, w: 11.8, h: 2.5, valign: 'top' });
+  footer(s);
+
+  // ===== 2. TARGET VS REALISASI =====
+  s = pptx.addSlide();
+  heading(s, '2', 'Target vs Realisasi');
   if (a.scope === 'all') {
-    s.addText('Kontribusi per Divisi', { x: 0.5, y: 3.8, w: 6, h: 0.4, fontSize: 16, bold: true, color: DARK });
-    const rows = [[
-      { text: 'Divisi', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } },
-      { text: 'GMV', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO }, align: 'right' } },
-      { text: 'Kontribusi', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO }, align: 'right' } }
-    ]];
-    a.shares.forEach(sh => rows.push([
-      { text: sh.label }, { text: rp(sh.value), options: { align: 'right' } }, { text: `${sh.share}%`, options: { align: 'right' } }
-    ]));
-    s.addTable(rows, { x: 0.5, y: 4.25, w: 6.1, fontSize: 12, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.42, fill: { color: 'FFFFFF' } });
-  }
-  if (a.accRows.length > 0 && (a.scope === 'internal' || a.scope === 'all')) {
-    const x0 = a.scope === 'all' ? 7.0 : 0.5;
-    s.addText('Akun Affiliator (Top 6)', { x: x0, y: 3.8, w: 6, h: 0.4, fontSize: 16, bold: true, color: DARK });
-    const rows2 = [[
-      { text: 'Akun', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } },
-      { text: 'Realisasi', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO }, align: 'right' } },
-      { text: 'Target Periode', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO }, align: 'right' } },
-      { text: 'Status', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } }
-    ]];
-    a.accRows.slice(0, 6).forEach(r => rows2.push([
-      { text: r.name },
-      { text: rp(r.actual), options: { align: 'right' } },
-      { text: r.target > 0 ? rp(r.target) : '—', options: { align: 'right' } },
-      { text: r.onTrack === null ? 'Tanpa target' : r.onTrack ? 'On track ✓' : 'Tertinggal', options: { color: r.onTrack === null ? '94A3B8' : r.onTrack ? '047857' : 'B91C1C', bold: r.onTrack !== null } }
-    ]));
-    s.addTable(rows2, { x: x0, y: 4.25, w: 5.83, fontSize: 11, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.38 });
-  }
-  footer(s, 2);
-
-  // ---- 3. TREN HARIAN (line chart) ----
-  s = pptx.addSlide();
-  s.addText('Tren GMV Harian', { x: 0.5, y: 0.4, w: 12, h: 0.6, fontSize: 28, bold: true, color: DARK });
-  s.addShape('rect', { x: 0.5, y: 1.05, w: 1.6, h: 0.06, fill: { color: INDIGO } });
-  s.addChart(pptx.ChartType.line, [{
-    name: 'GMV',
-    labels: a.series.map(p => p.date.slice(8, 10)),
-    values: a.series.map(p => p.value)
-  }], {
-    x: 0.5, y: 1.4, w: 12.3, h: 4.6,
-    lineSize: 3, chartColors: [INDIGO], lineSmooth: true,
-    catAxisLabelColor: SLATE, valAxisLabelColor: SLATE, catAxisLabelFontSize: 10, valAxisLabelFontSize: 10,
-    valGridLine: { color: 'E2E8F0', style: 'solid', size: 0.5 }, catGridLine: { style: 'none' },
-    showValAxisTitle: false, valAxisLabelFormatCode: '#,##0'
-  });
-  s.addText(`Rata-rata ${rp(a.avgPerDay)}/hari · Hari terbaik ${a.best.date ? fmtDate(a.best.date) : '—'} (${rp(a.best.value)})${a.zeroDays > 0 ? ` · ${a.zeroDays} hari tanpa input` : ''}`,
-    { x: 0.5, y: 6.15, w: 12.3, h: 0.4, fontSize: 12, color: SLATE, align: 'center' });
-  footer(s, 3);
-
-  // ---- 4. PERBANDINGAN DIVISI / AKUN (bar chart) ----
-  s = pptx.addSlide();
-  const barTitle = a.scope === 'all' ? 'GMV per Divisi' : 'GMV per Akun Affiliator';
-  s.addText(barTitle, { x: 0.5, y: 0.4, w: 12, h: 0.6, fontSize: 28, bold: true, color: DARK });
-  s.addShape('rect', { x: 0.5, y: 1.05, w: 1.6, h: 0.06, fill: { color: INDIGO } });
-  const barData = a.scope === 'all'
-    ? { labels: a.shares.map(x => x.label), values: a.shares.map(x => x.value) }
-    : a.accRows.length > 0
-      ? { labels: a.accRows.slice(0, 8).map(x => x.name), values: a.accRows.slice(0, 8).map(x => x.actual) }
-      : { labels: [a.scopeLabel], values: [a.total] };
-  s.addChart(pptx.ChartType.bar, [{ name: 'GMV', labels: barData.labels, values: barData.values }], {
-    x: 0.5, y: 1.4, w: 12.3, h: 4.8, barDir: 'col',
-    chartColors: ['2563EB', '10B981', 'F97316', '3B82F6', '8B5CF6', 'F59E0B', 'EC4899', '14B8A6'],
-    chartColorsOpacity: 90, catAxisLabelColor: SLATE, valAxisLabelColor: SLATE,
-    catAxisLabelFontSize: 10, valAxisLabelFontSize: 10, valGridLine: { color: 'E2E8F0', style: 'solid', size: 0.5 },
-    showValue: true, dataLabelFormatCode: '#,##0', dataLabelFontSize: 9, dataLabelColor: SLATE, valAxisLabelFormatCode: '#,##0'
-  });
-  footer(s, 4);
-
-  // ---- 5. SWOT ----
-  s = pptx.addSlide();
-  s.addText('Analisis SWOT', { x: 0.5, y: 0.35, w: 12, h: 0.55, fontSize: 28, bold: true, color: DARK });
-  s.addShape('rect', { x: 0.5, y: 0.95, w: 1.6, h: 0.06, fill: { color: INDIGO } });
-  const quads = [
-    { title: 'STRENGTHS — Kekuatan', items: a.swot.strengths, fill: 'ECFDF5', accent: '047857', x: 0.5, y: 1.25 },
-    { title: 'WEAKNESSES — Kelemahan', items: a.swot.weaknesses, fill: 'FFFBEB', accent: 'B45309', x: 6.92, y: 1.25 },
-    { title: 'OPPORTUNITIES — Peluang', items: a.swot.opportunities, fill: 'EFF6FF', accent: '1D4ED8', x: 0.5, y: 4.15 },
-    { title: 'THREATS — Ancaman', items: a.swot.threats, fill: 'FEF2F2', accent: 'B91C1C', x: 6.92, y: 4.15 }
-  ];
-  quads.forEach(q => {
-    s.addShape('roundRect', { x: q.x, y: q.y, w: 5.91, h: 2.72, fill: { color: q.fill }, line: { color: q.accent, width: 0.75 }, rectRadius: 0.06 });
-    s.addText(q.title, { x: q.x + 0.18, y: q.y + 0.12, w: 5.5, h: 0.32, fontSize: 12.5, bold: true, color: q.accent });
-    s.addText(q.items.map(it => ({ text: it, options: { bullet: { code: '2022', indent: 10 }, fontSize: 10.5, color: '334155', paraSpaceAfter: 4 } })),
-      { x: q.x + 0.22, y: q.y + 0.5, w: 5.5, h: 2.1, valign: 'top' });
-  });
-  footer(s, 5);
-
-  // ---- 6. MASALAH & REKOMENDASI ----
-  s = pptx.addSlide();
-  s.addText('Masalah Terbuka & Rekomendasi', { x: 0.5, y: 0.4, w: 12, h: 0.6, fontSize: 28, bold: true, color: DARK });
-  s.addShape('rect', { x: 0.5, y: 1.05, w: 1.6, h: 0.06, fill: { color: INDIGO } });
-  s.addText('Masalah Terbuka', { x: 0.5, y: 1.35, w: 6, h: 0.4, fontSize: 15, bold: true, color: DARK });
-  if (a.openProblems.length === 0) {
-    s.addText('✓ Tidak ada masalah terbuka. Pertahankan.', { x: 0.5, y: 1.8, w: 5.9, h: 0.4, fontSize: 12, color: '047857' });
+    const rows = [headRow(['Divisi', 'Target Periode', 'Realisasi', '% Capai', 'Status'])];
+    divAnalyses.forEach(d => {
+      const [st, stc] = statusTxt(d);
+      rows.push([
+        { text: GMV_DIVISIONS[d.scope].label },
+        { text: d.target > 0 ? rp(d.target) : '—', options: { align: 'right' } },
+        { text: rp(d.total), options: { align: 'right' } },
+        { text: d.target > 0 ? `${Math.round(d.total / d.target * 100)}%` : '—', options: { align: 'right', bold: true } },
+        { text: st, options: { color: stc, bold: true } }
+      ]);
+    });
+    const [stA, stAc] = statusTxt(a);
+    rows.push([
+      { text: 'TOTAL', options: { bold: true, fill: { color: 'EFF6FF' } } },
+      { text: a.target > 0 ? rp(a.target) : '—', options: { align: 'right', bold: true, fill: { color: 'EFF6FF' } } },
+      { text: rp(a.total), options: { align: 'right', bold: true, fill: { color: 'EFF6FF' } } },
+      { text: a.target > 0 ? `${Math.round(a.total / a.target * 100)}%` : '—', options: { align: 'right', bold: true, fill: { color: 'EFF6FF' } } },
+      { text: stA, options: { color: stAc, bold: true, fill: { color: 'EFF6FF' } } }
+    ]);
+    s.addTable(rows, { x: 0.5, y: 1.4, w: 6.4, fontSize: 11.5, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.46 });
+    s.addChart(pptx.ChartType.bar, [
+      { name: 'Target', labels: divAnalyses.map(d => GMV_DIVISIONS[d.scope].short), values: divAnalyses.map(d => d.target) },
+      { name: 'Realisasi', labels: divAnalyses.map(d => GMV_DIVISIONS[d.scope].short), values: divAnalyses.map(d => d.total) }
+    ], {
+      x: 7.2, y: 1.4, w: 5.6, h: 4.6, barDir: 'col', barGrouping: 'clustered',
+      chartColors: ['CBD5E1', BLUE], showLegend: true, legendPos: 'b', legendFontSize: 10,
+      catAxisLabelColor: SLATE, valAxisLabelColor: SLATE, catAxisLabelFontSize: 10, valAxisLabelFontSize: 9,
+      valGridLine: { color: 'E2E8F0', style: 'solid', size: 0.5 }, valAxisLabelFormatCode: '#,##0'
+    });
+    s.addText('Catatan: target periode dihitung pro-rata dari target bulanan.', { x: 0.5, y: 6.3, w: 6.4, h: 0.35, fontSize: 10, italic: true, color: '94A3B8' });
   } else {
-    const pRows = [[
-      { text: 'Masalah', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } },
-      { text: 'Urgensi', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } },
-      { text: 'Status', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } }
-    ]];
-    a.openProblems.slice(0, 6).forEach(p => pRows.push([
-      { text: (p.title || '').slice(0, 60) },
-      { text: URGENCY[p.urgency]?.label || p.urgency, options: { color: p.urgency === 'kritis' ? 'B91C1C' : p.urgency === 'tinggi' ? 'C2410C' : '64748B', bold: true } },
-      { text: PROBLEM_STATUS[p.status]?.label || p.status }
-    ]));
-    s.addTable(pRows, { x: 0.5, y: 1.8, w: 6.1, fontSize: 10.5, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.38, autoPage: false });
+    const [st, stc] = statusTxt(a);
+    const rows = [headRow(['Indikator', 'Nilai'])];
+    rows.push([{ text: 'Target periode' }, { text: a.target > 0 ? rp(a.target) : 'Belum di-set', options: { align: 'right' } }]);
+    rows.push([{ text: 'Realisasi' }, { text: rp(a.total), options: { align: 'right', bold: true } }]);
+    rows.push([{ text: '% capai' }, { text: a.target > 0 ? `${Math.round(a.total / a.target * 100)}%` : '—', options: { align: 'right', bold: true } }]);
+    rows.push([{ text: 'Status' }, { text: st, options: { align: 'right', bold: true, color: stc } }]);
+    rows.push([{ text: 'Kebutuhan per hari (sisa periode)' }, { text: a.needPerDay > 0 ? rp(a.needPerDay) : '—', options: { align: 'right' } }]);
+    s.addTable(rows, { x: 0.5, y: 1.4, w: 5.9, fontSize: 12, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.5 });
+    if (a.accRows.length > 0 && a.scope === 'internal') {
+      const rows2 = [headRow(['Akun', 'Target', 'Realisasi', 'Status'])];
+      a.accRows.slice(0, 7).forEach(r => rows2.push([
+        { text: r.name },
+        { text: r.target > 0 ? rp(r.target) : '—', options: { align: 'right' } },
+        { text: rp(r.actual), options: { align: 'right' } },
+        { text: r.onTrack === null ? 'Tanpa target' : r.onTrack ? 'On track ✓' : 'Tertinggal', options: { color: r.onTrack === null ? '94A3B8' : r.onTrack ? '047857' : 'B91C1C', bold: r.onTrack !== null } }
+      ]));
+      s.addTable(rows2, { x: 6.8, y: 1.4, w: 6.0, fontSize: 10.5, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.4 });
+    }
   }
-  s.addText('Rekomendasi Tindak Lanjut', { x: 7.0, y: 1.35, w: 5.8, h: 0.4, fontSize: 15, bold: true, color: DARK });
-  const recs = [...a.swot.weaknesses.slice(0, 2), ...a.swot.threats.slice(0, 2), ...a.swot.opportunities.slice(0, 2)]
-    .filter(t => !t.startsWith('Tidak ada') && !t.startsWith('Belum ada') && !t.startsWith('Lengkapi target'))
-    .slice(0, 5);
-  s.addText(
-    (recs.length ? recs : ['Pertahankan ritme kerja & disiplin input data.']).map((r, i) => ({
-      text: r, options: { bullet: { code: '2192' }, fontSize: 11.5, color: '334155', paraSpaceAfter: 8 }
-    })),
-    { x: 7.0, y: 1.8, w: 5.83, h: 4.2, valign: 'top' }
-  );
-  s.addShape('roundRect', { x: 0.5, y: 6.0, w: 12.33, h: 0.75, fill: { color: LIGHT }, line: { color: 'C7D2FE', width: 0.75 }, rectRadius: 0.06 });
-  s.addText(`Prinsip kerja: Efektif–Efisien · Prioritas · Selesaikan masalah sampai ke akar · Kepuasan pelanggan · Menuju world-class company`,
-    { x: 0.7, y: 6.08, w: 12, h: 0.6, fontSize: 11, italic: true, color: '4338CA', valign: 'middle' });
-  footer(s, 6);
+  footer(s);
 
-  const fname = `Laporan-${periodLabel.replace(/\s/g, '-')}-${a.scope === 'all' ? 'Keseluruhan' : a.scopeLabel.replace(/\s/g, '-')}-${a.start}-sd-${a.end}.pptx`;
+  // ===== 3. PERBANDINGAN DENGAN PERIODE SEBELUMNYA =====
+  s = pptx.addSlide();
+  heading(s, '3', `Perbandingan dengan ${periodLabel === 'Pekanan' ? 'Minggu' : 'Bulan'} Sebelumnya`);
+  const cmpItems = a.scope === 'all' ? divAnalyses : [a];
+  s.addChart(pptx.ChartType.bar, [
+    { name: 'Periode lalu', labels: cmpItems.map(d => a.scope === 'all' ? GMV_DIVISIONS[d.scope].short : d.scopeLabel), values: cmpItems.map(d => d.prevTotal) },
+    { name: 'Periode ini', labels: cmpItems.map(d => a.scope === 'all' ? GMV_DIVISIONS[d.scope].short : d.scopeLabel), values: cmpItems.map(d => d.total) }
+  ], {
+    x: 0.5, y: 1.4, w: 6.4, h: 4.5, barDir: 'col', barGrouping: 'clustered',
+    chartColors: ['94A3B8', '10B981'], showLegend: true, legendPos: 'b', legendFontSize: 10,
+    catAxisLabelColor: SLATE, valAxisLabelColor: SLATE, catAxisLabelFontSize: 10, valAxisLabelFontSize: 9,
+    valGridLine: { color: 'E2E8F0', style: 'solid', size: 0.5 }, valAxisLabelFormatCode: '#,##0'
+  });
+  const cmpRows = [headRow(['Lini', 'Lalu', 'Sekarang', 'Δ'])];
+  cmpItems.forEach(d => {
+    const g = d.growthPct;
+    cmpRows.push([
+      { text: a.scope === 'all' ? GMV_DIVISIONS[d.scope].label : d.scopeLabel },
+      { text: rp(d.prevTotal), options: { align: 'right' } },
+      { text: rp(d.total), options: { align: 'right', bold: true } },
+      { text: g === null ? 'baru' : `${g > 0 ? '+' : ''}${g}%`, options: { align: 'right', bold: true, color: g === null ? '94A3B8' : g >= 0 ? '047857' : 'B91C1C' } }
+    ]);
+  });
+  s.addTable(cmpRows, { x: 7.2, y: 1.4, w: 5.6, fontSize: 11, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.45 });
+  // Penyebab & dampak singkat
+  const cause = [];
+  if (a.growthPct !== null && a.growthPct < 0) cause.push(`PENYEBAB potensial penurunan: ${a.zeroDays > 0 ? `${a.zeroDays} hari tanpa input/penjualan; ` : ''}cek aktivitas konten/live pada hari-hari kosong. DAMPAK: kehilangan momentum ±${rp(Math.abs(a.total - a.prevTotal))}.`);
+  else if (a.growthPct !== null && a.growthPct > 0) cause.push(`Pendorong kenaikan: ritme input lebih konsisten${a.best.value > 0 ? ` dan lonjakan ${fmtDate(a.best.date)} (${rp(a.best.value)})` : ''}. Pertahankan pola yang sama.`);
+  if (cause.length) s.addText(cause.map(t => ({ text: t, options: { bullet: { code: '2022', indent: 10 }, fontSize: 11.5, color: '334155', paraSpaceAfter: 6 } })), { x: 7.2, y: 3.6, w: 5.6, h: 2.4, valign: 'top' });
+  footer(s);
+
+  // ===== RINCIAN PER DIVISI (hanya scope keseluruhan) =====
+  divAnalyses.forEach((d) => {
+    s = pptx.addSlide();
+    heading(s, '•', `Rincian Divisi — ${GMV_DIVISIONS[d.scope].label}`);
+    const mini = [
+      ['GMV', rp(d.total)],
+      ['Pace', d.pacePct !== null ? `${d.pacePct}%` : '—'],
+      ['Growth', d.growthPct !== null ? `${d.growthPct > 0 ? '+' : ''}${d.growthPct}%` : '—'],
+      ['Proyeksi', rp(d.projection)]
+    ];
+    mini.forEach(([l, v], i) => {
+      const x = 0.5 + i * 3.16;
+      s.addShape('roundRect', { x, y: 1.3, w: 2.96, h: 1.15, fill: { color: 'FFFFFF' }, line: { color: 'E2E8F0', width: 1 }, rectRadius: 0.08 });
+      s.addText(l.toUpperCase(), { x: x + 0.18, y: 1.42, w: 2.6, h: 0.3, fontSize: 9.5, bold: true, color: SLATE });
+      s.addText(v, { x: x + 0.18, y: 1.72, w: 2.6, h: 0.55, fontSize: 18, bold: true, color: DARK });
+    });
+    s.addChart(pptx.ChartType.line, [{ name: 'GMV', labels: d.series.map(p => p.date.slice(8, 10)), values: d.series.map(p => p.value) }], {
+      x: 0.5, y: 2.7, w: 7.3, h: 3.6, lineSize: 2.5, chartColors: [GMV_DIVISIONS[d.scope].color.replace('#', '')], lineSmooth: true,
+      catAxisLabelColor: SLATE, valAxisLabelColor: SLATE, catAxisLabelFontSize: 9, valAxisLabelFontSize: 9,
+      valGridLine: { color: 'E2E8F0', style: 'solid', size: 0.5 }, catGridLine: { style: 'none' }, valAxisLabelFormatCode: '#,##0'
+    });
+    const sBox = (title, items, fill, accent, y) => {
+      s.addShape('roundRect', { x: 8.1, y, w: 4.7, h: 1.7, fill: { color: fill }, line: { color: accent, width: 0.75 }, rectRadius: 0.06 });
+      s.addText(title, { x: 8.25, y: y + 0.08, w: 4.4, h: 0.3, fontSize: 10.5, bold: true, color: accent });
+      s.addText(items.slice(0, 2).map(it => ({ text: it, options: { bullet: { code: '2022', indent: 8 }, fontSize: 9, color: '334155', paraSpaceAfter: 3 } })),
+        { x: 8.3, y: y + 0.4, w: 4.35, h: 1.25, valign: 'top' });
+    };
+    sBox('KEKUATAN', d.swot.strengths, 'ECFDF5', '047857', 2.7);
+    sBox('PERHATIAN', [...d.swot.weaknesses, ...d.swot.threats], 'FEF2F2', 'B91C1C', 4.6);
+    if (d.scope === 'internal' && d.accRows.length > 0) {
+      s.addText(`Top akun: ${d.accRows.slice(0, 4).map(r => `${r.name} (${rp(r.actual)})`).join(' · ')}`, { x: 0.5, y: 6.45, w: 12.3, h: 0.4, fontSize: 10.5, color: SLATE });
+    }
+    footer(s);
+  });
+
+  // ===== 4. PENCAPAIAN UTAMA =====
+  s = pptx.addSlide();
+  heading(s, '4', 'Pencapaian Utama');
+  const achievements = [];
+  if (a.best.value > 0) achievements.push(`Hari terbaik ${fmtDate(a.best.date)}: ${rp(a.best.value)} — bukti kapasitas tim.`);
+  a.swot.strengths.forEach(t => { if (!t.startsWith('Belum ada')) achievements.push(t); });
+  const accOn = a.accRows.filter(r => r.onTrack === true);
+  if (accOn.length > 0) achievements.push(`${accOn.length} akun affiliator on-track: ${accOn.slice(0, 4).map(r => r.name).join(', ')}.`);
+  if (a.resolvedInRange.length > 0) achievements.push(`${a.resolvedInRange.length} masalah diselesaikan sampai akar (5-Why) periode ini.`);
+  if (a.team.tasksDone > 0) achievements.push(`${a.team.tasksDone} tiket pekerjaan diselesaikan tim.`);
+  s.addText((achievements.length ? achievements : ['Belum ada pencapaian menonjol pada periode ini — fokuskan eksekusi periode berikutnya.']).slice(0, 7).map(t => ({
+    text: t, options: { bullet: { code: '2713', indent: 14 }, fontSize: 14, color: '334155', paraSpaceAfter: 12 }
+  })), { x: 0.7, y: 1.5, w: 12, h: 5.2, valign: 'top' });
+  footer(s);
+
+  // ===== 5. LAPORAN AKTIVITAS TIM =====
+  s = pptx.addSlide();
+  heading(s, '5', 'Laporan Aktivitas Tim');
+  const actRows = [headRow(['Indikator Aktivitas', 'Nilai', 'Catatan'])];
+  actRows.push([{ text: 'Absen masuk tercatat' }, { text: `${a.team.attCount}× oleh ${a.team.attPeople} orang`, options: { align: 'right' } }, { text: 'dengan selfie + GPS' }]);
+  actRows.push([{ text: 'Ketepatan waktu hadir' }, { text: a.team.onTimeRate !== null ? `${a.team.onTimeRate}%` : '—', options: { align: 'right', bold: true, color: a.team.onTimeRate >= 90 ? '047857' : a.team.onTimeRate >= 75 ? 'B45309' : 'B91C1C' } }, { text: a.team.onTimeRate !== null && a.team.onTimeRate < 75 ? 'perlu pembinaan disiplin' : 'baik' }]);
+  actRows.push([{ text: 'Laporan harian masuk' }, { text: `${a.team.reportCount} laporan`, options: { align: 'right' } }, { text: a.reportRate !== null ? `kepatuhan ±${a.reportRate}%` : '—' }]);
+  actRows.push([{ text: 'Tiket selesai' }, { text: `${a.team.tasksDone}`, options: { align: 'right', bold: true } }, { text: 'dalam periode ini' }]);
+  actRows.push([{ text: 'Tiket lewat deadline (saat ini)' }, { text: `${a.team.tasksOverdue}`, options: { align: 'right', bold: true, color: a.team.tasksOverdue > 0 ? 'B91C1C' : '047857' } }, { text: a.team.tasksOverdue > 0 ? 'perlu ditindak' : 'bersih ✓' }]);
+  s.addTable(actRows, { x: 0.5, y: 1.5, w: 12.3, fontSize: 12.5, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.62 });
+  s.addText('Data dari modul Absensi (selfie + GPS), Laporan Harian, dan Tiket — bisa diaudit langsung di aplikasi.',
+    { x: 0.5, y: 5.6, w: 12.3, h: 0.4, fontSize: 10.5, italic: true, color: '94A3B8' });
+  footer(s);
+
+  // ===== 6. MASALAH & SOLUSI (Fakta → Penyebab → Dampak → Solusi) =====
+  s = pptx.addSlide();
+  heading(s, '6', 'Masalah & Solusi');
+  if (a.openProblems.length === 0 && a.resolvedInRange.length === 0) {
+    s.addText('✓ Tidak ada masalah terbuka maupun yang diselesaikan pada periode ini.', { x: 0.7, y: 1.6, w: 12, h: 0.5, fontSize: 14, color: '047857' });
+  } else {
+    const pRows = [headRow(['Fakta (Masalah)', 'Penyebab', 'Dampak', 'Solusi / Status'])];
+    [...a.openProblems.slice(0, 4), ...a.resolvedInRange.slice(0, 2)].slice(0, 6).forEach(p => {
+      const rc = p.rootCause || {};
+      pRows.push([
+        { text: (p.title || '').slice(0, 55) },
+        { text: (rc.root || rc.why1 || p.description || 'belum dianalisis 5-Why').slice(0, 60) },
+        { text: `${URGENCY[p.urgency]?.label || p.urgency || '-'}`, options: { color: p.urgency === 'kritis' ? 'B91C1C' : p.urgency === 'tinggi' ? 'C2410C' : '64748B', bold: true } },
+        { text: p.status === 'resolved' ? `Selesai ✓ ${(rc.corrective || '').slice(0, 40)}` : `${PROBLEM_STATUS[p.status]?.label || p.status} — ${(rc.corrective || 'tindakan dalam proses').slice(0, 40)}`, options: { color: p.status === 'resolved' ? '047857' : '334155' } }
+      ]);
+    });
+    s.addTable(pRows, { x: 0.5, y: 1.4, w: 12.3, fontSize: 10.5, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.55, colW: [3.6, 3.6, 1.6, 3.5] });
+    s.addText('Format: Fakta → Penyebab (akar, 5-Why) → Dampak (urgensi) → Solusi. Detail lengkap di menu Masalah & Solusi.',
+      { x: 0.5, y: 6.35, w: 12.3, h: 0.35, fontSize: 10, italic: true, color: '94A3B8' });
+  }
+  footer(s);
+
+  // ===== 7 & 8. RENCANA BERIKUTNYA + KEPUTUSAN OWNER =====
+  s = pptx.addSlide();
+  heading(s, '7–8', `Rencana ${periodLabel === 'Pekanan' ? 'Minggu' : 'Bulan'} Berikutnya & Keputusan Owner`);
+  const plans = [];
+  if (a.needPerDay > 0 && a.remainingDays > 0) plans.push(`Kejar sisa target: minimal ${rp(a.needPerDay)}/hari selama ${a.remainingDays} hari ke depan.`);
+  a.swot.opportunities.forEach(t => { if (!t.startsWith('Lengkapi target')) plans.push(t); });
+  if (a.team.tasksOverdue > 0) plans.push(`Bersihkan ${a.team.tasksOverdue} tiket yang lewat deadline.`);
+  s.addText(`TARGET BERIKUTNYA & RENCANA`, { x: 0.5, y: 1.35, w: 6, h: 0.4, fontSize: 14, bold: true, color: DARK });
+  s.addText(plans.slice(0, 5).map(t => ({ text: t, options: { bullet: { code: '2192', indent: 12 }, fontSize: 12, color: '334155', paraSpaceAfter: 9 } })),
+    { x: 0.6, y: 1.85, w: 6.0, h: 4.4, valign: 'top' });
+  // Keputusan yang dibutuhkan dari owner (otomatis dari kondisi data)
+  const decisions = [];
+  if (a.target <= 0) decisions.push(`Tetapkan target ${a.scopeLabel.toLowerCase()} periode berikutnya (saat ini belum di-set).`);
+  if (a.pacePct !== null && a.pacePct < 70 && a.remainingDays > 0) decisions.push(`Target tertinggal jauh (pace ${a.pacePct}%) — putuskan: tambah resource/budget promosi, atau sesuaikan target.`);
+  const noTarget = a.accRows.filter(r => r.target <= 0);
+  if (noTarget.length > 0) decisions.push(`Setujui breakdown target untuk ${noTarget.length} akun yang belum punya target: ${noTarget.slice(0, 3).map(r => r.name).join(', ')}.`);
+  const urgent = a.openProblems.filter(p => p.urgency === 'kritis');
+  if (urgent.length > 0) decisions.push(`Eskalasi ${urgent.length} masalah kritis: "${urgent[0].title}" — butuh arahan langsung.`);
+  if (a.team.onTimeRate !== null && a.team.onTimeRate < 70) decisions.push(`Disiplin kehadiran ${a.team.onTimeRate}% — putuskan kebijakan (teguran/insentif).`);
+  s.addShape('roundRect', { x: 7.0, y: 1.35, w: 5.83, h: 5.0, fill: { color: 'FFF7ED' }, line: { color: 'F59E0B', width: 1 }, rectRadius: 0.08 });
+  s.addText('KEPUTUSAN YANG DIBUTUHKAN DARI OWNER', { x: 7.2, y: 1.5, w: 5.4, h: 0.4, fontSize: 13, bold: true, color: 'B45309' });
+  s.addText((decisions.length ? decisions : ['Tidak ada keputusan mendesak — tim lanjut eksekusi sesuai rencana.']).slice(0, 5).map(t => ({
+    text: t, options: { bullet: { code: '25CF', indent: 10 }, fontSize: 11.5, color: '7C2D12', paraSpaceAfter: 9 }
+  })), { x: 7.25, y: 2.0, w: 5.35, h: 4.2, valign: 'top' });
+  s.addText('Pola: Fakta → Penyebab → Dampak → Solusi → Target berikutnya', { x: 0.5, y: 6.6, w: 12.3, h: 0.35, fontSize: 10, italic: true, color: '94A3B8' });
+  footer(s);
+
+  const fname = `Laporan-${periodLabel}-${a.scope === 'all' ? 'Keseluruhan' : a.scopeLabel.replace(/\s/g, '-')}-${a.start}-sd-${a.end}.pptx`;
   await pptx.writeFile({ fileName: fname });
 }
 
@@ -3141,7 +3229,7 @@ function PptExportModal({ scope, scopeLabel, dataBundle, appName, authorName, on
     try {
       const r = ranges.find(x => x.id === picked);
       const analysis = analyzeBusiness({ scope, start: r.start, end: r.end, ...dataBundle });
-      await exportBusinessPpt({ analysis, periodLabel: r.periodLabel, appName, authorName });
+      await exportBusinessPpt({ analysis, dataBundle, periodLabel: r.periodLabel, appName, authorName });
       onClose();
     } catch (e) {
       setErr(e.message || 'Gagal membuat PPT.');
@@ -3152,8 +3240,9 @@ function PptExportModal({ scope, scopeLabel, dataBundle, appName, authorName, on
   return (
     <Modal title="Download Laporan PPT" onClose={onClose}>
       <div className="space-y-3">
-        <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-xs text-blue-800">
-          📊 Laporan presentasi profesional siap dipakai ke Owner: ringkasan eksekutif, grafik tren, perbandingan divisi/akun, analisis SWOT, masalah terbuka & rekomendasi. Fokus: <b>{scopeLabel}</b> (ikut tab yang sedang aktif).
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-xs text-blue-800 leading-relaxed">
+          📊 Format laporan owner: <b>1)</b> Ringkasan eksekutif · <b>2)</b> Target vs realisasi · <b>3)</b> Perbandingan periode sebelumnya · <b>4)</b> Pencapaian utama · <b>5)</b> Aktivitas tim · <b>6)</b> Masalah & solusi (Fakta→Penyebab→Dampak→Solusi) · <b>7)</b> Rencana berikutnya · <b>8)</b> Keputusan dari owner.
+          Fokus: <b>{scopeLabel}</b>{scopeLabel === 'Keseluruhan Bisnis' ? ' + slide rincian per divisi MCN/TAP/Affiliator' : ''}.
         </div>
         <Field label="Pilih Periode">
           <div className="grid grid-cols-2 gap-2">
@@ -5667,19 +5756,23 @@ async function syncInternalFromAccounts() {
   return changed;
 }
 
-// Kurva interaktif: arahkan kursor / sentuh untuk lihat nilai per tanggal
-function InteractiveLineChart({ series, color = '#2563EB', height = 150, targetDaily = 0 }) {
+// Kurva interaktif: arahkan kursor / sentuh untuk lihat nilai per tanggal.
+// Bisa 1 garis (props series+color) atau multi-garis (props lines=[{label,color,series}]).
+function InteractiveLineChart({ series, color = '#2563EB', lines, height = 150, targetDaily = 0 }) {
   const [hover, setHover] = useState(null);
   const wrapRef = useRef(null);
   const gradId = useMemo(() => 'ilc-' + Math.random().toString(36).slice(2, 8), []);
-  if (!series || series.length === 0) return null;
+  const data = (lines && lines.length > 0) ? lines : [{ label: '', color, series: series || [] }];
+  const n = Math.max(...data.map(l => l.series.length), 0);
+  if (n === 0) return null;
+  const single = data.length === 1;
   const CW = 600, CH = 160, PADL = 8, PADR = 8, PADT = 16, PADB = 20;
-  const n = series.length;
-  const max = Math.max(...series.map(s => s.value), targetDaily || 0, 1);
+  const max = Math.max(...data.flatMap(l => l.series.map(s => s.value)), targetDaily || 0, 1);
   const xAt = (i) => PADL + (n <= 1 ? 0 : (i / (n - 1)) * (CW - PADL - PADR));
   const yAt = (v) => CH - PADB - (v / max) * (CH - PADT - PADB);
-  const pts = series.map((s, i) => `${xAt(i).toFixed(1)},${yAt(s.value).toFixed(1)}`).join(' ');
-  const area = `${pts} ${xAt(n - 1).toFixed(1)},${CH - PADB} ${xAt(0).toFixed(1)},${CH - PADB}`;
+  const ptsOf = (ser) => ser.map((s, i) => `${xAt(i).toFixed(1)},${yAt(s.value).toFixed(1)}`).join(' ');
+  const baseSeries = data[0].series;
+  const area = single ? `${ptsOf(baseSeries)} ${xAt(n - 1).toFixed(1)},${CH - PADB} ${xAt(0).toFixed(1)},${CH - PADB}` : '';
   const labelEvery = Math.ceil(n / 10);
   const todayStr = dayKey();
 
@@ -5691,7 +5784,7 @@ function InteractiveLineChart({ series, color = '#2563EB', height = 150, targetD
     let idx = Math.round((fx - PADL) / ((CW - PADL - PADR) / Math.max(n - 1, 1)));
     setHover(Math.max(0, Math.min(n - 1, idx)));
   };
-  const h = hover != null ? series[hover] : null;
+  const hBase = hover != null ? baseSeries[Math.min(hover, baseSeries.length - 1)] : null;
 
   return (
     <div ref={wrapRef} className="relative select-none" style={{ touchAction: 'pan-y' }}
@@ -5700,8 +5793,8 @@ function InteractiveLineChart({ series, color = '#2563EB', height = 150, targetD
       <svg viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" className="w-full" style={{ height }}>
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor={color} stopOpacity="0.22" />
-            <stop offset="1" stopColor={color} stopOpacity="0" />
+            <stop offset="0" stopColor={data[0].color} stopOpacity="0.22" />
+            <stop offset="1" stopColor={data[0].color} stopOpacity="0" />
           </linearGradient>
         </defs>
         {[0, 0.5, 1].map((f, i) => {
@@ -5711,31 +5804,41 @@ function InteractiveLineChart({ series, color = '#2563EB', height = 150, targetD
         {targetDaily > 0 && (
           <line x1={PADL} y1={yAt(targetDaily)} x2={CW - PADR} y2={yAt(targetDaily)} stroke="#F59E0B" strokeWidth="1.4" strokeDasharray="5 4" />
         )}
-        <polygon points={area} fill={`url(#${gradId})`} />
-        <polyline points={pts} fill="none" stroke={color} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-        {h && (
+        {single && <polygon points={area} fill={`url(#${gradId})`} />}
+        {data.map((l, li) => (
+          <polyline key={li} points={ptsOf(l.series)} fill="none" stroke={l.color} strokeWidth={single ? 2.6 : 2.3} strokeLinecap="round" strokeLinejoin="round" />
+        ))}
+        {hover != null && (
           <>
-            <line x1={xAt(hover)} y1={PADT} x2={xAt(hover)} y2={CH - PADB} stroke={color} strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
-            <circle cx={xAt(hover)} cy={yAt(h.value)} r="4.5" fill={color} stroke="#fff" strokeWidth="2" />
+            <line x1={xAt(hover)} y1={PADT} x2={xAt(hover)} y2={CH - PADB} stroke="#64748B" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+            {data.map((l, li) => l.series[hover] ? (
+              <circle key={li} cx={xAt(hover)} cy={yAt(l.series[hover].value)} r="4.5" fill={l.color} stroke="#fff" strokeWidth="2" />
+            ) : null)}
           </>
         )}
-        {series.map((s, i) => (
+        {baseSeries.map((s, i) => (
           (i % labelEvery === 0) ? (
             <text key={i} x={xAt(i)} y={CH - 6} fontSize="9" textAnchor="middle"
-              fill={s.date === todayStr ? color : '#94A3B8'} fontWeight={s.date === todayStr ? '800' : '500'}>
+              fill={s.date === todayStr ? '#2563EB' : '#94A3B8'} fontWeight={s.date === todayStr ? '800' : '500'}>
               {s.day || Number((s.date || '').slice(8, 10)) || i + 1}
             </text>
           ) : null
         ))}
       </svg>
-      {h && (
-        <div className="absolute pointer-events-none px-2.5 py-1.5 rounded-lg text-white text-[11px] font-bold whitespace-nowrap shadow-lg"
+      {hover != null && hBase && (
+        <div className="absolute pointer-events-none px-2.5 py-1.5 rounded-lg text-white text-[11px] font-semibold whitespace-nowrap shadow-lg space-y-0.5"
           style={{
             left: `${(xAt(hover) / CW) * 100}%`, top: 0,
             transform: `translateX(${hover > n * 0.7 ? '-100%' : hover < n * 0.3 ? '0' : '-50%'})`,
             backgroundColor: '#0B1437'
           }}>
-          {h.date ? fmtDate(h.date) : `Hari ${h.day}`} · {fmtRupiah(h.value)}
+          <div className="font-bold">{hBase.date ? fmtDate(hBase.date) : `Hari ${hBase.day}`}</div>
+          {data.map((l, li) => l.series[hover] ? (
+            <div key={li} className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: l.color }}></span>
+              {l.label ? `${l.label}: ` : ''}{fmtRupiah(l.series[hover].value)}
+            </div>
+          ) : null)}
         </div>
       )}
     </div>
@@ -6125,18 +6228,8 @@ function AccountTrendChart({ entries, accountId, mKey, dailyTarget }) {
     date: dk,
     value: entries.filter(e => e.accountId === accountId && e.date === dk).reduce((s, e) => s + (Number(e.gmv) || 0), 0)
   }));
-
-  const CW = 720, CH = 190, PADL = 8, PADR = 8, PADT = 18, PADB = 22;
-  const n = series.length;
-  const max = Math.max(...series.map(s => s.value), dailyTarget || 0, 1);
-  const xAt = (i) => PADL + (n <= 1 ? 0 : (i / (n - 1)) * (CW - PADL - PADR));
-  const yAt = (v) => CH - PADB - (v / max) * (CH - PADT - PADB);
-  const pts = series.map((s, i) => `${xAt(i).toFixed(1)},${yAt(s.value).toFixed(1)}`).join(' ');
-  const area = `${pts} ${xAt(n - 1).toFixed(1)},${CH - PADB} ${xAt(0).toFixed(1)},${CH - PADB}`;
-  const labelEvery = mode === 'week' ? 1 : Math.ceil(n / 15);
   const total = series.reduce((s, x) => s + x.value, 0);
   const filled = series.filter(s => s.value > 0).length;
-  const lastIdx = (() => { let li = -1; series.forEach((s, i) => { if (s.value > 0) li = i; }); return li; })();
 
   return (
     <div className="border border-slate-200 rounded-xl p-3">
@@ -6155,47 +6248,8 @@ function AccountTrendChart({ entries, accountId, mKey, dailyTarget }) {
           ))}
         </div>
       </div>
-      <svg viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" className="w-full" style={{ height: 190 }}>
-        <defs>
-          <linearGradient id={`acctArea-${accountId}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#3B82F6" stopOpacity="0.18" />
-            <stop offset="1" stopColor="#3B82F6" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {[0, 0.25, 0.5, 0.75, 1].map((f, i) => {
-          const y = PADT + f * (CH - PADT - PADB);
-          return <line key={i} x1={PADL} y1={y} x2={CW - PADR} y2={y} stroke="#EEF0F4" strokeWidth="1" />;
-        })}
-        {dailyTarget > 0 && (
-          <>
-            <line x1={PADL} y1={yAt(dailyTarget)} x2={CW - PADR} y2={yAt(dailyTarget)} stroke="#F59E0B" strokeWidth="1.6" strokeDasharray="6 5" />
-            <text x={PADL + 4} y={yAt(dailyTarget) - 4} fontSize="10" fill="#B45309" fontWeight="700">Target harian {fmtRupiah(dailyTarget)}</text>
-          </>
-        )}
-        <polygon points={area} fill={`url(#acctArea-${accountId})`} />
-        <polyline points={pts} fill="none" stroke="#3B82F6" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-        {series.map((s, i) => (
-          s.value > 0 ? (
-            <circle key={s.date} cx={xAt(i)} cy={yAt(s.value)} r={i === lastIdx ? 4 : 2.5}
-              fill={dailyTarget > 0 ? (s.value >= dailyTarget ? '#10B981' : '#EF4444') : '#3B82F6'}>
-              <title>{`${fmtDate(s.date)}: ${fmtRupiah(s.value)}`}</title>
-            </circle>
-          ) : null
-        ))}
-        {lastIdx >= 0 && (
-          <text x={Math.min(xAt(lastIdx), CW - 90)} y={Math.max(yAt(series[lastIdx].value) - 8, 12)} fontSize="11" fontWeight="700" fill="#1E293B">
-            {fmtRupiah(series[lastIdx].value)}
-          </text>
-        )}
-        {series.map((s, i) => (
-          (i % labelEvery === 0) ? (
-            <text key={`lbl-${s.date}`} x={xAt(i)} y={CH - 6} fontSize="9" fill={s.date === todayStr ? '#2563EB' : '#94A3B8'} fontWeight={s.date === todayStr ? '800' : '500'} textAnchor="middle">
-              {mode === 'week' ? new Date(s.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short' }) : Number(s.date.slice(8, 10))}
-            </text>
-          ) : null
-        ))}
-      </svg>
-      <div className="text-[10px] text-slate-400 mt-1">🟢 capai target harian · 🔴 di bawah target · garis putus-putus = target harian. Arahkan kursor ke titik untuk lihat nominal.</div>
+      <InteractiveLineChart series={series} color="#3B82F6" height={180} targetDaily={dailyTarget || 0} />
+      <div className="text-[10px] text-slate-400 mt-1">Garis putus-putus = target harian. Arahkan kursor / sentuh grafik untuk lihat nominal per tanggal.</div>
     </div>
   );
 }
@@ -7449,223 +7503,6 @@ function SellersView({ user, allUsers }) {
 }
 
 // ============ ABSENSI (Attendance + Lokasi GPS) ============
-// ============ TUGAS HARIAN (checklist berulang — diatur Leader/Manajer) ============
-function DailyTasksView({ user, allUsers }) {
-  const [tasks, setTasks] = useState([]);
-  const [log, setLog] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
-
-  const canManage = user.role === 'owner' || user.role === 'manajer' || user.role === 'leader';
-  const today = dayKey();
-
-  const load = async () => {
-    setTasks(await storage.getList('daily-tasks:all'));
-    setLog(await storage.getList('daily-tasks:log'));
-    setLoading(false);
-  };
-  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
-
-  // Siapa saja yang kena tugas ini
-  const targetsOf = (t) => (!t.assigneeIds || t.assigneeIds.length === 0)
-    ? allUsers.filter(u => u.role !== 'owner')
-    : allUsers.filter(u => t.assigneeIds.includes(u.id));
-
-  // Tugas untuk SAYA hari ini
-  const myTasks = tasks.filter(t => t.active !== false && targetsOf(t).some(u => u.id === user.id));
-  const isDone = (taskId, userId, date = today) => log.some(l => l.taskId === taskId && l.userId === userId && l.date === date);
-  const myDoneCount = myTasks.filter(t => isDone(t.id, user.id)).length;
-
-  const toggleDone = async (t) => {
-    let list = await storage.getList('daily-tasks:log');
-    const existing = list.find(l => l.taskId === t.id && l.userId === user.id && l.date === today);
-    if (existing) {
-      list = list.filter(l => l.id !== existing.id);
-    } else {
-      list.unshift({ id: uid(), taskId: t.id, userId: user.id, userName: user.name, date: today, doneAt: new Date().toISOString() });
-      await logActivity(`menyelesaikan tugas harian "${t.title}"`, user.name);
-    }
-    // rapikan log lebih tua dari 90 hari
-    const cutoff = dayKey(new Date(Date.now() - 90 * 86400000));
-    await storage.set('daily-tasks:log', list.filter(l => l.date >= cutoff));
-    load();
-  };
-
-  const saveTask = async (data) => {
-    let list = await storage.getList('daily-tasks:all');
-    if (editing) {
-      list = list.map(t => t.id === editing.id ? { ...t, ...data, updatedAt: new Date().toISOString() } : t);
-    } else {
-      list.unshift({ id: uid(), ...data, createdById: user.id, createdByName: user.name, createdAt: new Date().toISOString() });
-      await logActivity(`membuat tugas harian "${data.title}"`, user.name);
-    }
-    await storage.set('daily-tasks:all', list);
-    setShowForm(false); setEditing(null); load();
-  };
-
-  const deleteTask = async (t) => {
-    if (!confirm(`Hapus tugas harian "${t.title}"? Riwayat ceklisnya juga dihapus.`)) return;
-    await storage.set('daily-tasks:all', (await storage.getList('daily-tasks:all')).filter(x => x.id !== t.id));
-    await storage.set('daily-tasks:log', (await storage.getList('daily-tasks:log')).filter(l => l.taskId !== t.id));
-    load();
-  };
-
-  // Monitoring (leader lihat timnya, manajer/owner semua)
-  const scopeUsers = user.role === 'leader' ? allUsers.filter(u => u.leaderId === user.id || u.id === user.id) : allUsers;
-  const monitorTasks = tasks.filter(t => t.active !== false && (canManage
-    ? targetsOf(t).some(u => scopeUsers.some(s => s.id === u.id))
-    : false));
-
-  // Strip 7 hari terakhir per tugas (untuk monitoring)
-  const last7 = Array.from({ length: 7 }, (_, i) => dayKey(new Date(Date.now() - (6 - i) * 86400000)));
-
-  if (loading) return <div className="text-slate-400 text-sm">Memuat tugas harian...</div>;
-
-  return (
-    <div className="max-w-5xl">
-      <PageHeader title="Tugas Harian"
-        subtitle="Checklist rutinitas berulang tiap hari — dibuat Leader/Manajer, diceklis anggota, otomatis reset besok."
-        action={canManage ? (
-          <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Tugas Harian Baru
-          </button>
-        ) : null} />
-
-      {/* Checklist saya hari ini */}
-      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5 mb-6">
-        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-          <h3 className="font-display font-bold text-slate-900">Checklist Saya · {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short' })}</h3>
-          {myTasks.length > 0 && (
-            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${myDoneCount === myTasks.length ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
-              {myDoneCount}/{myTasks.length} selesai{myDoneCount === myTasks.length && myTasks.length > 0 ? ' 🎉' : ''}
-            </span>
-          )}
-        </div>
-        {myTasks.length === 0 ? (
-          <div className="text-sm text-slate-400 text-center py-6">Tidak ada tugas harian untukmu. {canManage ? 'Buat lewat tombol di atas.' : 'Leader-mu belum menetapkan tugas rutin.'}</div>
-        ) : (
-          <div className="space-y-2">
-            {myTasks.map(t => {
-              const done = isDone(t.id, user.id);
-              return (
-                <button key={t.id} onClick={() => toggleDone(t)}
-                  className={`w-full flex items-start gap-3 p-3.5 rounded-xl border-2 text-left transition ${done ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50/40'}`}>
-                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 transition ${done ? 'bg-emerald-500 text-white' : 'border-2 border-slate-300 bg-white'}`}>
-                    {done && <Check className="w-4 h-4" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className={`text-sm font-semibold ${done ? 'text-emerald-800 line-through decoration-emerald-400' : 'text-slate-800'}`}>{t.title}</div>
-                    {t.description && <div className="text-xs text-slate-500 mt-0.5">{t.description}</div>}
-                  </div>
-                  {done && <span className="text-[10px] text-emerald-600 font-bold flex-shrink-0">✓ selesai</span>}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Monitoring untuk leader/manajer */}
-      {canManage && monitorTasks.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5">
-          <h3 className="font-display font-bold text-slate-900 mb-1">Monitoring Tim · Hari Ini</h3>
-          <p className="text-xs text-slate-500 mb-4">Siapa yang sudah/belum menjalankan rutinitas — plus jejak 7 hari terakhir.</p>
-          <div className="space-y-3">
-            {monitorTasks.map(t => {
-              const people = targetsOf(t).filter(u => scopeUsers.some(s => s.id === u.id));
-              const doneToday = people.filter(u => isDone(t.id, u.id));
-              const notDone = people.filter(u => !isDone(t.id, u.id));
-              return (
-                <div key={t.id} className="border border-slate-200 rounded-xl p-4">
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-slate-900 text-sm">{t.title}</span>
-                        {t.active === false && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-bold">Nonaktif</span>}
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${doneToday.length === people.length && people.length > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                          {doneToday.length}/{people.length} selesai hari ini
-                        </span>
-                      </div>
-                      {notDone.length > 0 && (
-                        <div className="text-[11px] text-slate-500 mt-1">
-                          Belum: {notDone.slice(0, 5).map(u => u.name.split(' ')[0]).join(', ')}{notDone.length > 5 ? `, +${notDone.length - 5} lagi` : ''}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {/* Jejak 7 hari */}
-                      <div className="flex items-end gap-0.5" title="7 hari terakhir (% anggota yang ceklis)">
-                        {last7.map(d => {
-                          const cnt = people.filter(u => isDone(t.id, u.id, d)).length;
-                          const pctH = people.length > 0 ? cnt / people.length : 0;
-                          return <div key={d} className="w-1.5 rounded-t" style={{ height: `${6 + pctH * 18}px`, backgroundColor: pctH >= 1 ? '#10B981' : pctH > 0 ? '#60A5FA' : '#E2E8F0' }} title={`${fmtDate(d)}: ${cnt}/${people.length}`}></div>;
-                        })}
-                      </div>
-                      <button onClick={() => { setEditing(t); setShowForm(true); }} className="text-slate-400 hover:text-blue-600 p-1"><Edit2 className="w-4 h-4" /></button>
-                      <button onClick={() => deleteTask(t)} className="text-slate-400 hover:text-red-600 p-1"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {showForm && <DailyTaskForm editing={editing} user={user} allUsers={allUsers}
-        onSave={saveTask} onClose={() => { setShowForm(false); setEditing(null); }} />}
-    </div>
-  );
-}
-
-function DailyTaskForm({ editing, user, allUsers, onSave, onClose }) {
-  const assignable = user.role === 'leader'
-    ? allUsers.filter(u => u.leaderId === user.id || u.id === user.id)
-    : allUsers.filter(u => u.role !== 'owner');
-  const [form, setForm] = useState({
-    title: editing?.title || '',
-    description: editing?.description || '',
-    assigneeIds: editing?.assigneeIds || [],
-    active: editing?.active !== false
-  });
-  const toggle = (id) => setForm(f => ({ ...f, assigneeIds: f.assigneeIds.includes(id) ? f.assigneeIds.filter(x => x !== id) : [...f.assigneeIds, id] }));
-  return (
-    <Modal title={editing ? 'Edit Tugas Harian' : 'Tugas Harian Baru'} onClose={onClose}>
-      <div className="space-y-3">
-        <Field label="Nama Tugas *">
-          <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
-            placeholder="mis. Posting 3 konten TikTok / Follow up creator / Cek pesanan masuk"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </Field>
-        <Field label="Keterangan (opsional)">
-          <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-            rows={2} placeholder="Detail singkat / standar hasil yang diharapkan"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </Field>
-        <Field label={`Berlaku untuk (${form.assigneeIds.length === 0 ? 'semua anggota' : form.assigneeIds.length + ' orang'})`}>
-          <div className="text-[11px] text-slate-500 mb-1.5">Kosongkan = berlaku untuk semua anggota{user.role === 'leader' ? ' (timmu)' : ''}.</div>
-          <div className="max-h-44 overflow-y-auto scroll-thin border border-slate-200 rounded-lg p-2 space-y-1">
-            {assignable.map(u => (
-              <label key={u.id} className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded cursor-pointer">
-                <input type="checkbox" checked={form.assigneeIds.includes(u.id)} onChange={() => toggle(u.id)} className="w-4 h-4 accent-blue-600 rounded" />
-                <span className="text-sm flex-1">{u.name}</span>
-                {displayJobTitle(u) && <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{displayJobTitle(u)}</span>}
-              </label>
-            ))}
-          </div>
-        </Field>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} className="w-4 h-4 accent-blue-600 rounded" />
-          <span className="text-sm text-slate-700">Aktif (muncul di checklist harian)</span>
-        </label>
-        <FormActions onCancel={onClose} onSave={() => onSave({ ...form, title: form.title.trim() })} disabled={!form.title.trim()} />
-      </div>
-    </Modal>
-  );
-}
-
 // ============ KALKULATOR PEMBAGIAN KOMISI TAP ============
 function TapCommissionView({ user }) {
   const [tab, setTab] = useState('calc'); // calc | history | tiers
