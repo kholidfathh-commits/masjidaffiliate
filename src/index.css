@@ -3,16 +3,21 @@
 @tailwind utilities;
 
 body {
-  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  /* Inter — font minimalis modern ala produk internasional (Linear/Stripe/Vercel) */
+  font-family: 'Inter', 'Plus Jakarta Sans', system-ui, sans-serif;
   margin: 0;
   background-color: #F6F5FE;
   color: #111827;
+  letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv11', 'ss01';
 }
 
+/* Judul/display: sans modern rapat — menggantikan serif Fraunces */
 .font-display {
-  font-family: 'Fraunces', serif;
+  font-family: 'Inter', system-ui, sans-serif;
+  letter-spacing: -0.025em;
 }
 
 /* Thin scrollbar utility */

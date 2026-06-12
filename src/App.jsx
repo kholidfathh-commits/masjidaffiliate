@@ -10,7 +10,8 @@ import {
   KanbanSquare, CalendarDays, ClipboardList, PanelLeftClose, PanelLeftOpen,
   GripVertical, MapPin, ArrowRight, ArrowLeft, BarChart3, Pin, MessageSquare,
   Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle,
-  Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2
+  Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2,
+  Database, Camera, Paperclip, Presentation
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -171,6 +172,62 @@ const getWeekRange = (offset = 0) => {
   return { start: monday.toISOString().split('T')[0], end: sunday.toISOString().split('T')[0] };
 };
 
+// Kompres file gambar → dataURL JPEG (dipakai: feedback, laporan, selfie absen)
+function compressImageFile(file, { maxDim = 900, quality = 0.72 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith('image/')) return reject(new Error('File harus berupa gambar (PNG/JPG/WEBP).'));
+    if (file.size > 10 * 1024 * 1024) return reject(new Error('Ukuran file maksimal 10MB.'));
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        const scale = Math.min(1, maxDim / Math.max(width, height));
+        width = Math.round(width * scale); height = Math.round(height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('Gagal membaca gambar.'));
+      img.src = ev.target.result;
+    };
+    reader.onerror = () => reject(new Error('Gagal membaca file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Avatar seragam: foto profil (sinkron antar tim) atau inisial
+function Avatar({ person, size = 'md', className = '' }) {
+  const sizes = { xs: 'w-6 h-6 text-[10px]', sm: 'w-7 h-7 text-xs', md: 'w-9 h-9 text-sm', lg: 'w-11 h-11 text-base', xl: 'w-14 h-14 text-lg' };
+  const name = person?.name || '?';
+  return (
+    <div className={`${sizes[size] || sizes.md} rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold flex-shrink-0 overflow-hidden ${className}`}>
+      {person?.avatarImage
+        ? <img src={person.avatarImage} alt={name} className="w-full h-full object-cover" />
+        : name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+// Lightbox sederhana untuk lihat foto besar (selfie absen, lampiran, dll)
+function ImageLightbox({ src, title, onClose }) {
+  return createPortal(
+    <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-sm z-[120] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="max-w-3xl w-full" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-white text-sm font-semibold truncate">{title || 'Foto'}</div>
+          <button onClick={onClose} className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg p-2"><X className="w-5 h-5" /></button>
+        </div>
+        <img src={src} alt={title || 'Foto'} className="w-full max-h-[80vh] object-contain rounded-2xl bg-black/30" />
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 const PRIORITIES = {
   low:    { label: 'Rendah', color: 'bg-slate-100 text-slate-700' },
   medium: { label: 'Sedang', color: 'bg-amber-100 text-amber-800' },
@@ -255,16 +312,34 @@ const DEFAULT_ATTENDANCE_CONFIG = {
   lokasiLabel: '',
   lokasiLat: null,
   lokasiLng: null,
-  radiusM: 200
+  radiusM: 200,
+  selfieWajib: true,   // wajib foto selfie saat absen (anti-kecurangan)
+  custom: {}           // jam kerja per karyawan: { [userId]: { jamMasuk, jamPulang, toleransiMenit, flexible } }
 };
+
+// Jam kerja efektif seorang user: override per-user (freelance/shift) > default tim
+function effectiveAttConfig(config, userId) {
+  const ov = (config.custom || {})[userId];
+  if (!ov) return { ...config, flexible: false };
+  return {
+    ...config,
+    jamMasuk: ov.jamMasuk || config.jamMasuk,
+    jamPulang: ov.jamPulang || config.jamPulang,
+    toleransiMenit: ov.toleransiMenit !== undefined && ov.toleransiMenit !== '' ? ov.toleransiMenit : config.toleransiMenit,
+    flexible: !!ov.flexible
+  };
+}
 
 // Semua key data tim (shared) yang ikut di-backup. ui:* & current-user TIDAK ikut (khusus per-perangkat).
 const BACKUP_KEYS = [
   'users:list', 'app:settings', 'tasks:all', 'todos:all', 'creators:all', 'creators:last-sync',
   'sellers:all', 'attendance:all', 'attendance:config', 'activities:all', 'announcements:all', 'schedule:all', 'calendar:all',
   'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all', 'content-ideas:all',
-  'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all'
+  'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all',
+  'attendance:selfie-index'
 ];
+// Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
+// dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
 
 // Divisi tim Masjid Affiliate (sesuai struktur Al-Kahfi Corp)
 const DIVISIONS = {
@@ -316,40 +391,113 @@ const dayKey = (d = new Date()) => {
 const daysInMonth = (mKey) => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m, 0).getDate(); };
 const DEFAULT_AFFILIATE_GOAL = 1000000000; // target Affiliator Internal default 1 Miliar/bulan
 
-// ====== KPI POIN ======
+// ====== KPI POIN (v2 — adil per peran & divisi) ======
+// 5 komponen: Kehadiran (hadir) · Disiplin (tepat waktu) · Tugas (kualitas+volume) · Laporan Harian · Capaian Target GMV.
+// Untuk anggota yang tidak pegang target GMV (Media, Event, dll), bobot Target otomatis dialihkan ke Tugas & Laporan — tetap fair.
 const DEFAULT_KPI_CONFIG = {
   targetScore: 85,      // target bulanan, >= ini = Mumtaz
   workdays: 26,         // target hari kerja per bulan
-  taskVolumeTarget: 20, // target jumlah tugas selesai (untuk poin bonus produktivitas)
-  weights: { attendance: 30, tasks: 30, reports: 25, bonus: 15 }
+  taskVolumeTarget: 20, // target jumlah tugas selesai per bulan
+  weights: { attendance: 25, punctuality: 10, tasks: 25, reports: 20, target: 20 }
 };
+// Migrasi config lama (attendance/tasks/reports/bonus) → skema v2
+function normalizeKpiConfig(cfg) {
+  const c = { ...DEFAULT_KPI_CONFIG, ...(cfg || {}) };
+  const w = c.weights || {};
+  if (w.target === undefined || w.punctuality === undefined) {
+    c.weights = { ...DEFAULT_KPI_CONFIG.weights };
+  } else {
+    c.weights = { ...DEFAULT_KPI_CONFIG.weights, ...w };
+  }
+  return c;
+}
 // Hitung KPI seorang user untuk bulan mKey
-function computeKpi(userId, { tasks, attendance, reports }, mKey, cfg) {
-  const c = cfg || DEFAULT_KPI_CONFIG;
-  const w = c.weights || DEFAULT_KPI_CONFIG.weights;
-  // Kehadiran: jumlah hari unik check-in 'in' bulan ini
-  const attDays = new Set(attendance.filter(a => a.userId === userId && a.type === 'in' && (a.timestamp || '').slice(0, 7) === mKey)
-    .map(a => (a.timestamp || '').slice(0, 10))).size;
-  const attScore = Math.min(attDays / (c.workdays || 26), 1) * w.attendance;
-  // Tugas: selesai vs miss (overdue belum selesai)
+function computeKpi(userId, data, mKey, cfg) {
+  const { tasks = [], attendance = [], reports = [], gmvEntries = [], gmvTargets = {}, affAccounts = [], affEntries = [], allUsers = [] } = data || {};
+  const c = normalizeKpiConfig(cfg);
+  const w = c.weights;
+  const workdays = c.workdays || 26;
+  const u = allUsers.find(x => x.id === userId);
+
+  // 1) Kehadiran: hari unik absen masuk bulan ini
+  const myIns = attendance.filter(a => a.userId === userId && a.type === 'in' && (a.timestamp || '').slice(0, 7) === mKey);
+  const attDays = new Set(myIns.map(a => (a.timestamp || '').slice(0, 10))).size;
+  const attScore = Math.min(attDays / workdays, 1) * w.attendance;
+
+  // 2) Disiplin: % absen masuk yang tepat waktu (tidak telat)
+  const lateCount = myIns.filter(a => a.late).length;
+  const punctRate = myIns.length > 0 ? (myIns.length - lateCount) / myIns.length : 1;
+  const punctScore = punctRate * w.punctuality;
+
+  // 3) Tugas: 70% kualitas (selesai vs lewat deadline) + 30% volume
   const now = new Date();
   const myTasks = tasks.filter(t => t.assigneeId === userId);
   const done = myTasks.filter(t => t.status === 'done' && (t.completedAt || '').slice(0, 7) === mKey).length;
   const missed = myTasks.filter(t => t.status !== 'done' && t.deadline && new Date(t.deadline) < now && (t.deadline || '').slice(0, 7) === mKey).length;
   const rate = (done + missed) > 0 ? done / (done + missed) : 1;
-  const taskScore = rate * w.tasks;
-  // Laporan harian: jumlah hari unik lapor bulan ini
+  const volume = Math.min(done / (c.taskVolumeTarget || 20), 1);
+  const taskUnit = rate * 0.7 + volume * 0.3;
+
+  // 4) Laporan harian: hari unik lapor bulan ini
   const repDays = new Set(reports.filter(r => r.authorId === userId && (r.date || '').slice(0, 7) === mKey).map(r => r.date)).size;
-  const repScore = Math.min(repDays / (c.workdays || 26), 1) * w.reports;
-  // Bonus produktivitas: volume tugas selesai
-  const bonusScore = Math.min(done / (c.taskVolumeTarget || 20), 1) * w.bonus;
-  const total = Math.round(attScore + taskScore + repScore + bonusScore);
+  const repUnit = Math.min(repDays / workdays, 1);
+
+  // 5) Capaian Target GMV — sesuai tanggung jawabnya:
+  //    a. PIC akun affiliator → rata-rata pencapaian akun vs jalur target (pace bulan berjalan)
+  //    b. Leader/Manajer divisi GMV (mcn/tap/internal) → pencapaian divisi vs jalur target
+  //    c. Selain itu → bobot target dialihkan ke Tugas & Laporan
+  let targetAttain = null, targetInfo = '';
+  const dim = daysInMonth(mKey);
+  const elapsed = mKey === monthKey() ? Math.max(new Date().getDate(), 1) : dim;
+  const myAccounts = affAccounts.filter(a => a.active !== false && a.picId === userId);
+  if (myAccounts.length > 0) {
+    const atts = myAccounts.map(a => {
+      const t = Number(a.targets?.[mKey]) || 0;
+      if (t <= 0) return null;
+      const actual = affEntries.filter(e => e.accountId === a.id && (e.date || '').startsWith(mKey)).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
+      const expected = t * (elapsed / dim);
+      return expected > 0 ? Math.min(actual / expected, 1) : null;
+    }).filter(x => x !== null);
+    if (atts.length > 0) {
+      targetAttain = atts.reduce((s, x) => s + x, 0) / atts.length;
+      targetInfo = `${atts.length} akun yang dipegang`;
+    }
+  }
+  if (targetAttain === null && u && (u.role === 'leader' || u.role === 'manajer')) {
+    const div = u.division || '';
+    if (['mcn', 'tap', 'internal'].includes(div)) {
+      const t = Number((gmvTargets[mKey] || {})[div]) || 0;
+      if (t > 0) {
+        const actual = gmvEntries.filter(e => e.division === div && (e.date || '').startsWith(mKey)).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
+        const expected = t * (elapsed / dim);
+        targetAttain = expected > 0 ? Math.min(actual / expected, 1) : null;
+        targetInfo = `divisi ${GMV_DIVISIONS[div].label}`;
+      }
+    }
+  }
+
+  let taskScore, repScore, targetScore;
+  const targetApplicable = targetAttain !== null;
+  if (targetApplicable) {
+    taskScore = taskUnit * w.tasks;
+    repScore = repUnit * w.reports;
+    targetScore = targetAttain * w.target;
+  } else {
+    // realokasi bobot target → tugas & laporan (proporsional) supaya tetap total 100
+    const taskShare = (w.tasks + w.reports) > 0 ? w.tasks / (w.tasks + w.reports) : 0.5;
+    taskScore = taskUnit * (w.tasks + w.target * taskShare);
+    repScore = repUnit * (w.reports + w.target * (1 - taskShare));
+    targetScore = 0;
+  }
+
+  const total = Math.round(attScore + punctScore + taskScore + repScore + targetScore);
   return {
     total,
-    attendance: { days: attDays, score: Math.round(attScore) },
-    tasks: { done, missed, rate: Math.round(rate * 100), score: Math.round(taskScore) },
-    reports: { days: repDays, score: Math.round(repScore) },
-    bonus: { done, score: Math.round(bonusScore) }
+    attendance: { days: attDays, score: Math.round(attScore), max: w.attendance },
+    punctuality: { rate: Math.round(punctRate * 100), late: lateCount, score: Math.round(punctScore), max: w.punctuality },
+    tasks: { done, missed, rate: Math.round(rate * 100), score: Math.round(taskScore), max: targetApplicable ? w.tasks : Math.round(w.tasks + w.target * (w.tasks / Math.max(w.tasks + w.reports, 1))) },
+    reports: { days: repDays, score: Math.round(repScore), max: targetApplicable ? w.reports : Math.round(w.reports + w.target * (w.reports / Math.max(w.tasks + w.reports, 1))) },
+    target: { applicable: targetApplicable, attain: targetApplicable ? Math.round(targetAttain * 100) : null, info: targetInfo, score: Math.round(targetScore), max: w.target }
   };
 }
 const DEFAULT_SETTINGS = {
@@ -461,7 +609,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F6F5FE]" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+    <div className="min-h-screen bg-[#F6F5FE]" style={{ fontFamily: "'Inter', 'Plus Jakarta Sans', system-ui, sans-serif" }}>
       <div className="flex">
         <Sidebar view={view} setView={setView} user={currentUser} settings={settings} onLogout={handleLogout}
           isOpen={sidebarOpen} onToggle={toggleSidebar}
@@ -477,7 +625,7 @@ export default function App() {
             onOpenProfile={() => setShowProfile(true)}
             setView={setView} allUsers={allUsers} />
           <div className="p-4 sm:p-6 lg:p-8 animate-fade-in" key={view}>
-            {view === 'dashboard' && <Dashboard user={currentUser} allUsers={allUsers} setView={setView} />}
+            {view === 'dashboard' && <Dashboard user={currentUser} allUsers={allUsers} setView={setView} settings={settings} />}
             {view === 'tasks' && <TasksView user={currentUser} allUsers={allUsers} />}
             {view === 'todos' && <TodosView user={currentUser} allUsers={allUsers} />}
             {view === 'creators' && <CreatorsView user={currentUser} allUsers={allUsers} />}
@@ -518,8 +666,8 @@ function LandingPage({ settings, onGetStarted }) {
   const navLinks = ['Beranda', 'Fitur', 'Tim', 'Laporan', 'Kontak', 'FAQ'];
   return (
     <div className="min-h-screen flex items-center justify-center p-4 sm:p-8"
-      style={{ backgroundColor: '#5B4FE5', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fraunces:wght@600;700&display=swap'); .font-display { font-family: 'Fraunces', serif; }`}</style>
+      style={{ backgroundColor: '#5B4FE5', fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'); .font-display { font-family: 'Inter', system-ui, sans-serif; letter-spacing: -0.025em; }`}</style>
 
       {/* White page card */}
       <div className="relative w-full max-w-6xl bg-white rounded-[28px] shadow-2xl overflow-hidden"
@@ -811,8 +959,8 @@ function LoginScreen({ allUsers, settings, onLogin }) {
 
 function AuthShell({ settings, children }) {
   return (
-    <div className="min-h-screen flex" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fraunces:wght@600;700&display=swap'); .font-display { font-family: 'Fraunces', serif; }`}</style>
+    <div className="min-h-screen flex" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'); .font-display { font-family: 'Inter', system-ui, sans-serif; letter-spacing: -0.025em; }`}</style>
 
       {/* LEFT: Landing-style Hero panel (hidden on mobile) */}
       <div style={{ background: 'linear-gradient(135deg, #3730A3 0%, #4F46E5 50%, #1E1B4B 100%)', color: '#FFFFFF' }}
@@ -1258,11 +1406,36 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
     const loadNotifs = async () => {
       const tasks = await storage.getList('tasks:all');
       const announcements = await storage.getList('announcements:all');
+      const calEvents = await storage.getList('calendar:all');
       const lastView = await storage.get('ui:last-notif-view', false);
       if (stopped) return;
       setLastNotifView(lastView?.value || new Date(Date.now() - 7 * 86400000).toISOString());
 
       const notifs = [];
+      // Agenda kalender: pengingat H-1 (sore) dan hari-H (pagi) untuk peserta / agenda umum
+      {
+        const todayK = dayKey();
+        const tomorrowK = dayKey(new Date(Date.now() + 86400000));
+        const relevant = (e) => !e.attendeeIds || e.attendeeIds.length === 0 || e.attendeeIds.includes(user.id) || e.createdById === user.id;
+        calEvents.filter(e => e.date === todayK && relevant(e)).forEach(e => {
+          notifs.push({
+            id: `cal-d0-${e.id}`, type: 'calendar',
+            title: `📅 Hari ini ${e.time || ''}: ${e.title}`,
+            subtitle: `${EVENT_TYPE[e.type]?.label || 'Agenda'}${e.location ? ` · ${e.location.slice(0, 40)}` : ''}`,
+            time: `${todayK}T06:30:00`,
+            action: () => setView('calendar')
+          });
+        });
+        calEvents.filter(e => e.date === tomorrowK && relevant(e)).forEach(e => {
+          notifs.push({
+            id: `cal-d1-${e.id}`, type: 'calendar',
+            title: `📅 Besok ${e.time || ''}: ${e.title}`,
+            subtitle: `Pengingat H-1 · ${EVENT_TYPE[e.type]?.label || 'Agenda'}${e.location ? ` · ${e.location.slice(0, 40)}` : ''}`,
+            time: `${todayK}T15:00:00`,
+            action: () => setView('calendar')
+          });
+        });
+      }
       // Tasks assigned to me
       tasks.filter(t => t.assigneeId === user.id && t.createdById !== user.id)
         .slice(0, 10).forEach(t => {
@@ -1393,9 +1566,9 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
     {toasts.length > 0 && (
       <div className="fixed top-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm pointer-events-none">
         {toasts.map(t => {
-          const Icon = t.type === 'task' ? CheckSquare : t.type === 'comment' ? MessageSquare : Megaphone;
-          const accent = t.type === 'task' ? '#4F46E5' : t.type === 'comment' ? '#9333EA' : '#D97706';
-          const bg = t.type === 'task' ? '#EEF2FF' : t.type === 'comment' ? '#FAF5FF' : '#FFFBEB';
+          const Icon = t.type === 'task' ? CheckSquare : t.type === 'comment' ? MessageSquare : t.type === 'calendar' ? CalendarDays : Megaphone;
+          const accent = t.type === 'task' ? '#4F46E5' : t.type === 'comment' ? '#9333EA' : t.type === 'calendar' ? '#0284C7' : '#D97706';
+          const bg = t.type === 'task' ? '#EEF2FF' : t.type === 'comment' ? '#FAF5FF' : t.type === 'calendar' ? '#E0F2FE' : '#FFFBEB';
           return (
             <button key={t.toastId}
               onClick={() => { t.action && t.action(); setToasts(prev => prev.filter(x => x.toastId !== t.toastId)); }}
@@ -1593,9 +1766,9 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                   <div>
                     {notifications.map(n => {
                       const isUnread = (n.time || '') > (lastNotifView || '');
-                      const icon = n.type === 'task' ? CheckSquare : n.type === 'comment' ? MessageSquare : Megaphone;
+                      const icon = n.type === 'task' ? CheckSquare : n.type === 'comment' ? MessageSquare : n.type === 'calendar' ? CalendarDays : Megaphone;
                       const Icon = icon;
-                      const color = n.type === 'task' ? 'text-blue-600 bg-blue-50' : n.type === 'comment' ? 'text-purple-600 bg-purple-50' : 'text-amber-600 bg-amber-50';
+                      const color = n.type === 'task' ? 'text-blue-600 bg-blue-50' : n.type === 'comment' ? 'text-purple-600 bg-purple-50' : n.type === 'calendar' ? 'text-sky-600 bg-sky-50' : 'text-amber-600 bg-amber-50';
                       return (
                         <button key={n.id} onClick={() => { n.action(); setShowNotifDropdown(false); }}
                           className={`w-full text-left px-4 py-2.5 hover:bg-slate-50 transition flex items-start gap-3 border-b border-slate-50 ${isUnread ? 'bg-indigo-50/30' : ''}`}>
@@ -1636,7 +1809,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
 }
 
 // ============ DASHBOARD ============
-function Dashboard({ user, allUsers, setView }) {
+function Dashboard({ user, allUsers, setView, settings }) {
   const [tasks, setTasks] = useState([]);
   const [creators, setCreators] = useState([]);
   const [activities, setActivities] = useState([]);
@@ -1878,12 +2051,13 @@ function Dashboard({ user, allUsers, setView }) {
       {/* Dashboard Bisnis: Keseluruhan + per-divisi MCN/TAP/Affiliator */}
       {canAccessFeature(user, 'gmv') && (
         <BusinessDashboard gmvEntries={gmvEntries} gmvTargets={gmvTargets}
-          affAccounts={affAccounts} affEntries={affEntries} allUsers={allUsers} onNavigate={setView} />
+          affAccounts={affAccounts} affEntries={affEntries} allUsers={allUsers} onNavigate={setView}
+          problems={problems} attendance={attendanceRecs} reports={dailyReports} settings={settings} user={user} />
       )}
 
       {/* KPI Saya + Masalah Aktif */}
       <DashboardKpiProblemRow
-        kpi={computeKpi(user.id, { tasks, attendance: attendanceRecs, reports: dailyReports }, monthKey(), kpiConfig)}
+        kpi={computeKpi(user.id, { tasks, attendance: attendanceRecs, reports: dailyReports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers }, monthKey(), kpiConfig)}
         target={kpiConfig.targetScore || 85}
         openProblems={problems.filter(p => p.status !== 'resolved')}
         canHandle={user.role === 'owner' || user.role === 'manajer' || user.role === 'leader'}
@@ -2078,9 +2252,7 @@ function Dashboard({ user, allUsers, setView }) {
           <div className="space-y-2 max-h-80 overflow-y-auto scroll-thin">
             {activities.slice(0, 15).map(a => (
               <div key={a.id} className="flex items-start gap-3 py-2 border-b border-slate-100 last:border-0">
-                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                  {a.userName.charAt(0).toUpperCase()}
-                </div>
+                <Avatar person={allUsers.find(u => u.name === a.userName) || { name: a.userName }} size="sm" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-slate-700"><b>{a.userName}</b> {a.text}</div>
                   <div className="text-[10px] text-slate-400">{fmtDateTime(a.createdAt)}</div>
@@ -2165,7 +2337,7 @@ function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTar
   }
 
   // 6) KPI pribadi
-  const myKpi = computeKpi(user.id, { tasks, attendance, reports }, mk, kpiConfig);
+  const myKpi = computeKpi(user.id, { tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers }, mk, kpiConfig);
   const target = kpiConfig.targetScore || 85;
   if (myKpi.total < target) {
     const weak = [];
@@ -2188,9 +2360,10 @@ function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTar
 }
 
 // ============ DASHBOARD BISNIS (Keseluruhan + per-divisi MCN/TAP/Affiliator) ============
-function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, onNavigate }) {
+function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, onNavigate, problems = [], attendance = [], reports = [], settings, user }) {
   const [scope, setScope] = useState('all'); // all | mcn | tap | internal
   const [affGoal, setAffGoal] = useState(DEFAULT_AFFILIATE_GOAL);
+  const [showPpt, setShowPpt] = useState(false);
   const mKey = monthKey();
   const dim = daysInMonth(mKey);
   const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
@@ -2285,6 +2458,15 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
 
   const TABS = [{ id: 'all', label: 'Keseluruhan' }, { id: 'mcn', label: 'MCN' }, { id: 'tap', label: 'TAP' }, { id: 'internal', label: 'Affiliator' }];
 
+  // Analisis SWOT bulan berjalan untuk tab/fokus yang aktif
+  const monthStart = `${mKey}-01`;
+  const monthEnd = `${mKey}-${String(dim).padStart(2, '0')}`;
+  const dataBundle = { gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers };
+  const analysis = useMemo(
+    () => analyzeBusiness({ scope, start: monthStart, end: monthEnd, ...dataBundle }),
+    [scope, gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, mKey]
+  );
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/40">
       {/* header */}
@@ -2295,7 +2477,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">GMV {isAll ? 'gabungan semua lini' : GMV_DIVISIONS[scope].label} · {monthLabel}</p>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {TABS.map(t => (
             <button key={t.id} onClick={() => setScope(t.id)}
               style={scope === t.id ? { backgroundColor: '#4F46E5', color: '#fff', borderColor: '#4F46E5' } : {}}
@@ -2303,6 +2485,11 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
               {t.label}
             </button>
           ))}
+          <button onClick={() => setShowPpt(true)}
+            title="Download laporan pekanan/bulanan sebagai PPT presentasi"
+            className="text-xs font-bold px-3.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition flex items-center gap-1.5">
+            <Presentation className="w-3.5 h-3.5" /> Laporan PPT
+          </button>
         </div>
       </div>
 
@@ -2443,9 +2630,437 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
               )}
             </div>
           )}
+
+          {/* Evaluasi otomatis format SWOT — per fokus tab */}
+          <SwotPanel analysis={analysis} />
         </div>
       )}
+
+      {showPpt && (
+        <PptExportModal scope={scope} scopeLabel={isAll ? 'Keseluruhan Bisnis' : GMV_DIVISIONS[scope].label}
+          dataBundle={dataBundle} appName={settings?.appName || 'Al-Kahfi Corp'} authorName={user?.name || ''}
+          onClose={() => setShowPpt(false)} />
+      )}
     </div>
+  );
+}
+
+// ====== ANALISIS BISNIS OTOMATIS — format SWOT (berbasis data nyata aplikasi) ======
+function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, affAccounts = [], affEntries = [], problems = [], attendance = [], reports = [], allUsers = [] }) {
+  const inRange = (d) => d && d >= start && d <= end;
+  const dayList = [];
+  {
+    const cur = new Date(start + 'T00:00:00');
+    while (dayKey(cur) <= end) { dayList.push(dayKey(cur)); cur.setDate(cur.getDate() + 1); }
+  }
+  const todayStr = dayKey();
+  const elapsedDays = dayList.filter(d => d <= todayStr);
+  const divs = scope === 'all' ? ['mcn', 'tap', 'internal'] : [scope];
+  const scopeLabel = scope === 'all' ? 'Keseluruhan Bisnis' : GMV_DIVISIONS[scope].label;
+
+  const sumDiv = (div, s = start, e = end) => gmvEntries.filter(x => x.division === div && x.date >= s && x.date <= e).reduce((a, x) => a + (Number(x.gmv) || 0), 0);
+  const byDiv = { mcn: sumDiv('mcn'), tap: sumDiv('tap'), internal: sumDiv('internal') };
+  const total = divs.reduce((s, d) => s + byDiv[d], 0);
+
+  // Target pro-rata periode (target bulanan × porsi hari periode di bulan tsb)
+  const targetOfDiv = (div) => {
+    let t = 0;
+    [...new Set(dayList.map(d => d.slice(0, 7)))].forEach(mk => {
+      const monthTarget = Number((gmvTargets[mk] || {})[div]) || 0;
+      if (monthTarget <= 0) return;
+      t += monthTarget * (dayList.filter(d => d.startsWith(mk)).length / daysInMonth(mk));
+    });
+    return Math.round(t);
+  };
+  const target = divs.reduce((s, d) => s + targetOfDiv(d), 0);
+  // Pace: dibanding jalur yang seharusnya sudah tercapai sampai hari ini
+  const expectedSoFar = target > 0 ? target * (Math.max(elapsedDays.length, 1) / dayList.length) : 0;
+  const pacePct = expectedSoFar > 0 ? Math.round((total / expectedSoFar) * 100) : null;
+
+  // Periode pembanding (sama panjang, tepat sebelum periode ini)
+  const lenMs = dayList.length * 86400000;
+  const prevEndD = new Date(new Date(start + 'T00:00:00').getTime() - 86400000);
+  const prevStartD = new Date(prevEndD.getTime() - lenMs + 86400000);
+  const prevStart = dayKey(prevStartD), prevEnd = dayKey(prevEndD);
+  const prevTotal = divs.reduce((s, d) => s + sumDiv(d, prevStart, prevEnd), 0);
+  const growthPct = prevTotal > 0 ? Math.round(((total - prevTotal) / prevTotal) * 100) : (total > 0 ? null : 0);
+
+  // Seri harian + statistik
+  const series = dayList.map(d => ({ date: d, value: gmvEntries.filter(e => divs.includes(e.division) && e.date === d).reduce((s, e) => s + (Number(e.gmv) || 0), 0) }));
+  const elapsedSeries = series.filter(s => s.date <= todayStr);
+  const avgPerDay = elapsedSeries.length > 0 ? total / elapsedSeries.length : 0;
+  const best = elapsedSeries.reduce((m, s) => s.value > m.value ? s : m, { date: null, value: 0 });
+  const zeroDays = elapsedSeries.filter(s => s.value === 0).length;
+  let zeroStreak = 0;
+  for (let i = elapsedSeries.length - 1; i >= 0; i--) { if (elapsedSeries[i].value === 0) zeroStreak++; else break; }
+  const remainingDays = dayList.length - elapsedDays.length;
+  const projection = Math.round(avgPerDay * dayList.length);
+  const gapToTarget = target - total;
+  const needPerDay = remainingDays > 0 && gapToTarget > 0 ? Math.round(gapToTarget / remainingDays) : 0;
+
+  // Akun affiliator (relevan untuk scope internal/all)
+  const accRows = affAccounts.filter(a => a.active !== false).map(a => {
+    const actual = affEntries.filter(e => e.accountId === a.id && inRange(e.date)).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
+    let tgt = 0;
+    [...new Set(dayList.map(d => d.slice(0, 7)))].forEach(mk => {
+      const mt = Number(a.targets?.[mk]) || 0;
+      if (mt > 0) tgt += mt * (dayList.filter(d => d.startsWith(mk)).length / daysInMonth(mk));
+    });
+    tgt = Math.round(tgt);
+    const expAcc = tgt > 0 ? tgt * (Math.max(elapsedDays.length, 1) / dayList.length) : 0;
+    return { name: a.name, actual, target: tgt, onTrack: expAcc > 0 ? actual >= expAcc * 0.95 : null };
+  }).sort((a, b) => b.actual - a.actual);
+  const accOn = accRows.filter(r => r.onTrack === true);
+  const accBehind = accRows.filter(r => r.onTrack === false);
+  const accNoTarget = accRows.filter(r => r.target <= 0);
+
+  // Disiplin & laporan dalam periode
+  const attIn = attendance.filter(r => r.type === 'in' && inRange((r.timestamp || '').slice(0, 10)));
+  const lateRate = attIn.length > 0 ? Math.round(attIn.filter(r => r.late).length / attIn.length * 100) : null;
+  const staff = allUsers.filter(u => u.role !== 'owner');
+  const repDays = new Set(reports.filter(r => inRange(r.date)).map(r => `${r.authorId}|${r.date}`)).size;
+  const repExpected = staff.length * Math.max(elapsedDays.length, 1);
+  const reportRate = repExpected > 0 ? Math.round(repDays / repExpected * 100) : null;
+  const openProblems = problems.filter(p => p.status !== 'resolved');
+  const urgentProblems = openProblems.filter(p => p.urgency === 'kritis' || p.urgency === 'tinggi');
+
+  // Kontribusi divisi (scope all)
+  const shares = divs.map(d => ({ div: d, label: GMV_DIVISIONS[d].label, value: byDiv[d], share: total > 0 ? Math.round(byDiv[d] / total * 100) : 0 })).sort((a, b) => b.value - a.value);
+  const topShare = shares[0];
+
+  // ===== Susun SWOT =====
+  const S = [], W = [], O = [], T = [];
+  if (target > 0 && pacePct !== null && pacePct >= 100) S.push(`GMV ${fmtRupiah(total)} — sudah ${Math.round(total / target * 100)}% dari target periode, di depan jalur (pace ${pacePct}%).`);
+  if (growthPct !== null && growthPct >= 10) S.push(`Tumbuh ${growthPct}% dibanding periode sebelumnya (${fmtRupiah(prevTotal)} → ${fmtRupiah(total)}).`);
+  if (best.value > 0 && avgPerDay > 0 && best.value >= avgPerDay * 1.8) S.push(`Hari terbaik ${fmtDate(best.date)}: ${fmtRupiah(best.value)} (${(best.value / avgPerDay).toFixed(1)}× rata-rata) — buktinya tim mampu di angka ini.`);
+  if (scope === 'all' && topShare && topShare.share >= 40 && topShare.share <= 85) S.push(`${topShare.label} jadi motor utama bisnis (${topShare.share}% kontribusi).`);
+  if (accOn.length > 0 && divs.includes('internal')) S.push(`${accOn.length} akun affiliator berjalan sesuai/di atas jalur target: ${accOn.slice(0, 3).map(r => r.name).join(', ')}${accOn.length > 3 ? ', dll' : ''}.`);
+  if (lateRate !== null && lateRate <= 10 && attIn.length >= 5) S.push(`Disiplin tim baik — hanya ${lateRate}% absen masuk yang terlambat.`);
+
+  if (target > 0 && pacePct !== null && pacePct < 85) W.push(`GMV tertinggal dari jalur target: baru ${fmtRupiah(total)} (pace ${pacePct}%), kurang ${fmtRupiah(Math.max(Math.round(expectedSoFar - total), 0))} dari yang seharusnya.`);
+  if (target <= 0) W.push(`Target periode belum di-set untuk ${scopeLabel.toLowerCase()} — tim jalan tanpa patokan angka.`);
+  if (zeroStreak >= 2) W.push(`${zeroStreak} hari terakhir tanpa input GMV — data bolong atau penjualan berhenti; pastikan input harian disiplin.`);
+  else if (zeroDays >= 3) W.push(`${zeroDays} hari dalam periode ini tanpa GMV sama sekali.`);
+  if (accBehind.length > 0 && divs.includes('internal')) W.push(`${accBehind.length} akun affiliator di bawah jalur target: ${accBehind.slice(0, 3).map(r => r.name).join(', ')}${accBehind.length > 3 ? ', dll' : ''}.`);
+  if (accNoTarget.length > 0 && divs.includes('internal')) W.push(`${accNoTarget.length} akun belum punya target — breakdown goal belum lengkap.`);
+  if (lateRate !== null && lateRate >= 25) W.push(`Disiplin perlu dibenahi: ${lateRate}% absen masuk terlambat.`);
+  if (reportRate !== null && reportRate < 60) W.push(`Kepatuhan laporan harian rendah (${reportRate}%) — evaluasi kinerja jadi sulit.`);
+
+  if (gapToTarget > 0 && remainingDays > 0 && needPerDay <= avgPerDay * 2.5) O.push(`Target masih terkejar: butuh rata-rata ${fmtRupiah(needPerDay)}/hari selama ${remainingDays} hari tersisa${avgPerDay > 0 ? ` (saat ini ${fmtRupiah(Math.round(avgPerDay))}/hari)` : ''}.`);
+  if (best.value > 0 && avgPerDay > 0 && best.value >= avgPerDay * 1.5) O.push(`Replikasi pola hari terbaik (${fmtDate(best.date)}) — cek produk, jam live, dan konten yang jalan hari itu, lalu ulangi.`);
+  if (scope === 'all') {
+    const weakest = shares[shares.length - 1];
+    if (weakest && weakest.share <= 15 && total > 0) O.push(`${weakest.label} baru ${weakest.share}% kontribusi — ruang tumbuh besar lewat penambahan ${weakest.div === 'tap' ? 'seller & campaign' : weakest.div === 'mcn' ? 'creator aktif' : 'akun & jam live'}.`);
+  }
+  if (growthPct !== null && growthPct > 0 && growthPct < 10) O.push(`Momentum positif (+${growthPct}%) — dorong sedikit lagi lewat konten/live tambahan untuk tembus 2 digit.`);
+  if (divs.includes('internal') && accRows.length > 0 && accRows.length < 5) O.push(`Baru ${accRows.length} akun affiliator aktif — menambah akun = menambah slot komisi & jangkauan.`);
+  if (O.length === 0 && total > 0) O.push(`Pertahankan ritme input & evaluasi harian; data periode ini jadi baseline untuk naikkan target periode depan.`);
+
+  if (urgentProblems.length > 0) T.push(`${urgentProblems.length} masalah prioritas (kritis/tinggi) masih terbuka: "${urgentProblems[0].title}"${urgentProblems.length > 1 ? ', dll' : ''} — selesaikan sampai akar (5 Why).`);
+  if (growthPct !== null && growthPct <= -15) T.push(`GMV turun ${Math.abs(growthPct)}% dibanding periode sebelumnya — cari akar penyebabnya sebelum jadi tren.`);
+  if (scope === 'all' && topShare && topShare.share > 85) T.push(`Ketergantungan tinggi pada ${topShare.label} (${topShare.share}%) — kalau channel ini terganggu, hampir seluruh omzet ikut jatuh.`);
+  if (target > 0 && projection < target && remainingDays > 0) T.push(`Dengan laju sekarang, proyeksi akhir periode ${fmtRupiah(projection)} — di bawah target ${fmtRupiah(target)}.`);
+  if (needPerDay > 0 && avgPerDay > 0 && needPerDay > avgPerDay * 2.5) T.push(`Kebutuhan ${fmtRupiah(needPerDay)}/hari untuk kejar target = ${(needPerDay / avgPerDay).toFixed(1)}× laju sekarang — target periode ini realistisnya perlu strategi luar biasa atau penyesuaian.`);
+
+  const fallback = (arr, text) => arr.length === 0 ? [text] : arr;
+  return {
+    scope, scopeLabel, start, end, total, target, pacePct, growthPct, prevTotal, prevStart, prevEnd,
+    series, byDiv, shares, accRows, best, avgPerDay, projection, remainingDays, needPerDay,
+    lateRate, reportRate, openProblems, zeroDays,
+    swot: {
+      strengths: fallback(S, 'Belum ada kekuatan menonjol terdeteksi dari data periode ini — perbanyak input data agar analisis tajam.').slice(0, 4),
+      weaknesses: fallback(W, 'Tidak ada kelemahan signifikan terdeteksi pada periode ini.').slice(0, 4),
+      opportunities: fallback(O, 'Lengkapi target & data harian untuk membuka analisis peluang.').slice(0, 4),
+      threats: fallback(T, 'Tidak ada ancaman mendesak terdeteksi. Tetap pantau tren harian.').slice(0, 4)
+    }
+  };
+}
+
+// Panel SWOT di Dashboard Bisnis
+function SwotPanel({ analysis }) {
+  const quad = [
+    { key: 'strengths', title: 'Strengths · Kekuatan', icon: '💪', bg: '#ECFDF5', border: '#A7F3D0', accent: '#047857' },
+    { key: 'weaknesses', title: 'Weaknesses · Kelemahan', icon: '⚠️', bg: '#FFFBEB', border: '#FDE68A', accent: '#B45309' },
+    { key: 'opportunities', title: 'Opportunities · Peluang', icon: '🚀', bg: '#EFF6FF', border: '#BFDBFE', accent: '#1D4ED8' },
+    { key: 'threats', title: 'Threats · Ancaman', icon: '🛑', bg: '#FEF2F2', border: '#FECACA', accent: '#B91C1C' }
+  ];
+  return (
+    <div className="rounded-2xl border border-slate-200 p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div>
+          <div className="text-sm font-bold text-slate-700 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-600" /> Evaluasi Otomatis — Format SWOT</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">{analysis.scopeLabel} · {fmtDate(analysis.start)} – {fmtDate(analysis.end)} · dihitung dari data nyata aplikasi</div>
+        </div>
+        <div className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-lg px-2.5 py-1">
+          Pace {analysis.pacePct !== null ? `${analysis.pacePct}%` : '—'} · Growth {analysis.growthPct !== null ? `${analysis.growthPct > 0 ? '+' : ''}${analysis.growthPct}%` : '—'}
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {quad.map(q => (
+          <div key={q.key} className="rounded-xl p-3.5" style={{ backgroundColor: q.bg, border: `1px solid ${q.border}` }}>
+            <div className="text-xs font-bold uppercase tracking-wide mb-2 flex items-center gap-1.5" style={{ color: q.accent }}>
+              <span>{q.icon}</span> {q.title}
+            </div>
+            <ul className="space-y-1.5">
+              {analysis.swot[q.key].map((item, i) => (
+                <li key={i} className="text-[12px] leading-relaxed text-slate-700 flex gap-1.5">
+                  <span className="flex-shrink-0 mt-1 w-1 h-1 rounded-full" style={{ backgroundColor: q.accent }}></span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ====== EXPORT LAPORAN PPT PROFESIONAL (pptxgenjs via CDN) ======
+let _pptxPromise = null;
+function loadPptxGen() {
+  if (window.PptxGenJS) return Promise.resolve(window.PptxGenJS);
+  if (_pptxPromise) return _pptxPromise;
+  _pptxPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/PptxGenJS/3.12.0/pptxgen.bundle.min.js';
+    s.onload = () => resolve(window.PptxGenJS);
+    s.onerror = () => { _pptxPromise = null; reject(new Error('Gagal memuat library PPT — cek koneksi internet, lalu coba lagi.')); };
+    document.head.appendChild(s);
+  });
+  return _pptxPromise;
+}
+
+async function exportBusinessPpt({ analysis, periodLabel, appName = 'Al-Kahfi Corp', authorName = '' }) {
+  const PptxGenJS = await loadPptxGen();
+  const pptx = new PptxGenJS();
+  pptx.defineLayout({ name: 'WIDE', width: 13.33, height: 7.5 });
+  pptx.layout = 'WIDE';
+  const INDIGO = '4F46E5', DARK = '1E1B4B', SLATE = '475569', LIGHT = 'F6F5FE', GOLD = 'F59E0B';
+  const a = analysis;
+  const rp = (n) => fmtRupiah(Math.round(n || 0)).replace('Rp ', 'Rp');
+  const footer = (slide, page) => {
+    slide.addText(`${appName} · Laporan ${periodLabel} · ${a.scopeLabel}`, { x: 0.5, y: 7.05, w: 8, h: 0.35, fontSize: 9, color: '94A3B8' });
+    slide.addText(`${page}`, { x: 12.3, y: 7.05, w: 0.6, h: 0.35, fontSize: 9, color: '94A3B8', align: 'right' });
+  };
+
+  // ---- 1. COVER ----
+  let s = pptx.addSlide();
+  s.background = { color: DARK };
+  s.addShape('rect', { x: 0, y: 0, w: 0.25, h: 7.5, fill: { color: GOLD } });
+  s.addText(appName.toUpperCase(), { x: 0.9, y: 1.5, w: 11.5, h: 0.5, fontSize: 16, color: GOLD, bold: true, charSpacing: 4 });
+  s.addText(`Laporan ${periodLabel}`, { x: 0.9, y: 2.1, w: 11.5, h: 1.1, fontSize: 44, color: 'FFFFFF', bold: true });
+  s.addText(a.scopeLabel, { x: 0.9, y: 3.2, w: 11.5, h: 0.7, fontSize: 26, color: 'C7D2FE' });
+  s.addText(`Periode: ${fmtDate(a.start)} – ${fmtDate(a.end)}`, { x: 0.9, y: 4.1, w: 11.5, h: 0.45, fontSize: 16, color: 'E2E8F0' });
+  s.addText([
+    { text: 'Disusun otomatis oleh sistem manajemen tim', options: { fontSize: 12, color: '94A3B8' } },
+    { text: authorName ? `\nDiunduh oleh: ${authorName} · ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}` : '', options: { fontSize: 12, color: '94A3B8' } }
+  ], { x: 0.9, y: 6.3, w: 11, h: 0.8 });
+
+  // ---- 2. RINGKASAN EKSEKUTIF ----
+  s = pptx.addSlide();
+  s.addText('Ringkasan Eksekutif', { x: 0.5, y: 0.4, w: 12, h: 0.6, fontSize: 28, bold: true, color: DARK });
+  s.addShape('rect', { x: 0.5, y: 1.05, w: 1.6, h: 0.06, fill: { color: INDIGO } });
+  const kpis = [
+    { label: 'TOTAL GMV', value: rp(a.total), sub: a.target > 0 ? `${Math.round(a.total / a.target * 100)}% dari target ${rp(a.target)}` : 'Target belum di-set' },
+    { label: 'VS PERIODE SEBELUMNYA', value: a.growthPct !== null ? `${a.growthPct > 0 ? '+' : ''}${a.growthPct}%` : '—', sub: `Sebelumnya ${rp(a.prevTotal)}` },
+    { label: 'RATA-RATA / HARI', value: rp(a.avgPerDay), sub: `Hari terbaik: ${a.best.date ? fmtDate(a.best.date) : '—'} (${rp(a.best.value)})` },
+    { label: 'PROYEKSI AKHIR PERIODE', value: rp(a.projection), sub: a.target > 0 ? (a.projection >= a.target ? 'On track mencapai target ✓' : `Selisih ${rp(a.target - a.projection)} dari target`) : '—' }
+  ];
+  kpis.forEach((k, i) => {
+    const x = 0.5 + i * 3.16;
+    s.addShape('roundRect', { x, y: 1.5, w: 2.96, h: 1.9, fill: { color: 'FFFFFF' }, line: { color: 'E2E8F0', width: 1 }, rectRadius: 0.08, shadow: { type: 'outer', blur: 6, offset: 2, angle: 90, color: 'CBD5E1', opacity: 0.4 } });
+    s.addText(k.label, { x: x + 0.2, y: 1.7, w: 2.6, h: 0.3, fontSize: 10, bold: true, color: SLATE, charSpacing: 1 });
+    s.addText(k.value, { x: x + 0.2, y: 2.05, w: 2.6, h: 0.6, fontSize: 21, bold: true, color: DARK });
+    s.addText(k.sub, { x: x + 0.2, y: 2.7, w: 2.6, h: 0.55, fontSize: 10, color: SLATE });
+  });
+  // Kontribusi divisi / akun
+  if (a.scope === 'all') {
+    s.addText('Kontribusi per Divisi', { x: 0.5, y: 3.8, w: 6, h: 0.4, fontSize: 16, bold: true, color: DARK });
+    const rows = [[
+      { text: 'Divisi', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } },
+      { text: 'GMV', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO }, align: 'right' } },
+      { text: 'Kontribusi', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO }, align: 'right' } }
+    ]];
+    a.shares.forEach(sh => rows.push([
+      { text: sh.label }, { text: rp(sh.value), options: { align: 'right' } }, { text: `${sh.share}%`, options: { align: 'right' } }
+    ]));
+    s.addTable(rows, { x: 0.5, y: 4.25, w: 6.1, fontSize: 12, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.42, fill: { color: 'FFFFFF' } });
+  }
+  if (a.accRows.length > 0 && (a.scope === 'internal' || a.scope === 'all')) {
+    const x0 = a.scope === 'all' ? 7.0 : 0.5;
+    s.addText('Akun Affiliator (Top 6)', { x: x0, y: 3.8, w: 6, h: 0.4, fontSize: 16, bold: true, color: DARK });
+    const rows2 = [[
+      { text: 'Akun', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } },
+      { text: 'Realisasi', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO }, align: 'right' } },
+      { text: 'Target Periode', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO }, align: 'right' } },
+      { text: 'Status', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } }
+    ]];
+    a.accRows.slice(0, 6).forEach(r => rows2.push([
+      { text: r.name },
+      { text: rp(r.actual), options: { align: 'right' } },
+      { text: r.target > 0 ? rp(r.target) : '—', options: { align: 'right' } },
+      { text: r.onTrack === null ? 'Tanpa target' : r.onTrack ? 'On track ✓' : 'Tertinggal', options: { color: r.onTrack === null ? '94A3B8' : r.onTrack ? '047857' : 'B91C1C', bold: r.onTrack !== null } }
+    ]));
+    s.addTable(rows2, { x: x0, y: 4.25, w: 5.83, fontSize: 11, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.38 });
+  }
+  footer(s, 2);
+
+  // ---- 3. TREN HARIAN (line chart) ----
+  s = pptx.addSlide();
+  s.addText('Tren GMV Harian', { x: 0.5, y: 0.4, w: 12, h: 0.6, fontSize: 28, bold: true, color: DARK });
+  s.addShape('rect', { x: 0.5, y: 1.05, w: 1.6, h: 0.06, fill: { color: INDIGO } });
+  s.addChart(pptx.ChartType.line, [{
+    name: 'GMV',
+    labels: a.series.map(p => p.date.slice(8, 10)),
+    values: a.series.map(p => p.value)
+  }], {
+    x: 0.5, y: 1.4, w: 12.3, h: 4.6,
+    lineSize: 3, chartColors: [INDIGO], lineSmooth: true,
+    catAxisLabelColor: SLATE, valAxisLabelColor: SLATE, catAxisLabelFontSize: 10, valAxisLabelFontSize: 10,
+    valGridLine: { color: 'E2E8F0', style: 'solid', size: 0.5 }, catGridLine: { style: 'none' },
+    showValAxisTitle: false, valAxisLabelFormatCode: '#,##0'
+  });
+  s.addText(`Rata-rata ${rp(a.avgPerDay)}/hari · Hari terbaik ${a.best.date ? fmtDate(a.best.date) : '—'} (${rp(a.best.value)})${a.zeroDays > 0 ? ` · ${a.zeroDays} hari tanpa input` : ''}`,
+    { x: 0.5, y: 6.15, w: 12.3, h: 0.4, fontSize: 12, color: SLATE, align: 'center' });
+  footer(s, 3);
+
+  // ---- 4. PERBANDINGAN DIVISI / AKUN (bar chart) ----
+  s = pptx.addSlide();
+  const barTitle = a.scope === 'all' ? 'GMV per Divisi' : 'GMV per Akun Affiliator';
+  s.addText(barTitle, { x: 0.5, y: 0.4, w: 12, h: 0.6, fontSize: 28, bold: true, color: DARK });
+  s.addShape('rect', { x: 0.5, y: 1.05, w: 1.6, h: 0.06, fill: { color: INDIGO } });
+  const barData = a.scope === 'all'
+    ? { labels: a.shares.map(x => x.label), values: a.shares.map(x => x.value) }
+    : a.accRows.length > 0
+      ? { labels: a.accRows.slice(0, 8).map(x => x.name), values: a.accRows.slice(0, 8).map(x => x.actual) }
+      : { labels: [a.scopeLabel], values: [a.total] };
+  s.addChart(pptx.ChartType.bar, [{ name: 'GMV', labels: barData.labels, values: barData.values }], {
+    x: 0.5, y: 1.4, w: 12.3, h: 4.8, barDir: 'col',
+    chartColors: ['4F46E5', '10B981', 'F97316', '3B82F6', '8B5CF6', 'F59E0B', 'EC4899', '14B8A6'],
+    chartColorsOpacity: 90, catAxisLabelColor: SLATE, valAxisLabelColor: SLATE,
+    catAxisLabelFontSize: 10, valAxisLabelFontSize: 10, valGridLine: { color: 'E2E8F0', style: 'solid', size: 0.5 },
+    showValue: true, dataLabelFormatCode: '#,##0', dataLabelFontSize: 9, dataLabelColor: SLATE, valAxisLabelFormatCode: '#,##0'
+  });
+  footer(s, 4);
+
+  // ---- 5. SWOT ----
+  s = pptx.addSlide();
+  s.addText('Analisis SWOT', { x: 0.5, y: 0.35, w: 12, h: 0.55, fontSize: 28, bold: true, color: DARK });
+  s.addShape('rect', { x: 0.5, y: 0.95, w: 1.6, h: 0.06, fill: { color: INDIGO } });
+  const quads = [
+    { title: 'STRENGTHS — Kekuatan', items: a.swot.strengths, fill: 'ECFDF5', accent: '047857', x: 0.5, y: 1.25 },
+    { title: 'WEAKNESSES — Kelemahan', items: a.swot.weaknesses, fill: 'FFFBEB', accent: 'B45309', x: 6.92, y: 1.25 },
+    { title: 'OPPORTUNITIES — Peluang', items: a.swot.opportunities, fill: 'EFF6FF', accent: '1D4ED8', x: 0.5, y: 4.15 },
+    { title: 'THREATS — Ancaman', items: a.swot.threats, fill: 'FEF2F2', accent: 'B91C1C', x: 6.92, y: 4.15 }
+  ];
+  quads.forEach(q => {
+    s.addShape('roundRect', { x: q.x, y: q.y, w: 5.91, h: 2.72, fill: { color: q.fill }, line: { color: q.accent, width: 0.75 }, rectRadius: 0.06 });
+    s.addText(q.title, { x: q.x + 0.18, y: q.y + 0.12, w: 5.5, h: 0.32, fontSize: 12.5, bold: true, color: q.accent });
+    s.addText(q.items.map(it => ({ text: it, options: { bullet: { code: '2022', indent: 10 }, fontSize: 10.5, color: '334155', paraSpaceAfter: 4 } })),
+      { x: q.x + 0.22, y: q.y + 0.5, w: 5.5, h: 2.1, valign: 'top' });
+  });
+  footer(s, 5);
+
+  // ---- 6. MASALAH & REKOMENDASI ----
+  s = pptx.addSlide();
+  s.addText('Masalah Terbuka & Rekomendasi', { x: 0.5, y: 0.4, w: 12, h: 0.6, fontSize: 28, bold: true, color: DARK });
+  s.addShape('rect', { x: 0.5, y: 1.05, w: 1.6, h: 0.06, fill: { color: INDIGO } });
+  s.addText('Masalah Terbuka', { x: 0.5, y: 1.35, w: 6, h: 0.4, fontSize: 15, bold: true, color: DARK });
+  if (a.openProblems.length === 0) {
+    s.addText('✓ Tidak ada masalah terbuka. Pertahankan.', { x: 0.5, y: 1.8, w: 5.9, h: 0.4, fontSize: 12, color: '047857' });
+  } else {
+    const pRows = [[
+      { text: 'Masalah', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } },
+      { text: 'Urgensi', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } },
+      { text: 'Status', options: { bold: true, color: 'FFFFFF', fill: { color: INDIGO } } }
+    ]];
+    a.openProblems.slice(0, 6).forEach(p => pRows.push([
+      { text: (p.title || '').slice(0, 60) },
+      { text: URGENCY[p.urgency]?.label || p.urgency, options: { color: p.urgency === 'kritis' ? 'B91C1C' : p.urgency === 'tinggi' ? 'C2410C' : '64748B', bold: true } },
+      { text: PROBLEM_STATUS[p.status]?.label || p.status }
+    ]));
+    s.addTable(pRows, { x: 0.5, y: 1.8, w: 6.1, fontSize: 10.5, color: '334155', border: { type: 'solid', color: 'E2E8F0', pt: 0.5 }, rowH: 0.38, autoPage: false });
+  }
+  s.addText('Rekomendasi Tindak Lanjut', { x: 7.0, y: 1.35, w: 5.8, h: 0.4, fontSize: 15, bold: true, color: DARK });
+  const recs = [...a.swot.weaknesses.slice(0, 2), ...a.swot.threats.slice(0, 2), ...a.swot.opportunities.slice(0, 2)]
+    .filter(t => !t.startsWith('Tidak ada') && !t.startsWith('Belum ada') && !t.startsWith('Lengkapi target'))
+    .slice(0, 5);
+  s.addText(
+    (recs.length ? recs : ['Pertahankan ritme kerja & disiplin input data.']).map((r, i) => ({
+      text: r, options: { bullet: { code: '2192' }, fontSize: 11.5, color: '334155', paraSpaceAfter: 8 }
+    })),
+    { x: 7.0, y: 1.8, w: 5.83, h: 4.2, valign: 'top' }
+  );
+  s.addShape('roundRect', { x: 0.5, y: 6.0, w: 12.33, h: 0.75, fill: { color: LIGHT }, line: { color: 'C7D2FE', width: 0.75 }, rectRadius: 0.06 });
+  s.addText(`Prinsip kerja: Efektif–Efisien · Prioritas · Selesaikan masalah sampai ke akar · Kepuasan pelanggan · Menuju world-class company`,
+    { x: 0.7, y: 6.08, w: 12, h: 0.6, fontSize: 11, italic: true, color: '4338CA', valign: 'middle' });
+  footer(s, 6);
+
+  const fname = `Laporan-${periodLabel.replace(/\s/g, '-')}-${a.scope === 'all' ? 'Keseluruhan' : a.scopeLabel.replace(/\s/g, '-')}-${a.start}-sd-${a.end}.pptx`;
+  await pptx.writeFile({ fileName: fname });
+}
+
+// Modal pilih periode laporan PPT
+function PptExportModal({ scope, scopeLabel, dataBundle, appName, authorName, onClose }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const today = new Date();
+  const todayStr = dayKey(today);
+
+  const ranges = (() => {
+    const d = today.getDay();
+    const mon = new Date(today); mon.setDate(today.getDate() - d + (d === 0 ? -6 : 1));
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    const lastMon = new Date(mon); lastMon.setDate(mon.getDate() - 7);
+    const lastSun = new Date(mon); lastSun.setDate(mon.getDate() - 1);
+    const mStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const mEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    const lmStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const lmEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+    return [
+      { id: 'this-week', label: 'Pekanan · Minggu Ini', periodLabel: 'Pekanan', start: dayKey(mon), end: dayKey(sun) },
+      { id: 'last-week', label: 'Pekanan · Minggu Lalu', periodLabel: 'Pekanan', start: dayKey(lastMon), end: dayKey(lastSun) },
+      { id: 'this-month', label: 'Bulanan · Bulan Ini', periodLabel: 'Bulanan', start: dayKey(mStart), end: dayKey(mEnd) },
+      { id: 'last-month', label: 'Bulanan · Bulan Lalu', periodLabel: 'Bulanan', start: dayKey(lmStart), end: dayKey(lmEnd) }
+    ];
+  })();
+  const [picked, setPicked] = useState('this-week');
+
+  const generate = async () => {
+    setErr(''); setBusy(true);
+    try {
+      const r = ranges.find(x => x.id === picked);
+      const analysis = analyzeBusiness({ scope, start: r.start, end: r.end, ...dataBundle });
+      await exportBusinessPpt({ analysis, periodLabel: r.periodLabel, appName, authorName });
+      onClose();
+    } catch (e) {
+      setErr(e.message || 'Gagal membuat PPT.');
+    }
+    setBusy(false);
+  };
+
+  return (
+    <Modal title="Download Laporan PPT" onClose={onClose}>
+      <div className="space-y-3">
+        <div className="bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 text-xs text-indigo-800">
+          📊 Laporan presentasi profesional siap dipakai ke Owner: ringkasan eksekutif, grafik tren, perbandingan divisi/akun, analisis SWOT, masalah terbuka & rekomendasi. Fokus: <b>{scopeLabel}</b> (ikut tab yang sedang aktif).
+        </div>
+        <Field label="Pilih Periode">
+          <div className="grid grid-cols-2 gap-2">
+            {ranges.map(r => (
+              <button key={r.id} onClick={() => setPicked(r.id)}
+                className={`text-left px-3 py-2.5 rounded-xl border-2 transition ${picked === r.id ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                <div className={`text-sm font-bold ${picked === r.id ? 'text-indigo-700' : 'text-slate-700'}`}>{r.label}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">{fmtDate(r.start)} – {fmtDate(r.end)}</div>
+              </button>
+            ))}
+          </div>
+        </Field>
+        {err && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{err}</div>}
+        <FormActions onCancel={onClose} onSave={generate} disabled={busy} saveLabel={busy ? 'Membuat PPT…' : 'Buat & Download PPT'} />
+      </div>
+    </Modal>
   );
 }
 
@@ -3097,13 +3712,12 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
                 return (
                   <div key={m.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition">
                     <div className="flex items-start gap-3">
-                      <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold flex-shrink-0">
-                        {m.name.charAt(0).toUpperCase()}
-                      </div>
+                      <Avatar person={m} size="lg" />
                       <div className="flex-1 min-w-0">
                         <div className="font-semibold text-slate-900 truncate">{m.name}</div>
                         <div className="text-xs text-slate-500">@{m.username}</div>
-                        {m.jobTitle && <div className="text-[10px] mt-1 inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{m.jobTitle}</div>}
+                        {m.jobTitle ? <div className="text-[10px] mt-1 inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{m.jobTitle}</div>
+                          : <div className="text-[10px] mt-1 inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-400">Jabatan belum diisi</div>}
                         {leader && <div className="text-[10px] text-slate-500 mt-1">Leader: {leader.name}</div>}
                         {operasionalCount !== null && <div className="text-[10px] text-blue-600 mt-1">Memimpin {operasionalCount} operasional</div>}
                         {m.phone && <div className="text-[10px] text-slate-500 mt-0.5">📱 {m.phone}</div>}
@@ -3854,9 +4468,12 @@ function CreatorsView({ user, allUsers }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [filter, setFilter] = useState({ status: 'all', manager: 'all', search: '' });
+  const [selectedIds, setSelectedIds] = useState([]);
 
-  const load = async () => setCreators(await storage.getList('creators:all'));
+  const load = async () => { setCreators(await storage.getList('creators:all')); setSelectedIds([]); };
   useEffect(() => { load(); }, []);
+
+  const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
 
   const handleSave = async (data) => {
     let list = await storage.getList('creators:all');
@@ -3880,6 +4497,28 @@ function CreatorsView({ user, allUsers }) {
     await storage.set('creators:all', list);
     load();
   };
+
+  // Hapus beberapa creator sekaligus (yang diceklis)
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0) return;
+    if (!confirm(`Hapus ${selectedIds.length} creator yang diceklis? Tindakan ini tidak bisa dibatalkan.`)) return;
+    const idSet = new Set(selectedIds);
+    const list = (await storage.getList('creators:all')).filter(x => !idSet.has(x.id));
+    await storage.set('creators:all', list);
+    await logActivity(`menghapus ${selectedIds.length} creator sekaligus`, user.name);
+    load();
+  };
+
+  // Hapus SEMUA creator (owner/manajer, konfirmasi ganda)
+  const handleDeleteAll = async () => {
+    if (!confirm(`Hapus SEMUA creator (${creators.length} data)? Tindakan ini tidak bisa dibatalkan.`)) return;
+    if (!confirm('Yakin 100%? Seluruh database creator akan hilang permanen. Disarankan Export Data dulu sebagai cadangan.')) return;
+    await storage.set('creators:all', []);
+    await logActivity(`menghapus SEMUA creator (${creators.length} data)`, user.name);
+    load();
+  };
+
+  const toggleSelect = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   const visibleCreators = creators.filter(c => can.canSeeCreator(user, c, allUsers));
   const managers = useMemo(() => {
@@ -3940,6 +4579,31 @@ function CreatorsView({ user, allUsers }) {
         </select>
       </div>
 
+      {/* Bulk action bar: hapus terpilih / hapus semua */}
+      {(selectedIds.length > 0 || (isOwnerMgr && creators.length > 0)) && (
+        <div className="mb-4 flex items-center gap-2 flex-wrap bg-white rounded-xl border border-slate-200 p-3">
+          {selectedIds.length > 0 ? (
+            <>
+              <span className="text-sm text-slate-600"><b className="text-indigo-700">{selectedIds.length}</b> creator diceklis</span>
+              <button onClick={handleDeleteSelected}
+                className="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5">
+                <Trash2 className="w-4 h-4" /> Hapus Terpilih ({selectedIds.length})
+              </button>
+              <button onClick={() => setSelectedIds([])}
+                className="text-sm text-slate-500 hover:text-slate-700 font-semibold px-2 py-1.5">Batal pilih</button>
+            </>
+          ) : (
+            <span className="text-xs text-slate-400">Ceklis baris untuk hapus beberapa sekaligus</span>
+          )}
+          {isOwnerMgr && (
+            <button onClick={handleDeleteAll} disabled={creators.length === 0}
+              className="ml-auto bg-white border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 text-sm font-semibold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5">
+              <Trash2 className="w-4 h-4" /> Hapus Semua Creator
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {filtered.length === 0 ? (
           <EmptyState icon={Users} text="Belum ada creator. Klik 'Creator Baru' atau import CSV." />
@@ -3948,6 +4612,12 @@ function CreatorsView({ user, allUsers }) {
             <table className="w-full">
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
                 <tr>
+                  <th className="p-3 w-10">
+                    <input type="checkbox" title="Ceklis semua (hasil filter)"
+                      checked={filtered.length > 0 && filtered.every(c => selectedIds.includes(c.id))}
+                      onChange={e => setSelectedIds(e.target.checked ? filtered.map(c => c.id) : [])}
+                      className="w-4 h-4 accent-indigo-600 rounded cursor-pointer" />
+                  </th>
                   <th className="text-left p-3 font-semibold">Creator</th>
                   <th className="text-left p-3 font-semibold">Kategori</th>
                   <th className="text-left p-3 font-semibold">Status</th>
@@ -3959,7 +4629,11 @@ function CreatorsView({ user, allUsers }) {
               </thead>
               <tbody>
                 {filtered.map(c => (
-                  <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <tr key={c.id} className={`border-t border-slate-100 hover:bg-slate-50 ${selectedIds.includes(c.id) ? 'bg-indigo-50/50' : ''}`}>
+                    <td className="p-3">
+                      <input type="checkbox" checked={selectedIds.includes(c.id)} onChange={() => toggleSelect(c.id)}
+                        className="w-4 h-4 accent-indigo-600 rounded cursor-pointer" />
+                    </td>
                     <td className="p-3">
                       <div className="font-medium text-slate-800">{c.name}</div>
                       <div className="text-xs text-slate-500">
@@ -4403,6 +5077,7 @@ function ReportsView({ user, allUsers }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [filterWeek, setFilterWeek] = useState('all');
+  const [lightbox, setLightbox] = useState(null);
 
   const load = async () => setReports(await storage.getList('reports:all'));
   useEffect(() => { load(); }, []);
@@ -4502,10 +5177,23 @@ function ReportsView({ user, allUsers }) {
                   {r.gmv > 0 && <div>GMV: <b className="text-slate-900">{fmtRupiah(r.gmv)}</b></div>}
                 </div>
               )}
+              {(r.attachments || []).length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Paperclip className="w-3 h-3" /> Bukti ({r.attachments.length})</div>
+                  <div className="flex gap-2 flex-wrap">
+                    {r.attachments.map((img, i) => (
+                      <img key={i} src={img} alt={`Bukti ${i + 1}`}
+                        onClick={() => setLightbox({ src: img, title: `Bukti laporan ${r.authorName}` })}
+                        className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition" />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
+      {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.title} onClose={() => setLightbox(null)} />}
 
       {showForm && <ReportForm report={editing} onSave={handleSave} onClose={() => { setShowForm(false); setEditing(null); }} />}
     </div>
@@ -4525,6 +5213,19 @@ function ReportForm({ report, onSave, onClose }) {
     gmv: report?.gmv || 0,
     contentCount: report?.contentCount || 0
   });
+  const [attachments, setAttachments] = useState(report?.attachments || []);
+  const [attBusy, setAttBusy] = useState(false);
+  const attRef = useRef();
+  const addAttachments = async (files) => {
+    setAttBusy(true);
+    try {
+      const picked = Array.from(files).slice(0, 3 - attachments.length);
+      const next = [];
+      for (const f of picked) next.push(await compressImageFile(f, { maxDim: 1100, quality: 0.7 }));
+      setAttachments(prev => [...prev, ...next].slice(0, 3));
+    } catch (e) { alert(e.message || 'Gagal memproses gambar.'); }
+    setAttBusy(false);
+  };
   return (
     <Modal title={report ? 'Edit Laporan' : 'Laporan Mingguan'} onClose={onClose} wide>
       <div className="space-y-3">
@@ -4561,7 +5262,30 @@ function ReportForm({ report, onSave, onClose }) {
               className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" />
           </Field>
         </div>
-        <FormActions onCancel={onClose} onSave={() => onSave(form)} disabled={!form.achievements.trim()} />
+        <Field label="Bukti Foto / Screenshot (opsional, maks. 3)">
+          <div className="flex items-center gap-2 flex-wrap">
+            {attachments.map((img, i) => (
+              <div key={i} className="relative">
+                <img src={img} alt={`Bukti ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                <button onClick={() => setAttachments(attachments.filter((_, x) => x !== i))}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+            {attachments.length < 3 && (
+              <button type="button" onClick={() => attRef.current?.click()} disabled={attBusy}
+                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 transition disabled:opacity-50">
+                <Paperclip className="w-4 h-4" />
+                <span className="text-[9px] font-semibold mt-0.5">{attBusy ? '...' : 'Upload'}</span>
+              </button>
+            )}
+            <input ref={attRef} type="file" accept="image/*" multiple className="hidden"
+              onChange={e => { addAttachments(e.target.files); e.target.value = ''; }} />
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">💡 Mis. screenshot GMV mingguan supaya laporan tervalidasi.</div>
+        </Field>
+        <FormActions onCancel={onClose} onSave={() => onSave({ ...form, attachments })} disabled={!form.achievements.trim()} />
       </div>
     </Modal>
   );
@@ -5180,8 +5904,10 @@ function AffiliateAccountsView({ user, allUsers }) {
   const [showAcct, setShowAcct] = useState(false);
   const [editingAcct, setEditingAcct] = useState(null);
   const [inputAcct, setInputAcct] = useState(null);
+  const [editEntry, setEditEntry] = useState(null);   // entry harian yang diedit
   const [targetAcct, setTargetAcct] = useState(null);
   const [showGoal, setShowGoal] = useState(false);
+  const [detailAcct, setDetailAcct] = useState(null); // akun yang rincian hariannya dibuka
 
   const load = async () => {
     setAccounts(await storage.getList('affiliate-accounts:all'));
@@ -5234,6 +5960,21 @@ function AffiliateAccountsView({ user, allUsers }) {
     await logActivity(`set target akun ${monthLabel}`, user.name);
     setTargetAcct(null); load();
   };
+  // Sinkron otomatis: total semua akun per tanggal → GMV divisi "internal" (gmv:daily),
+  // jadi Dashboard Bisnis & goal bulanan ikut ter-update tanpa input dobel.
+  const syncInternalDivision = async (date, byName) => {
+    const accEntries = await storage.getList('affiliate-gmv:daily');
+    const totalThatDate = accEntries.filter(e => e.date === date).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
+    let divList = await storage.getList('gmv:daily');
+    const existing = divList.find(e => e.division === 'internal' && e.date === date);
+    if (existing) {
+      divList = divList.map(e => e.id === existing.id ? { ...e, gmv: totalThatDate, autoSynced: true, inputByName: `${byName} (auto)`, updatedAt: new Date().toISOString() } : e);
+    } else {
+      divList.unshift({ id: uid(), division: 'internal', date, gmv: totalThatDate, autoSynced: true, inputById: user.id, inputByName: `${byName} (auto)`, createdAt: new Date().toISOString() });
+    }
+    await storage.set('gmv:daily', divList);
+  };
+
   const saveEntry = async (data) => {
     let list = await storage.getList('affiliate-gmv:daily');
     const existing = list.find(e => e.accountId === data.accountId && e.date === data.date);
@@ -5243,8 +5984,16 @@ function AffiliateAccountsView({ user, allUsers }) {
       list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
     }
     await storage.set('affiliate-gmv:daily', list);
-    await logActivity(`update GMV akun ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
+    await syncInternalDivision(data.date, user.name);
+    await logActivity(`update GMV akun ${data.accountName} ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
     setInputAcct(null); load();
+  };
+
+  const deleteEntry = async (e) => {
+    if (!confirm(`Hapus GMV ${e.accountName || ''} tanggal ${fmtDate(e.date)} (${fmtRupiah(e.gmv)})?`)) return;
+    await storage.set('affiliate-gmv:daily', (await storage.getList('affiliate-gmv:daily')).filter(x => x.id !== e.id));
+    await syncInternalDivision(e.date, user.name);
+    load();
   };
   const saveGoal = async (value) => {
     const g = (await storage.get('affiliate:goal')) || {};
@@ -5319,7 +6068,7 @@ function AffiliateAccountsView({ user, allUsers }) {
                     <div className="text-xs text-slate-500 mt-0.5">PIC: {pic?.name || '—'}</div>
                   </div>
                   <div className="flex gap-1">
-                    {canInput(a) && <button onClick={() => setInputAcct(a)} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Update Hari Ini</button>}
+                    {canInput(a) && <button onClick={() => { setEditEntry(null); setInputAcct(a); }} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Input GMV</button>}
                     {canManage && <button onClick={() => setTargetAcct(a)} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200">Set Target</button>}
                     {canManage && <button onClick={() => { setEditingAcct(a); setShowAcct(true); }} className="text-slate-400 hover:text-blue-600 p-1.5"><Edit2 className="w-4 h-4" /></button>}
                     {isOwnerMgr && <button onClick={() => deleteAcct(a)} className="text-slate-400 hover:text-red-600 p-1.5"><Trash2 className="w-4 h-4" /></button>}
@@ -5357,9 +6106,75 @@ function AffiliateAccountsView({ user, allUsers }) {
 
                 {/* Traffic harian */}
                 <div className="mt-3">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Traffic Harian</div>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase">Traffic Harian</div>
+                    <button onClick={() => setDetailAcct(detailAcct === a.id ? null : a.id)}
+                      className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1">
+                      {detailAcct === a.id ? 'Tutup rincian' : 'Lihat rincian angka'} <ChevronDown className={`w-3.5 h-3.5 transition-transform ${detailAcct === a.id ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
                   <MiniBarChart series={series} color="#3B82F6" />
                 </div>
+
+                {/* Rincian angka per tanggal — biar nominal kelihatan jelas, bukan cuma diagram */}
+                {detailAcct === a.id && (() => {
+                  const acctEntries = entries
+                    .filter(e => e.accountId === a.id && (e.date || '').startsWith(mKey))
+                    .sort((x, y) => y.date.localeCompare(x.date));
+                  return (
+                    <div className="mt-3 border border-slate-200 rounded-xl overflow-hidden">
+                      {acctEntries.length === 0 ? (
+                        <div className="text-center text-xs text-slate-400 py-4">Belum ada input GMV bulan ini.</div>
+                      ) : (
+                        <div className="overflow-x-auto max-h-72 overflow-y-auto scroll-thin">
+                          <table className="w-full text-sm">
+                            <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500 sticky top-0">
+                              <tr>
+                                <th className="text-left px-3 py-2 font-bold">Tanggal</th>
+                                <th className="text-right px-3 py-2 font-bold">GMV</th>
+                                <th className="text-right px-3 py-2 font-bold">Order</th>
+                                <th className="text-left px-3 py-2 font-bold hidden sm:table-cell">Diinput</th>
+                                <th className="px-2 py-2"></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {acctEntries.map(e => {
+                                const hitDay = dailyTarget > 0 && (Number(e.gmv) || 0) >= dailyTarget;
+                                return (
+                                  <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50">
+                                    <td className="px-3 py-2 text-slate-700">{fmtDate(e.date)}</td>
+                                    <td className={`px-3 py-2 text-right tabular-nums font-bold ${dailyTarget > 0 ? (hitDay ? 'text-emerald-700' : 'text-red-600') : 'text-slate-800'}`}>{fmtRupiah(e.gmv)}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">{e.orders ? fmtNumber(e.orders) : '–'}</td>
+                                    <td className="px-3 py-2 text-xs text-slate-400 hidden sm:table-cell">{e.inputByName || '–'}</td>
+                                    <td className="px-2 py-2 text-right whitespace-nowrap">
+                                      {canInput(a) && (
+                                        <button onClick={() => { setEditEntry(e); setInputAcct(a); }} title="Edit GMV tanggal ini"
+                                          className="text-slate-300 hover:text-indigo-600 p-1"><Edit2 className="w-3.5 h-3.5" /></button>
+                                      )}
+                                      {canManage && (
+                                        <button onClick={() => deleteEntry(e)} title="Hapus"
+                                          className="text-slate-300 hover:text-red-600 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                            <tfoot className="bg-indigo-50/60 border-t border-indigo-100">
+                              <tr>
+                                <td className="px-3 py-2 text-xs font-bold text-indigo-800">Total {monthLabel}</td>
+                                <td className="px-3 py-2 text-right tabular-nums font-bold text-indigo-800">{fmtRupiah(actual)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-indigo-700 text-xs">{fmtNumber(acctEntries.reduce((s, e) => s + (Number(e.orders) || 0), 0))}</td>
+                                <td className="hidden sm:table-cell"></td>
+                                <td></td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
@@ -5367,7 +6182,7 @@ function AffiliateAccountsView({ user, allUsers }) {
       )}
 
       {showAcct && <AccountFormModal editing={editingAcct} internalUsers={allUsers.filter(u => (u.division || '') === 'internal' || u.role === 'leader')} onSave={saveAcct} onClose={() => { setShowAcct(false); setEditingAcct(null); }} />}
-      {inputAcct && <AccountGmvInputModal account={inputAcct} onSave={saveEntry} onClose={() => setInputAcct(null)} />}
+      {inputAcct && <AccountGmvInputModal account={inputAcct} initial={editEntry} onSave={saveEntry} onClose={() => { setInputAcct(null); setEditEntry(null); }} />}
       {targetAcct && <AccountTargetModal account={targetAcct} monthLabel={monthLabel} current={Number(targetAcct.targets?.[mKey]) || 0} dim={dim} onSave={(v) => saveTarget(targetAcct.id, v)} onClose={() => setTargetAcct(null)} />}
       {showGoal && <GoalModal monthLabel={monthLabel} current={goal} onSave={saveGoal} onClose={() => setShowGoal(false)} />}
     </div>
@@ -5411,8 +6226,13 @@ function AccountFormModal({ editing, internalUsers, onSave, onClose }) {
   );
 }
 
-function AccountGmvInputModal({ account, onSave, onClose }) {
-  const [form, setForm] = useState({ date: dayKey(), gmv: '', orders: '', note: '' });
+function AccountGmvInputModal({ account, initial, onSave, onClose }) {
+  const [form, setForm] = useState({
+    date: initial?.date || dayKey(),
+    gmv: initial ? String(initial.gmv) : '',
+    orders: initial?.orders ? String(initial.orders) : '',
+    note: initial?.note || ''
+  });
   const [error, setError] = useState('');
   const submit = () => {
     const gmv = Number(String(form.gmv).replace(/[^\d]/g, ''));
@@ -5420,13 +6240,13 @@ function AccountGmvInputModal({ account, onSave, onClose }) {
     onSave({ accountId: account.id, accountName: account.name, date: form.date, gmv, orders: Number(String(form.orders).replace(/[^\d]/g, '')) || 0, note: form.note.trim() });
   };
   return (
-    <Modal title={`Update GMV — ${account.name}`} onClose={onClose}>
+    <Modal title={`${initial ? 'Edit' : 'Input'} GMV — ${account.name}`} onClose={onClose}>
       <div className="space-y-3">
-        <Field label="Tanggal *">
+        <Field label="Tanggal * (bisa pilih tanggal lewat yang belum terisi)">
           <input type="date" value={form.date} max={dayKey()} onChange={e => setForm({ ...form, date: e.target.value })}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
         </Field>
-        <Field label="GMV Hari Ini (Rp) *">
+        <Field label="GMV Tanggal Ini (Rp) *">
           <input type="text" inputMode="numeric" value={form.gmv} onChange={e => setForm({ ...form, gmv: e.target.value.replace(/[^\d]/g, '') })}
             placeholder="mis. 25000000"
             className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
@@ -5436,7 +6256,7 @@ function AccountGmvInputModal({ account, onSave, onClose }) {
           <input type="text" inputMode="numeric" value={form.orders} onChange={e => setForm({ ...form, orders: e.target.value.replace(/[^\d]/g, '') })}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
         </Field>
-        <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-3 py-2">💡 Kalau tanggal ini sudah diisi, data lama otomatis diperbarui.</div>
+        <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-3 py-2">💡 Kalau tanggal ini sudah diisi, data lama otomatis diperbarui. Progres goal bulanan & Dashboard Bisnis ikut ter-update otomatis.</div>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
         <FormActions onCancel={onClose} onSave={submit} saveLabel="Simpan" />
       </div>
@@ -5490,6 +6310,10 @@ function KpiView({ user, allUsers }) {
   const [tasks, setTasks] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [reports, setReports] = useState([]);
+  const [gmvEntries, setGmvEntries] = useState([]);
+  const [gmvTargets, setGmvTargets] = useState({});
+  const [affAccounts, setAffAccounts] = useState([]);
+  const [affEntries, setAffEntries] = useState([]);
   const [cfg, setCfg] = useState(DEFAULT_KPI_CONFIG);
   const [loading, setLoading] = useState(true);
   const [mKey, setMKey] = useState(monthKey());
@@ -5500,7 +6324,11 @@ function KpiView({ user, allUsers }) {
     setTasks(await storage.getList('tasks:all'));
     setAttendance(await storage.getList('attendance:all'));
     setReports(await storage.getList('daily-reports:all'));
-    setCfg((await storage.get('kpi:config')) || DEFAULT_KPI_CONFIG);
+    setGmvEntries(await storage.getList('gmv:daily'));
+    setGmvTargets((await storage.get('gmv:targets')) || {});
+    setAffAccounts(await storage.getList('affiliate-accounts:all'));
+    setAffEntries(await storage.getList('affiliate-gmv:daily'));
+    setCfg(normalizeKpiConfig(await storage.get('kpi:config')));
     setLoading(false);
   };
   useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
@@ -5514,9 +6342,10 @@ function KpiView({ user, allUsers }) {
     return allUsers.filter(u => u.id === user.id);
   }, [allUsers, user, isOwnerMgr]);
 
+  const kpiData = { tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers };
   const scored = useMemo(() => visibleUsers.map(u => ({
-    user: u, kpi: computeKpi(u.id, { tasks, attendance, reports }, mKey, cfg)
-  })).sort((a, b) => b.kpi.total - a.kpi.total), [visibleUsers, tasks, attendance, reports, mKey, cfg]);
+    user: u, kpi: computeKpi(u.id, kpiData, mKey, cfg)
+  })).sort((a, b) => b.kpi.total - a.kpi.total), [visibleUsers, tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, mKey, cfg]);
 
   const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
   const shiftMonth = (delta) => { const [y, m] = mKey.split('-').map(Number); setMKey(monthKey(new Date(y, m - 1 + delta, 1))); };
@@ -5557,9 +6386,11 @@ function KpiView({ user, allUsers }) {
       </div>
 
       {/* How KPI calculated */}
-      <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 mb-4 text-xs text-slate-600">
-        💡 KPI dihitung otomatis dari: <b>Kehadiran</b> ({cfg.weights.attendance} poin) · <b>Tugas Selesai</b> ({cfg.weights.tasks} poin) · <b>Laporan Harian</b> ({cfg.weights.reports} poin) · <b>Bonus Produktivitas</b> ({cfg.weights.bonus} poin). Target hari kerja: {cfg.workdays}/bulan.
-      </div>
+      {(() => { const w = normalizeKpiConfig(cfg).weights; return (
+        <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 mb-4 text-xs text-slate-600 leading-relaxed">
+          💡 KPI dihitung otomatis dari 5 komponen: <b>Kehadiran</b> ({w.attendance}) · <b>Disiplin Waktu</b> ({w.punctuality}, % absen tepat waktu) · <b>Tugas</b> ({w.tasks}, kualitas 70% + volume 30%) · <b>Laporan Harian</b> ({w.reports}) · <b>Capaian Target GMV</b> ({w.target}, untuk PIC akun / leader divisi GMV — yang tidak pegang target, bobotnya otomatis dialihkan ke Tugas & Laporan supaya adil). Target hari kerja: {cfg.workdays}/bulan.
+        </div>
+      ); })()}
 
       <div className="space-y-2">
         {scored.map((s, i) => {
@@ -5570,6 +6401,7 @@ function KpiView({ user, allUsers }) {
             <div key={s.user.id} className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${isMumtaz ? 'border-emerald-200' : 'border-slate-200'}`}>
               <button onClick={() => setExpanded(open ? null : s.user.id)} className="w-full p-4 flex items-center gap-4 text-left hover:bg-slate-50/50">
                 <div className="text-sm font-bold text-slate-400 w-6 text-center">#{i + 1}</div>
+                <Avatar person={s.user} size="md" />
                 {/* Ring score */}
                 <div className="relative w-14 h-14 flex-shrink-0">
                   <svg viewBox="0 0 36 36" className="w-14 h-14 -rotate-90">
@@ -5582,6 +6414,7 @@ function KpiView({ user, allUsers }) {
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold text-slate-900 truncate">{s.user.name}</div>
                   <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    {s.user.jobTitle && <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{s.user.jobTitle}</span>}
                     <span className={`text-[10px] px-2 py-0.5 rounded ${ROLES[s.user.role]?.color}`}>{ROLES[s.user.role]?.label}</span>
                     {s.user.division && DIVISIONS[s.user.division] && <span className={`text-[10px] px-2 py-0.5 rounded ${DIVISIONS[s.user.division].color}`}>{DIVISIONS[s.user.division].label}</span>}
                   </div>
@@ -5594,11 +6427,21 @@ function KpiView({ user, allUsers }) {
                 </div>
               </button>
               {open && (
-                <div className="px-4 pb-4 pt-1 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <KpiBreakdownItem label="Kehadiran" value={`${k.attendance.days}/${cfg.workdays} hari`} score={k.attendance.score} max={cfg.weights.attendance} color="#10B981" />
-                  <KpiBreakdownItem label="Tugas Selesai" value={`${k.tasks.done} selesai · ${k.tasks.rate}%`} score={k.tasks.score} max={cfg.weights.tasks} color="#3B82F6" sub={k.tasks.missed > 0 ? `${k.tasks.missed} miss` : ''} />
-                  <KpiBreakdownItem label="Laporan Harian" value={`${k.reports.days}/${cfg.workdays} hari`} score={k.reports.score} max={cfg.weights.reports} color="#8B5CF6" />
-                  <KpiBreakdownItem label="Bonus Produktif" value={`${k.bonus.done} tugas`} score={k.bonus.score} max={cfg.weights.bonus} color="#F59E0B" />
+                <div className="px-4 pb-4 pt-1 border-t border-slate-100">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                    <KpiBreakdownItem label="Kehadiran" value={`${k.attendance.days}/${cfg.workdays} hari`} score={k.attendance.score} max={k.attendance.max} color="#10B981" />
+                    <KpiBreakdownItem label="Disiplin Waktu" value={`${k.punctuality.rate}% tepat waktu`} score={k.punctuality.score} max={k.punctuality.max} color="#06B6D4" sub={k.punctuality.late > 0 ? `${k.punctuality.late}× telat` : ''} />
+                    <KpiBreakdownItem label="Tugas" value={`${k.tasks.done} selesai · ${k.tasks.rate}%`} score={k.tasks.score} max={k.tasks.max} color="#3B82F6" sub={k.tasks.missed > 0 ? `${k.tasks.missed} lewat deadline` : ''} />
+                    <KpiBreakdownItem label="Laporan Harian" value={`${k.reports.days}/${cfg.workdays} hari`} score={k.reports.score} max={k.reports.max} color="#8B5CF6" />
+                    {k.target.applicable ? (
+                      <KpiBreakdownItem label="Capaian Target" value={`${k.target.attain}% dari jalur (${k.target.info})`} score={k.target.score} max={k.target.max} color="#F59E0B" />
+                    ) : (
+                      <div className="bg-slate-50 rounded-xl p-3 flex flex-col justify-center">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Capaian Target</div>
+                        <div className="text-[11px] text-slate-500 mt-1 leading-snug">Tidak pegang target GMV — bobotnya dialihkan ke Tugas & Laporan.</div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -5625,12 +6468,13 @@ function KpiBreakdownItem({ label, value, score, max, color, sub }) {
 }
 
 function KpiConfigModal({ cfg, onSave, onClose }) {
+  const norm = normalizeKpiConfig(cfg);
   const [form, setForm] = useState({
-    targetScore: cfg.targetScore, workdays: cfg.workdays, taskVolumeTarget: cfg.taskVolumeTarget,
-    weights: { ...cfg.weights }
+    targetScore: norm.targetScore, workdays: norm.workdays, taskVolumeTarget: norm.taskVolumeTarget,
+    weights: { ...norm.weights }
   });
   const [error, setError] = useState('');
-  const totalWeight = form.weights.attendance + form.weights.tasks + form.weights.reports + form.weights.bonus;
+  const totalWeight = (Number(form.weights.attendance) || 0) + (Number(form.weights.punctuality) || 0) + (Number(form.weights.tasks) || 0) + (Number(form.weights.reports) || 0) + (Number(form.weights.target) || 0);
   const submit = () => {
     setError('');
     if (totalWeight !== 100) return setError(`Total bobot harus 100 (sekarang ${totalWeight}).`);
@@ -5638,8 +6482,9 @@ function KpiConfigModal({ cfg, onSave, onClose }) {
       targetScore: Number(form.targetScore) || 85, workdays: Number(form.workdays) || 26,
       taskVolumeTarget: Number(form.taskVolumeTarget) || 20,
       weights: {
-        attendance: Number(form.weights.attendance) || 0, tasks: Number(form.weights.tasks) || 0,
-        reports: Number(form.weights.reports) || 0, bonus: Number(form.weights.bonus) || 0
+        attendance: Number(form.weights.attendance) || 0, punctuality: Number(form.weights.punctuality) || 0,
+        tasks: Number(form.weights.tasks) || 0, reports: Number(form.weights.reports) || 0,
+        target: Number(form.weights.target) || 0
       }
     });
   };
@@ -5654,15 +6499,17 @@ function KpiConfigModal({ cfg, onSave, onClose }) {
         </div>
         <div className="border-t border-slate-100 pt-3">
           <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Bobot Poin</label>
+            <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Bobot Poin (5 komponen)</label>
             <span className={`text-xs font-bold ${totalWeight === 100 ? 'text-emerald-600' : 'text-red-500'}`}>Total: {totalWeight}/100</span>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Kehadiran"><input type="text" inputMode="numeric" value={form.weights.attendance} onChange={e => setW('attendance', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
-            <Field label="Tugas Selesai"><input type="text" inputMode="numeric" value={form.weights.tasks} onChange={e => setW('tasks', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
+            <Field label="Disiplin Waktu"><input type="text" inputMode="numeric" value={form.weights.punctuality} onChange={e => setW('punctuality', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
+            <Field label="Tugas"><input type="text" inputMode="numeric" value={form.weights.tasks} onChange={e => setW('tasks', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
             <Field label="Laporan Harian"><input type="text" inputMode="numeric" value={form.weights.reports} onChange={e => setW('reports', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
-            <Field label="Bonus Produktif"><input type="text" inputMode="numeric" value={form.weights.bonus} onChange={e => setW('bonus', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
+            <Field label="Capaian Target GMV"><input type="text" inputMode="numeric" value={form.weights.target} onChange={e => setW('target', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
           </div>
+          <div className="text-[11px] text-slate-500 mt-2 bg-slate-50 rounded-lg p-2">💡 Anggota yang tidak pegang target GMV (mis. Media, Event): bobot "Capaian Target" otomatis dialihkan ke Tugas & Laporan — semua tetap dinilai dari 100.</div>
         </div>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
         <FormActions onCancel={onClose} onSave={submit} saveLabel="Simpan Pengaturan" />
@@ -6281,6 +7128,9 @@ function AttendanceView({ user, allUsers }) {
   const [result, setResult] = useState(null);   // banner hasil absen (telat/lokasi)
   const [showSettings, setShowSettings] = useState(false);
   const [editing, setEditing] = useState(null);  // record yang sedang diedit
+  const [selfieFor, setSelfieFor] = useState(null); // 'in' | 'out' → buka kamera dulu
+  const [lightbox, setLightbox] = useState(null);
+  const [selfieLoading, setSelfieLoading] = useState(null); // recordId yang fotonya sedang dimuat
 
   const canManageAtt = user.role === 'owner' || user.role === 'manajer';
 
@@ -6309,11 +7159,11 @@ function AttendanceView({ user, allUsers }) {
   const computeFlags = (type, dateObj, loc, cfg) => {
     const mins = dateObj.getHours() * 60 + dateObj.getMinutes();
     let late = false, lateBy = 0, earlyLeave = false, earlyBy = 0;
-    if (type === 'in' && parseHM(cfg.jamMasuk) != null) {
+    if (!cfg.flexible && type === 'in' && parseHM(cfg.jamMasuk) != null) {
       const sched = parseHM(cfg.jamMasuk);
       if (mins > sched + (Number(cfg.toleransiMenit) || 0)) { late = true; lateBy = mins - sched; }
     }
-    if (type === 'out' && parseHM(cfg.jamPulang) != null) {
+    if (!cfg.flexible && type === 'out' && parseHM(cfg.jamPulang) != null) {
       const sched = parseHM(cfg.jamPulang);
       if (mins < sched) { earlyLeave = true; earlyBy = sched - mins; }
     }
@@ -6352,13 +7202,21 @@ function AttendanceView({ user, allUsers }) {
     } catch { return ''; }
   };
 
-  const doAbsen = async (type) => {
-    setError(''); setResult(null); setBusy(true);
+  // Mulai absen: kalau selfie wajib → buka kamera dulu, lalu lanjut proses
+  const doAbsen = (type) => {
+    setError(''); setResult(null);
+    if (config.selfieWajib !== false) setSelfieFor(type);
+    else proceedAbsen(type, null);
+  };
+
+  const proceedAbsen = async (type, selfieDataUrl) => {
+    setSelfieFor(null); setBusy(true);
     try {
       const loc = await getLocation();
       const address = await getAddress(loc.lat, loc.lng);
       const now = new Date();
-      const flags = computeFlags(type, now, loc, config);
+      const myCfg = effectiveAttConfig(config, user.id);
+      const flags = computeFlags(type, now, loc, myCfg);
       const rec = {
         id: uid(),
         userId: user.id,
@@ -6373,8 +7231,20 @@ function AttendanceView({ user, allUsers }) {
         accuracy: loc.acc,
         address,
         note: note.trim(),
+        hasSelfie: !!selfieDataUrl,
         ...flags
       };
+      // Simpan selfie terpisah (biar daftar absensi tetap ringan) + rapikan foto lama >60 hari
+      if (selfieDataUrl) {
+        await storage.set(`selfie:${rec.id}`, selfieDataUrl);
+        const idx = (await storage.get('attendance:selfie-index')) || [];
+        idx.push({ key: `selfie:${rec.id}`, date: dayKey(now) });
+        const cutoff = dayKey(new Date(Date.now() - 60 * 86400000));
+        const keep = [], drop = [];
+        idx.forEach(it => (it.date >= cutoff ? keep : drop).push(it));
+        for (const it of drop) await storage.delete(it.key);
+        await storage.set('attendance:selfie-index', keep);
+      }
       const list = await storage.getList('attendance:all');
       list.unshift(rec);
       await storage.set('attendance:all', list.slice(0, 2000));
@@ -6382,8 +7252,8 @@ function AttendanceView({ user, allUsers }) {
       setNote('');
       // banner hasil
       const warns = [];
-      if (flags.late) warns.push(`Kamu terlambat ${flags.lateBy} menit (jam masuk ${config.jamMasuk}).`);
-      if (flags.earlyLeave) warns.push(`Pulang ${flags.earlyBy} menit lebih awal (jam pulang ${config.jamPulang}).`);
+      if (flags.late) warns.push(`Kamu terlambat ${flags.lateBy} menit (jam masuk ${myCfg.jamMasuk}).`);
+      if (flags.earlyLeave) warns.push(`Pulang ${flags.earlyBy} menit lebih awal (jam pulang ${myCfg.jamPulang}).`);
       if (flags.locationMismatch) warns.push(`⚠️ Lokasi tidak sesuai — ±${flags.distanceM} m dari lokasi kerja (${config.lokasiLabel || 'kantor'}).`);
       setResult({ ok: warns.length === 0, type, time: fmtTime(rec.timestamp), warns });
       await load();
@@ -6392,6 +7262,15 @@ function AttendanceView({ user, allUsers }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  // Lihat selfie sebuah record (dimuat saat diminta biar hemat data)
+  const viewSelfie = async (r) => {
+    setSelfieLoading(r.id);
+    const img = await storage.get(`selfie:${r.id}`);
+    setSelfieLoading(null);
+    if (!img) return alert('Foto selfie tidak ditemukan (mungkin sudah dihapus otomatis setelah 60 hari).');
+    setLightbox({ src: img, title: `Selfie ${r.userName} · ${new Date(r.timestamp).toLocaleString('id-ID')}` });
   };
 
   // Simpan konfigurasi jam & lokasi
@@ -6405,7 +7284,7 @@ function AttendanceView({ user, allUsers }) {
   // Simpan hasil edit absensi (recompute telat/lokasi dari waktu baru)
   const saveEdit = async (rec, { timestamp, note, clearLocationWarn }) => {
     const d = new Date(timestamp);
-    const flags = computeFlags(rec.type, d, { lat: rec.latitude, lng: rec.longitude }, config);
+    const flags = computeFlags(rec.type, d, { lat: rec.latitude, lng: rec.longitude }, effectiveAttConfig(config, rec.userId));
     if (clearLocationWarn) { flags.locationMismatch = false; }
     const updated = { ...rec, timestamp: d.toISOString(), note: (note || '').trim(), ...flags, editedBy: user.name, editedAt: new Date().toISOString() };
     const list = await storage.getList('attendance:all');
@@ -6415,10 +7294,13 @@ function AttendanceView({ user, allUsers }) {
     await load();
   };
 
-  // Hapus semua absensi (owner/manajer)
+  // Hapus semua absensi (owner/manajer) — termasuk semua foto selfie
   const deleteAllRecords = async () => {
     if (!confirm(`Hapus SEMUA data absensi (${records.length} rekaman)? Tindakan ini tidak bisa dibatalkan.`)) return;
     if (!confirm('Yakin 100%? Semua riwayat absen akan hilang permanen.')) return;
+    const idx = (await storage.get('attendance:selfie-index')) || [];
+    for (const it of idx) await storage.delete(it.key);
+    await storage.set('attendance:selfie-index', []);
     await storage.set('attendance:all', []);
     await logActivity(`menghapus SEMUA data absensi (${records.length} rekaman)`, user.name);
     await load();
@@ -6450,9 +7332,14 @@ function AttendanceView({ user, allUsers }) {
 
   // Download rekap CSV
   const downloadRecap = () => {
-    const rows = [['Nama', 'Divisi', 'Jabatan', 'Tipe', 'Tanggal', 'Jam', 'Lokasi (Alamat)', 'Koordinat', 'Akurasi (m)', 'Catatan']];
+    const rows = [['Nama', 'Divisi', 'Jabatan', 'Tipe', 'Tanggal', 'Jam', 'Status', 'Selfie', 'Lokasi (Alamat)', 'Koordinat', 'Akurasi (m)', 'Catatan']];
     visibleRecords.forEach(r => {
       const d = new Date(r.timestamp);
+      const status = [
+        r.late ? `Terlambat ${r.lateBy || ''}m` : '',
+        r.earlyLeave ? `Pulang cepat ${r.earlyBy || ''}m` : '',
+        r.locationMismatch ? 'Lokasi tidak sesuai' : ''
+      ].filter(Boolean).join(' + ') || 'Tepat waktu';
       rows.push([
         r.userName,
         DIVISIONS[r.division]?.label || r.division || '-',
@@ -6460,6 +7347,8 @@ function AttendanceView({ user, allUsers }) {
         r.type === 'in' ? 'Masuk' : 'Pulang',
         d.toLocaleDateString('id-ID'),
         d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+        status,
+        r.hasSelfie ? 'Ya' : 'Tidak',
         (r.address || '').replace(/"/g, "'"),
         `${r.latitude},${r.longitude}`,
         r.accuracy || '',
@@ -6484,6 +7373,11 @@ function AttendanceView({ user, allUsers }) {
   const deleteRecord = async (r) => {
     if (!confirm(`Hapus absensi ${r.userName} (${r.type === 'in' ? 'masuk' : 'pulang'}) ${new Date(r.timestamp).toLocaleString('id-ID')}?`)) return;
     await storage.set('attendance:all', (await storage.getList('attendance:all')).filter(x => x.id !== r.id));
+    if (r.hasSelfie) {
+      await storage.delete(`selfie:${r.id}`);
+      const idx = (await storage.get('attendance:selfie-index')) || [];
+      await storage.set('attendance:selfie-index', idx.filter(it => it.key !== `selfie:${r.id}`));
+    }
     await logActivity(`menghapus 1 data absensi`, user.name);
     await load();
   };
@@ -6507,9 +7401,11 @@ function AttendanceView({ user, allUsers }) {
             <Clock className="w-4 h-4" /> Atur Jam & Lokasi Kerja
           </button>
           <span className="text-xs text-slate-500">
-            Jam kerja: <b className="text-slate-700">{config.jamMasuk}</b>–<b className="text-slate-700">{config.jamPulang}</b>
+            Jam kerja tim: <b className="text-slate-700">{config.jamMasuk}</b>–<b className="text-slate-700">{config.jamPulang}</b>
             {config.toleransiMenit ? ` · toleransi ${config.toleransiMenit} mnt` : ''}
             {config.lokasiAktif ? ` · lokasi: ${config.lokasiLabel || 'aktif'} (±${config.radiusM}m)` : ' · cek lokasi: nonaktif'}
+            {config.selfieWajib !== false ? ' · selfie: wajib' : ' · selfie: nonaktif'}
+            {Object.keys(config.custom || {}).length > 0 ? ` · ${Object.keys(config.custom).length} jadwal khusus` : ''}
           </span>
         </div>
       )}
@@ -6531,6 +7427,18 @@ function AttendanceView({ user, allUsers }) {
               )}
             </div>
           </div>
+          {(() => {
+            const my = effectiveAttConfig(config, user.id);
+            return (
+              <div className="text-right">
+                <div className="text-[10px] font-bold text-slate-400 uppercase">Jam Kerjamu</div>
+                <div className="text-sm font-bold text-slate-800">
+                  {my.flexible ? 'Fleksibel' : `${my.jamMasuk}–${my.jamPulang}`}
+                </div>
+                {(config.custom || {})[user.id] && <div className="text-[10px] text-indigo-600 font-semibold">jadwal khusus</div>}
+              </div>
+            );
+          })()}
         </div>
 
         <div className="mt-4">
@@ -6541,11 +7449,13 @@ function AttendanceView({ user, allUsers }) {
           <button onClick={() => doAbsen(nextType)} disabled={busy}
             style={{ background: nextType === 'in' ? 'linear-gradient(135deg, #4F46E5, #4338CA)' : 'linear-gradient(135deg, #D97706, #B45309)' }}
             className="w-full text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition disabled:opacity-60">
-            <MapPin className="w-5 h-5" />
+            {config.selfieWajib !== false ? <Camera className="w-5 h-5" /> : <MapPin className="w-5 h-5" />}
             {busy ? 'Mengambil lokasi...' : (nextType === 'in' ? 'Absen Masuk Sekarang' : 'Absen Pulang Sekarang')}
           </button>
           <p className="text-[11px] text-slate-400 mt-2 text-center">
-            Saat ditekan, browser akan minta izin lokasi. Izinkan agar lokasi tersimpan.
+            {config.selfieWajib !== false
+              ? '📸 Saat ditekan: ambil selfie dulu, lalu browser minta izin lokasi. Izinkan keduanya.'
+              : 'Saat ditekan, browser akan minta izin lokasi. Izinkan agar lokasi tersimpan.'}
           </p>
           {error && (
             <div className="mt-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 flex items-start gap-2">
@@ -6608,14 +7518,18 @@ function AttendanceView({ user, allUsers }) {
           {visibleRecords.map(r => (
             <div key={r.id} className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
               <div className="p-4 flex items-start gap-3">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${r.type === 'in' ? 'bg-emerald-100' : 'bg-amber-100'}`}>
-                  {r.type === 'in'
-                    ? <ArrowRight className="w-5 h-5 text-emerald-600" />
-                    : <ArrowLeft className="w-5 h-5 text-amber-600" />}
+                <div className="relative flex-shrink-0">
+                  <Avatar person={allUsers.find(u => u.id === r.userId) || { name: r.userName }} size="lg" />
+                  <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center border-2 border-white ${r.type === 'in' ? 'bg-emerald-500' : 'bg-amber-500'}`}>
+                    {r.type === 'in'
+                      ? <ArrowRight className="w-3 h-3 text-white" />
+                      : <ArrowLeft className="w-3 h-3 text-white" />}
+                  </div>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-slate-900 text-sm">{r.userName}</span>
+                    {r.jobTitle && <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{r.jobTitle}</span>}
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${r.type === 'in' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                       {r.type === 'in' ? 'MASUK' : 'PULANG'}
                     </span>
@@ -6634,6 +7548,14 @@ function AttendanceView({ user, allUsers }) {
                     {r.editedBy && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Diedit oleh ${r.editedBy}`}>diedit</span>
                     )}
+                    {r.hasSelfie ? (
+                      <button onClick={() => viewSelfie(r)} disabled={selfieLoading === r.id}
+                        className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-100 text-indigo-700 hover:bg-indigo-200 inline-flex items-center gap-1 transition disabled:opacity-60">
+                        <Camera className="w-3 h-3" /> {selfieLoading === r.id ? 'Memuat…' : 'Lihat Selfie'}
+                      </button>
+                    ) : (config.selfieWajib !== false && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-400" title="Absen ini tanpa foto selfie">tanpa selfie</span>
+                    ))}
                     <div className="ml-auto flex items-center gap-1 flex-shrink-0">
                       {canEditRec(r) && (
                         <button onClick={() => setEditing(r)} title="Edit absensi ini"
@@ -6682,20 +7604,132 @@ function AttendanceView({ user, allUsers }) {
       )}
 
       {showSettings && (
-        <AttendanceSettingsModal config={config} onSave={saveConfig} onClose={() => setShowSettings(false)} getLocation={getLocation} />
+        <AttendanceSettingsModal config={config} allUsers={allUsers} onSave={saveConfig} onClose={() => setShowSettings(false)} getLocation={getLocation} />
       )}
       {editing && (
-        <AttendanceEditModal record={editing} config={config} toLocalInput={toLocalInput} canManage={canManageAtt} onSave={saveEdit} onClose={() => setEditing(null)} />
+        <AttendanceEditModal record={editing} config={effectiveAttConfig(config, editing.userId)} toLocalInput={toLocalInput} canManage={canManageAtt} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
+      {selfieFor && (
+        <SelfieCaptureModal type={selfieFor} userName={user.name}
+          onCapture={(img) => proceedAbsen(selfieFor, img)}
+          onClose={() => setSelfieFor(null)} />
+      )}
+      {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.title} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
 
+// Modal kamera selfie untuk absen (wajib, anti-kecurangan)
+function SelfieCaptureModal({ type, userName, onCapture, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [snapshot, setSnapshot] = useState(null);
+  const [camErr, setCamErr] = useState('');
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Browser tidak mendukung kamera.');
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 } }, audio: false });
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        setReady(true);
+      } catch (e) {
+        setCamErr(e.name === 'NotAllowedError'
+          ? 'Izin kamera ditolak. Aktifkan izin kamera di browser (ikon gembok di address bar) lalu coba lagi.'
+          : (e.message || 'Gagal membuka kamera.'));
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  const takePhoto = () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    const MAX = 480;
+    const scale = Math.min(1, MAX / Math.max(video.videoWidth, video.videoHeight));
+    const w = Math.round(video.videoWidth * scale), h = Math.round(video.videoHeight * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    // mirror seperti kaca biar natural
+    ctx.translate(w, 0); ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, w, h);
+    setSnapshot(canvas.toDataURL('image/jpeg', 0.65));
+  };
+
+  const stopCam = () => { if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()); };
+
+  return (
+    <Modal title={`📸 Selfie Absen ${type === 'in' ? 'Masuk' : 'Pulang'}`} onClose={() => { stopCam(); onClose(); }}>
+      <div className="space-y-3">
+        <div className="text-xs text-slate-500 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+          Hai <b>{userName.split(' ')[0]}</b> — posisikan wajah di tengah, lalu ambil foto. Foto jadi bukti kehadiranmu.
+        </div>
+        <div className="relative rounded-2xl overflow-hidden bg-slate-900 aspect-[4/3]">
+          {camErr ? (
+            <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-red-300">{camErr}</div>
+          ) : snapshot ? (
+            <img src={snapshot} alt="Selfie" className="w-full h-full object-cover" />
+          ) : (
+            <video ref={videoRef} playsInline muted className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
+          )}
+          {!camErr && !snapshot && !ready && (
+            <div className="absolute inset-0 flex items-center justify-center text-white/70 text-sm">Membuka kamera…</div>
+          )}
+        </div>
+        {camErr ? (
+          <FormActions onCancel={() => { stopCam(); onClose(); }} onSave={() => window.location.reload()} saveLabel="Muat Ulang Halaman" />
+        ) : snapshot ? (
+          <div className="flex gap-2">
+            <button onClick={() => setSnapshot(null)}
+              className="flex-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold py-2.5 rounded-lg">↺ Ulangi</button>
+            <button onClick={() => { stopCam(); onCapture(snapshot); }}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2">
+              <Check className="w-4 h-4" /> Gunakan & Lanjut Absen
+            </button>
+          </div>
+        ) : (
+          <button onClick={takePhoto} disabled={!ready}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
+            <Camera className="w-5 h-5" /> Ambil Foto
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 // Modal: atur jam kerja & lokasi kerja (owner/manajer)
-function AttendanceSettingsModal({ config, onSave, onClose, getLocation }) {
-  const [form, setForm] = useState({ ...DEFAULT_ATTENDANCE_CONFIG, ...config });
+function AttendanceSettingsModal({ config, allUsers = [], onSave, onClose, getLocation }) {
+  const [form, setForm] = useState({ ...DEFAULT_ATTENDANCE_CONFIG, ...config, custom: { ...(config.custom || {}) } });
   const [locBusy, setLocBusy] = useState(false);
   const [locErr, setLocErr] = useState('');
+  const [pickUserId, setPickUserId] = useState('');
+
+  // Jadwal khusus per karyawan (freelance / shift beda)
+  const customIds = Object.keys(form.custom || {});
+  const availableUsers = allUsers.filter(u => !customIds.includes(u.id));
+  const addCustom = () => {
+    if (!pickUserId) return;
+    setForm({ ...form, custom: { ...form.custom, [pickUserId]: { jamMasuk: form.jamMasuk, jamPulang: form.jamPulang, toleransiMenit: form.toleransiMenit, flexible: false } } });
+    setPickUserId('');
+  };
+  const setCustom = (id, key, val) => setForm({ ...form, custom: { ...form.custom, [id]: { ...form.custom[id], [key]: val } } });
+  const removeCustom = (id) => {
+    const next = { ...form.custom };
+    delete next[id];
+    setForm({ ...form, custom: next });
+  };
 
   const pakaiLokasiSaya = async () => {
     setLocErr(''); setLocBusy(true);
@@ -6724,6 +7758,75 @@ function AttendanceSettingsModal({ config, onSave, onClose, getLocation }) {
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           <div className="text-[11px] text-slate-500 mt-1">Absen masuk lewat dari jam masuk + toleransi = ditandai "Terlambat".</div>
         </Field>
+
+        {/* Selfie wajib */}
+        <div className="border-t border-slate-100 pt-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={form.selfieWajib !== false} onChange={e => setForm({ ...form, selfieWajib: e.target.checked })}
+              className="w-4 h-4 rounded accent-indigo-600" />
+            <span className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Camera className="w-4 h-4 text-indigo-600" /> Wajib selfie saat absen</span>
+          </label>
+          <div className="text-[11px] text-slate-500 mt-1">Anggota harus ambil foto wajah sebelum absen masuk/pulang — mencegah titip absen. Foto otomatis dihapus setelah 60 hari.</div>
+        </div>
+
+        {/* Jadwal khusus per karyawan */}
+        <div className="border-t border-slate-100 pt-4">
+          <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5 mb-1"><Clock className="w-4 h-4 text-indigo-600" /> Jam Kerja Khusus per Karyawan</div>
+          <div className="text-[11px] text-slate-500 mb-2">Untuk freelance / shift yang jamnya beda dari tim. Yang tidak diatur di sini ikut jam kerja tim di atas.</div>
+
+          {customIds.length > 0 && (
+            <div className="space-y-2 mb-3">
+              {customIds.map(id => {
+                const u = allUsers.find(x => x.id === id);
+                const c = form.custom[id];
+                return (
+                  <div key={id} className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-sm font-bold text-slate-800 truncate">{u?.name || 'User terhapus'}</span>
+                      <button onClick={() => removeCustom(id)} title="Hapus jadwal khusus (kembali ikut jam tim)"
+                        className="text-slate-400 hover:text-red-600 p-1"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer mb-2">
+                      <input type="checkbox" checked={!!c.flexible} onChange={e => setCustom(id, 'flexible', e.target.checked)}
+                        className="w-4 h-4 rounded accent-indigo-600" />
+                      <span className="text-xs text-slate-700"><b>Jam fleksibel</b> (freelance) — tidak pernah ditandai telat/pulang cepat</span>
+                    </label>
+                    {!c.flexible && (
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <div className="text-[10px] font-semibold text-slate-500 uppercase mb-0.5">Masuk</div>
+                          <input type="time" value={c.jamMasuk || ''} onChange={e => setCustom(id, 'jamMasuk', e.target.value)}
+                            className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm" />
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-semibold text-slate-500 uppercase mb-0.5">Pulang</div>
+                          <input type="time" value={c.jamPulang || ''} onChange={e => setCustom(id, 'jamPulang', e.target.value)}
+                            className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm" />
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-semibold text-slate-500 uppercase mb-0.5">Toleransi</div>
+                          <input type="number" min="0" value={c.toleransiMenit ?? ''} placeholder={String(form.toleransiMenit)}
+                            onChange={e => setCustom(id, 'toleransiMenit', e.target.value === '' ? '' : Number(e.target.value))}
+                            className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <select value={pickUserId} onChange={e => setPickUserId(e.target.value)}
+              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+              <option value="">- Pilih anggota untuk jadwal khusus -</option>
+              {availableUsers.map(u => <option key={u.id} value={u.id}>{u.name}{u.jobTitle ? ` · ${u.jobTitle}` : ''}</option>)}
+            </select>
+            <button onClick={addCustom} disabled={!pickUserId}
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg">Tambah</button>
+          </div>
+        </div>
 
         <div className="border-t border-slate-100 pt-4">
           <label className="flex items-center gap-2 cursor-pointer">
@@ -6805,48 +7908,67 @@ function AttendanceEditModal({ record, config, toLocalInput, canManage, onSave, 
 }
 
 function LeaderboardView({ allUsers }) {
-  const [tasks, setTasks] = useState([]);
+  const [data, setData] = useState(null);
+  const [cfg, setCfg] = useState(DEFAULT_KPI_CONFIG);
+  const mKey = monthKey();
 
   useEffect(() => {
     (async () => {
-      setTasks(await storage.getList('tasks:all'));
+      const [tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, savedCfg] = await Promise.all([
+        storage.getList('tasks:all'), storage.getList('attendance:all'), storage.getList('daily-reports:all'),
+        storage.getList('gmv:daily'), storage.get('gmv:targets'), storage.getList('affiliate-accounts:all'),
+        storage.getList('affiliate-gmv:daily'), storage.get('kpi:config')
+      ]);
+      setData({ tasks, attendance, reports, gmvEntries, gmvTargets: gmvTargets || {}, affAccounts, affEntries, allUsers });
+      setCfg(normalizeKpiConfig(savedCfg));
     })();
-  }, []);
+  }, [allUsers]);
 
-  // Owner (mis. Azka & Kholid) tidak ikut kompetisi leaderboard
-  const teamStats = allUsers.filter(m => m.role !== 'owner').map(m => {
-    const myTasks = tasks.filter(t => t.assigneeId === m.id);
-    const done = myTasks.filter(t => t.status === 'done').length;
-    return { ...m, total: myTasks.length, done, rate: myTasks.length ? Math.round(done / myTasks.length * 100) : 0 };
-  }).sort((a, b) => b.done - a.done);
+  if (!data) return <div className="text-slate-400 text-sm">Memuat leaderboard...</div>;
+
+  // Owner (mis. Azka & Kholid) tidak ikut kompetisi leaderboard. Ranking = skor KPI bulan ini.
+  const targetScore = cfg.targetScore || 85;
+  const teamStats = allUsers.filter(m => m.role !== 'owner').map(m => ({
+    ...m, kpi: computeKpi(m.id, data, mKey, cfg)
+  })).sort((a, b) => b.kpi.total - a.kpi.total);
+  const monthLabel = new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
 
   return (
     <div className="max-w-5xl">
-      <PageHeader title="Leaderboard" subtitle="Kompetisi sehat — siapa anggota tim paling produktif" />
+      <PageHeader title="Leaderboard" subtitle={`Kompetisi sehat berbasis skor KPI · ${monthLabel} · ≥${targetScore} = Mumtaz ⭐`} />
       <div className="space-y-2">
-        {teamStats.map((m, i) => (
-          <div key={m.id} className={`bg-white rounded-xl border p-4 flex items-center gap-4 ${i < 3 && m.done > 0 ? 'border-indigo-200 bg-gradient-to-r from-indigo-50/30 to-transparent' : 'border-slate-200'}`}>
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center font-display font-bold text-lg ${
-              m.done > 0 && i === 0 ? 'bg-gradient-to-br from-amber-400 to-yellow-600 text-white' :
-              m.done > 0 && i === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-white' :
-              m.done > 0 && i === 2 ? 'bg-gradient-to-br from-orange-400 to-orange-600 text-white' :
-              'bg-slate-100 text-slate-600'
-            }`}>{m.done > 0 && i === 0 ? '🥇' : m.done > 0 && i === 1 ? '🥈' : m.done > 0 && i === 2 ? '🥉' : `#${i + 1}`}</div>
-            <div className="flex-1">
-              <div className="font-semibold text-slate-900">{m.name}</div>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className={`text-[10px] inline-block px-2 py-0.5 rounded ${ROLES[m.role]?.color}`}>{ROLES[m.role]?.label}</span>
-                {m.division && DIVISIONS[m.division] && (
-                  <span className={`text-[10px] inline-block px-2 py-0.5 rounded ${DIVISIONS[m.division].color}`}>{DIVISIONS[m.division].label}</span>
-                )}
+        {teamStats.map((m, i) => {
+          const k = m.kpi;
+          const isMumtaz = k.total >= targetScore;
+          return (
+            <div key={m.id} className={`bg-white rounded-xl border p-4 flex items-center gap-4 ${i < 3 && k.total > 0 ? 'border-indigo-200 bg-gradient-to-r from-indigo-50/30 to-transparent' : 'border-slate-200'}`}>
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center font-display font-bold text-lg flex-shrink-0 ${
+                k.total > 0 && i === 0 ? 'bg-gradient-to-br from-amber-400 to-yellow-600 text-white' :
+                k.total > 0 && i === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-white' :
+                k.total > 0 && i === 2 ? 'bg-gradient-to-br from-orange-400 to-orange-600 text-white' :
+                'bg-slate-100 text-slate-600'
+              }`}>{k.total > 0 && i === 0 ? '🥇' : k.total > 0 && i === 1 ? '🥈' : k.total > 0 && i === 2 ? '🥉' : `#${i + 1}`}</div>
+              <Avatar person={m} size="lg" />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-slate-900 truncate">{m.name}</div>
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  {m.jobTitle && <span className="text-[10px] inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold">{m.jobTitle}</span>}
+                  <span className={`text-[10px] inline-block px-2 py-0.5 rounded ${ROLES[m.role]?.color}`}>{ROLES[m.role]?.label}</span>
+                  {m.division && DIVISIONS[m.division] && (
+                    <span className={`text-[10px] inline-block px-2 py-0.5 rounded ${DIVISIONS[m.division].color}`}>{DIVISIONS[m.division].label}</span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1">
+                  Hadir {k.attendance.days} hari · {k.tasks.done} tugas selesai · lapor {k.reports.days} hari{k.target.applicable ? ` · target ${k.target.attain}%` : ''}
+                </div>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <div className={`font-display font-bold text-2xl ${isMumtaz ? 'text-emerald-600' : k.total >= targetScore * 0.7 ? 'text-amber-600' : 'text-slate-700'}`}>{k.total}</div>
+                <div className="text-[10px] text-slate-500">{isMumtaz ? '⭐ Mumtaz' : 'poin KPI'}</div>
               </div>
             </div>
-            <div className="text-right">
-              <div className="font-display font-bold text-lg text-indigo-700">{m.done}</div>
-              <div className="text-xs text-slate-500">tugas selesai · {m.rate}% rate</div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -7375,17 +8497,33 @@ function FeedbackView({ user, allUsers }) {
   const [filter, setFilter] = useState('all');
   const [busy, setBusy] = useState(false);
   const [replyText, setReplyText] = useState({});
+  const [images, setImages] = useState([]);
+  const [imgBusy, setImgBusy] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
+  const imgRef = useRef();
 
   const isManager = user.role === 'owner' || user.role === 'manajer';
 
   const load = async () => { setItems(await storage.getList('feedback:all')); setLoading(false); };
   useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
 
+  const addImages = async (files) => {
+    setImgBusy(true);
+    try {
+      const room = 3 - images.length;
+      const picked = Array.from(files).slice(0, room);
+      const compressed = [];
+      for (const f of picked) compressed.push(await compressImageFile(f, { maxDim: 1000, quality: 0.7 }));
+      setImages(prev => [...prev, ...compressed].slice(0, 3));
+    } catch (e) { alert(e.message || 'Gagal memproses gambar.'); }
+    setImgBusy(false);
+  };
+
   const submit = async () => {
     if (!msg.trim()) return;
     setBusy(true);
     const item = {
-      id: uid(), type, message: msg.trim(), page: page.trim(),
+      id: uid(), type, message: msg.trim(), page: page.trim(), images,
       userId: user.id, userName: user.name, userRole: user.role,
       status: 'baru', createdAt: new Date().toISOString(), replies: []
     };
@@ -7393,7 +8531,7 @@ function FeedbackView({ user, allUsers }) {
     list.unshift(item);
     await storage.set('feedback:all', list);
     await logActivity(`mengirim masukan (${FEEDBACK_TYPES[type].label})`, user.name);
-    setMsg(''); setPage(''); setType('bug'); setBusy(false);
+    setMsg(''); setPage(''); setType('bug'); setImages([]); setBusy(false);
     await load();
   };
 
@@ -7447,6 +8585,31 @@ function FeedbackView({ user, allUsers }) {
         <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={3}
           placeholder={type === 'bug' ? 'Jelaskan bug-nya: apa yang terjadi, di halaman mana, langkahnya gimana…' : 'Tulis saran/masukanmu di sini…'}
           className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none text-sm" />
+        {/* Lampiran screenshot biar laporan tepat sasaran */}
+        <div className="mt-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {images.map((img, i) => (
+              <div key={i} className="relative group">
+                <img src={img} alt={`Lampiran ${i + 1}`} onClick={() => setLightbox({ src: img, title: `Lampiran ${i + 1}` })}
+                  className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                <button onClick={() => setImages(images.filter((_, x) => x !== i))}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+            {images.length < 3 && (
+              <button onClick={() => imgRef.current?.click()} disabled={imgBusy}
+                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 transition disabled:opacity-50">
+                <ImagePlus className="w-5 h-5" />
+                <span className="text-[9px] font-semibold mt-0.5">{imgBusy ? '...' : 'Foto'}</span>
+              </button>
+            )}
+            <input ref={imgRef} type="file" accept="image/*" multiple className="hidden"
+              onChange={e => { addImages(e.target.files); e.target.value = ''; }} />
+          </div>
+          <div className="text-[10px] text-slate-400 mt-1">📎 Lampirkan screenshot bug/masukan (maks. 3 gambar) supaya tim teknis langsung paham.</div>
+        </div>
         <div className="flex flex-col sm:flex-row gap-2 mt-2">
           <input type="text" value={page} onChange={e => setPage(e.target.value)}
             placeholder="Halaman terkait (opsional, mis. Absensi, Kalender)"
@@ -7482,9 +8645,7 @@ function FeedbackView({ user, allUsers }) {
             return (
               <div key={item.id} className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4">
                 <div className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-700 text-white grid place-items-center font-bold text-sm flex-shrink-0">
-                    {item.userName.charAt(0).toUpperCase()}
-                  </div>
+                  <Avatar person={allUsers.find(u => u.id === item.userId) || { name: item.userName }} size="md" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-slate-900 text-sm">{item.userName}</span>
@@ -7499,6 +8660,17 @@ function FeedbackView({ user, allUsers }) {
                     </div>
                     <div className="text-[11px] text-slate-400 mt-0.5">{fmtDateTime(item.createdAt)}</div>
                     <div className="text-sm text-slate-700 mt-2 whitespace-pre-wrap">{item.message}</div>
+
+                    {/* Lampiran gambar */}
+                    {(item.images || []).length > 0 && (
+                      <div className="flex gap-2 mt-2 flex-wrap">
+                        {item.images.map((img, i) => (
+                          <img key={i} src={img} alt={`Lampiran ${i + 1}`}
+                            onClick={() => setLightbox({ src: img, title: `Lampiran dari ${item.userName}` })}
+                            className="w-20 h-20 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition" />
+                        ))}
+                      </div>
+                    )}
 
                     {/* Status controls (owner/manajer) */}
                     {isManager && (
@@ -7547,12 +8719,13 @@ function FeedbackView({ user, allUsers }) {
           })}
         </div>
       )}
+      {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.title} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
 
 function SettingsView({ user, settings, onSave }) {
-  if (!can.editAppSettings(user)) return <NoAccess />;
+  const allowed = can.editAppSettings(user);
   const [form, setForm] = useState({
     ...settings,
     customRoles: { ...DEFAULT_ROLE_LABELS, ...(settings.customRoles || {}) },
@@ -7664,6 +8837,8 @@ function SettingsView({ user, settings, onSave }) {
   };
 
   const resetRoleLabels = () => setForm({ ...form, customRoles: { ...DEFAULT_ROLE_LABELS } });
+
+  if (!allowed) return <NoAccess />;
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -8165,6 +9340,7 @@ function DailyReportsView({ user, allUsers }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
   const [filter, setFilter] = useState({
     date: new Date().toISOString().split('T')[0],
     author: 'all'
@@ -8421,6 +9597,18 @@ function DailyReportsView({ user, allUsers }) {
                           <DynamicFieldDisplay key={f.id} field={f} />
                         ))}
                       </div>
+                      {(r.attachments || []).length > 0 && (
+                        <div className="mt-3 pt-2 border-t border-slate-100">
+                          <div className="text-[10px] font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Paperclip className="w-3 h-3" /> Bukti ({r.attachments.length})</div>
+                          <div className="flex gap-2 flex-wrap">
+                            {r.attachments.map((img, i) => (
+                              <img key={i} src={img} alt={`Bukti ${i + 1}`}
+                                onClick={() => setLightbox({ src: img, title: `Bukti laporan ${r.authorName} · ${fmtDate(r.date)}` })}
+                                className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition" />
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -8436,6 +9624,7 @@ function DailyReportsView({ user, allUsers }) {
         onSave={handleSaveTemplates} onClose={() => setShowTemplateManager(false)} />}
       {showDownloadModal && <DownloadRangeModal filterableAuthors={filterableAuthors} reportsCount={visibleReports.length}
         onDownload={downloadInRange} onClose={() => setShowDownloadModal(false)} />}
+      {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.title} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
@@ -8722,6 +9911,22 @@ function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
   const canPickTemplate = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader' || templates.length > 1;
   const canPin = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader';
 
+  // Lampiran bukti (screenshot GMV, hasil kerja, dll)
+  const [attachments, setAttachments] = useState(report?.attachments || []);
+  const [attBusy, setAttBusy] = useState(false);
+  const attRef = useRef();
+  const addAttachments = async (files) => {
+    setAttBusy(true);
+    try {
+      const room = 3 - attachments.length;
+      const picked = Array.from(files).slice(0, room);
+      const next = [];
+      for (const f of picked) next.push(await compressImageFile(f, { maxDim: 1100, quality: 0.7 }));
+      setAttachments(prev => [...prev, ...next].slice(0, 3));
+    } catch (e) { alert(e.message || 'Gagal memproses gambar.'); }
+    setAttBusy(false);
+  };
+
   const setFieldValue = (fieldId, value) => {
     setForm({ ...form, _values: { ...form._values, [fieldId]: value } });
   };
@@ -8743,6 +9948,7 @@ function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
       templateId: activeTemplate?.id || null,
       templateName: activeTemplate?.name || null,
       fieldsSnapshot,
+      attachments,
       pinToDashboard: form.pinToDashboard
     });
   };
@@ -8788,6 +9994,31 @@ function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
               onChange={v => setFieldValue(f.id, v)} />
           ))}
         </div>
+
+        {/* Bukti foto / screenshot */}
+        <Field label="Bukti Foto / Screenshot (opsional, maks. 3)">
+          <div className="flex items-center gap-2 flex-wrap">
+            {attachments.map((img, i) => (
+              <div key={i} className="relative">
+                <img src={img} alt={`Bukti ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                <button onClick={() => setAttachments(attachments.filter((_, x) => x !== i))}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+            {attachments.length < 3 && (
+              <button type="button" onClick={() => attRef.current?.click()} disabled={attBusy}
+                className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 transition disabled:opacity-50">
+                <Paperclip className="w-4 h-4" />
+                <span className="text-[9px] font-semibold mt-0.5">{attBusy ? '...' : 'Upload'}</span>
+              </button>
+            )}
+            <input ref={attRef} type="file" accept="image/*" multiple className="hidden"
+              onChange={e => { addAttachments(e.target.files); e.target.value = ''; }} />
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">💡 Lampirkan screenshot GMV / bukti hasil kerja supaya laporan tervalidasi.</div>
+        </Field>
 
         {canPin && (
           <label className="flex items-start gap-2 bg-indigo-50 border border-indigo-200 p-3 rounded-lg cursor-pointer">
@@ -9055,6 +10286,8 @@ function TemplateBuilderModal({ template, allUsers, existingTemplates, onSave, o
 
 function FieldBuilder({ field, idx, total, onChange, onRemove, onMoveUp, onMoveDown }) {
   const [expanded, setExpanded] = useState(!field.label);
+  // Teks mentah opsi disimpan lokal supaya Enter/baris baru tidak hilang saat mengetik
+  const [optionsText, setOptionsText] = useState((field.options || []).join('\n'));
   return (
     <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
       <div className="flex items-center gap-2 mb-2">
@@ -9101,11 +10334,15 @@ function FieldBuilder({ field, idx, total, onChange, onRemove, onMoveUp, onMoveD
           </div>
           {(field.type === 'select' || field.type === 'radio' || field.type === 'checkbox') && (
             <div>
-              <label className="text-[10px] uppercase font-semibold text-slate-500">Pilihan (satu per baris)</label>
-              <textarea value={(field.options || []).join('\n')}
-                onChange={e => onChange('options', e.target.value.split('\n').map(s => s.trim()).filter(Boolean))}
-                rows={3} placeholder="Pilihan 1&#10;Pilihan 2&#10;Pilihan 3"
+              <label className="text-[10px] uppercase font-semibold text-slate-500">Pilihan (satu per baris — tekan Enter untuk tambah pilihan)</label>
+              <textarea value={optionsText}
+                onChange={e => {
+                  setOptionsText(e.target.value);
+                  onChange('options', e.target.value.split('\n').map(s => s.trim()).filter(Boolean));
+                }}
+                rows={4} placeholder="Pilihan 1&#10;Pilihan 2&#10;Pilihan 3"
                 className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm mt-0.5 resize-none font-mono" />
+              <div className="text-[10px] text-slate-400 mt-0.5">{(field.options || []).length} pilihan terdeteksi</div>
             </div>
           )}
           <label className="flex items-center gap-2 text-sm">
@@ -9219,7 +10456,7 @@ function CalendarView({ user, allUsers }) {
         <div className="flex-1 text-sm">
           <div className="font-semibold text-blue-900">Integrasi Google Calendar</div>
           <div className="text-blue-800 mt-0.5">
-            Pilih peserta saat membuat agenda → peserta yang sudah isi <b>Gmail</b> (di Profil) akan otomatis <b>diundang</b> ke Google Calendar saat agenda dibuka & disimpan lewat tombol <b>"Google Calendar"</b>. Bisa juga download <b>.ics</b> untuk Outlook/Apple Calendar.
+            Pilih peserta saat membuat agenda → peserta yang sudah isi <b>Gmail</b> (di Profil) akan otomatis <b>diundang</b> ke Google Calendar saat agenda dibuka & disimpan lewat tombol <b>"Google Calendar"</b>. Bisa juga download <b>.ics</b> untuk Outlook/Apple Calendar. 🔔 Peserta otomatis dapat <b>notifikasi di lonceng</b> (pengingat H-1 sore & pagi hari-H) + pop-up saat aplikasi terbuka.
             {!canManage && <span className="block mt-1 text-blue-700">Kamu bisa <b>melihat</b> agenda. Penambahan agenda dilakukan oleh Leader/Manajer/CEO/Sekretariat.</span>}
           </div>
         </div>

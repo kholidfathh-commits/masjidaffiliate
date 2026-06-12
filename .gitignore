@@ -1,0 +1,13 @@
+# Dependencies — Vercel install sendiri saat deploy, jangan di-commit
+node_modules/
+
+# Hasil build lokal — Vercel build sendiri
+dist/
+
+# File sistem macOS
+.DS_Store
+**/.DS_Store
+
+# Log & cache
+*.log
+.vite/
