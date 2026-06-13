@@ -317,6 +317,7 @@ const DEFAULT_ATTENDANCE_CONFIG = {
   lokasiLng: null,
   radiusM: 200,
   selfieWajib: true,   // wajib foto selfie saat absen (anti-kecurangan)
+  izinHmin: 1,         // pengajuan izin minimal H-berapa (sakit boleh hari-H)
   custom: {}           // jam kerja per karyawan: { [userId]: { jamMasuk, jamPulang, toleransiMenit, flexible } }
 };
 
@@ -340,7 +341,7 @@ const BACKUP_KEYS = [
   'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all', 'content-ideas:all',
   'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all',
   'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history',
-  'partner-feedback:all', 'swot:external', 'backup:last'
+  'partner-feedback:all', 'swot:external', 'backup:last', 'leave-requests:all'
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
@@ -474,20 +475,21 @@ function normalizeKpiConfig(cfg) {
 }
 // Hitung KPI seorang user untuk bulan mKey
 function computeKpi(userId, data, mKey, cfg) {
-  const { tasks = [], attendance = [], reports = [], gmvEntries = [], gmvTargets = {}, affAccounts = [], affEntries = [], allUsers = [] } = data || {};
+  const { tasks = [], attendance = [], reports = [], gmvEntries = [], gmvTargets = {}, affAccounts = [], affEntries = [], allUsers = [], templates = [], leaves = [] } = data || {};
   const c = normalizeKpiConfig(cfg);
   const w = c.weights;
   const workdays = c.workdays || 26;
   const u = allUsers.find(x => x.id === userId);
 
-  // 1) Kehadiran: hari unik absen masuk bulan ini
+  // 1) Kehadiran: hadir penuh = 1 hari, izin disetujui = kredit 0.5 hari, alpa = 0 (otomatis mengurangi)
   const myIns = attendance.filter(a => a.userId === userId && a.type === 'in' && (a.timestamp || '').slice(0, 7) === mKey);
   const attDays = new Set(myIns.map(a => (a.timestamp || '').slice(0, 10))).size;
-  const attScore = Math.min(attDays / workdays, 1) * w.attendance;
+  const izinDays = new Set(leaves.filter(l => l.userId === userId && l.status === 'approved' && (l.date || '').slice(0, 7) === mKey).map(l => l.date)).size;
+  const attScore = Math.min((attDays + izinDays * 0.5) / workdays, 1) * w.attendance;
 
-  // 2) Disiplin: % absen masuk yang tepat waktu (tidak telat)
+  // 2) Disiplin: % absen masuk tepat waktu. Tidak pernah absen = 0 (bukan 100%) — tanpa kehadiran tidak ada disiplin.
   const lateCount = myIns.filter(a => a.late).length;
-  const punctRate = myIns.length > 0 ? (myIns.length - lateCount) / myIns.length : 1;
+  const punctRate = myIns.length > 0 ? (myIns.length - lateCount) / myIns.length : 0;
   const punctScore = punctRate * w.punctuality;
 
   // 3) Tugas: 70% kualitas (selesai vs lewat deadline) + 30% volume
@@ -499,9 +501,10 @@ function computeKpi(userId, data, mKey, cfg) {
   const volume = Math.min(done / (c.taskVolumeTarget || 20), 1);
   const taskUnit = rate * 0.7 + volume * 0.3;
 
-  // 4) Laporan harian: hari unik lapor bulan ini
+  // 4) Laporan harian: hanya dinilai kalau Leader sudah membuatkan form (staff tanpa form = tidak diwajibkan, dapat kredit penuh)
   const repDays = new Set(reports.filter(r => r.authorId === userId && (r.date || '').slice(0, 7) === mKey).map(r => r.date)).size;
-  const repUnit = Math.min(repDays / workdays, 1);
+  const reportRequired = !(u && u.role === 'operasional' && !templates.some(t => t.assignedUserIds?.includes(userId)));
+  const repUnit = reportRequired ? Math.min(repDays / workdays, 1) : 1;
 
   // 5) Capaian Target GMV — sesuai tanggung jawabnya:
   //    a. PIC akun affiliator → rata-rata pencapaian akun vs jalur target (pace bulan berjalan)
@@ -554,10 +557,10 @@ function computeKpi(userId, data, mKey, cfg) {
   const total = Math.round(attScore + punctScore + taskScore + repScore + targetScore);
   return {
     total,
-    attendance: { days: attDays, score: Math.round(attScore), max: w.attendance },
-    punctuality: { rate: Math.round(punctRate * 100), late: lateCount, score: Math.round(punctScore), max: w.punctuality },
+    attendance: { days: attDays, izin: izinDays, score: Math.round(attScore), max: w.attendance },
+    punctuality: { rate: Math.round(punctRate * 100), late: lateCount, hasData: myIns.length > 0, score: Math.round(punctScore), max: w.punctuality },
     tasks: { done, missed, rate: Math.round(rate * 100), score: Math.round(taskScore), max: targetApplicable ? w.tasks : Math.round(w.tasks + w.target * (w.tasks / Math.max(w.tasks + w.reports, 1))) },
-    reports: { days: repDays, score: Math.round(repScore), max: targetApplicable ? w.reports : Math.round(w.reports + w.target * (w.reports / Math.max(w.tasks + w.reports, 1))) },
+    reports: { days: repDays, required: reportRequired, score: Math.round(repScore), max: targetApplicable ? w.reports : Math.round(w.reports + w.target * (w.reports / Math.max(w.tasks + w.reports, 1))) },
     target: { applicable: targetApplicable, attain: targetApplicable ? Math.round(targetAttain * 100) : null, info: targetInfo, score: Math.round(targetScore), max: w.target }
   };
 }
@@ -1286,7 +1289,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
     {
       label: 'Operasional',
       items: [
-        { id: 'tasks', label: 'Tiket', icon: CheckSquare, show: true },
+        { id: 'tasks', label: 'Tiket', icon: CheckSquare, show: user.role !== 'operasional' },
         { id: 'todos', label: 'To-Do Pribadi', icon: KanbanSquare, show: true },
         { id: 'daily-reports', label: 'Laporan Harian', icon: ClipboardList, show: true },
         { id: 'attendance', label: 'Absensi', icon: MapPin, show: true },
@@ -1312,7 +1315,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'gmv', label: 'Target & GMV', icon: BarChart3, show: canAccessFeature(user, 'gmv') },
         { id: 'affiliate-accounts', label: 'Akun Affiliator', icon: Target, show: canAccessFeature(user, 'affiliate-accounts') },
         { id: 'kpi', label: 'KPI Tim', icon: Award, show: true },
-        { id: 'reports', label: 'Laporan Mingguan', icon: FileText, show: true },
+        { id: 'reports', label: 'Laporan Mingguan', icon: FileText, show: user.role !== 'operasional' },
         { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, show: true }
       ]
     },
@@ -1512,6 +1515,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
       const tasks = await storage.getList('tasks:all');
       const announcements = await storage.getList('announcements:all');
       const calEvents = await storage.getList('calendar:all');
+      const leaveReqs = await storage.getList('leave-requests:all');
       const lastView = await storage.get('ui:last-notif-view', false);
       if (stopped) return;
       setLastNotifView(lastView?.value || new Date(Date.now() - 7 * 86400000).toISOString());
@@ -1541,8 +1545,29 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
           });
         });
       }
-      // Tasks assigned to me
-      tasks.filter(t => t.assigneeId === user.id && t.createdById !== user.id)
+      // Pengajuan izin: pending → hanya ke Owner/Manajer/Leader (leader: timnya); hasil keputusan → ke pemohon
+      if (user.role === 'owner' || user.role === 'manajer' || user.role === 'leader') {
+        leaveReqs.filter(l => l.status === 'pending')
+          .filter(l => user.role !== 'leader' || (allUsers.find(u => u.id === l.userId)?.leaderId === user.id))
+          .slice(0, 8).forEach(l => notifs.push({
+            id: `leave-p-${l.id}`, type: 'leave',
+            title: `🟡 Pengajuan izin: ${l.userName} · ${fmtDate(l.date)}`,
+            subtitle: `${l.type === 'sakit' ? 'Sakit' : 'Izin'} — ${(l.reason || '').slice(0, 50)}`,
+            time: l.createdAt,
+            action: () => setView('attendance')
+          }));
+      }
+      leaveReqs.filter(l => l.userId === user.id && l.status !== 'pending' && l.decidedAt)
+        .slice(0, 5).forEach(l => notifs.push({
+          id: `leave-d-${l.id}`, type: 'leave',
+          title: `${l.status === 'approved' ? '✅ Izin disetujui' : '❌ Izin ditolak'} · ${fmtDate(l.date)}`,
+          subtitle: `oleh ${l.decidedByName || ''}${l.note ? ` — ${l.note.slice(0, 40)}` : ''}`,
+          time: l.decidedAt,
+          action: () => setView('attendance')
+        }));
+
+      // Tasks assigned to me (Tiket = fitur pengelola)
+      if (user.role !== 'operasional') tasks.filter(t => t.assigneeId === user.id && t.createdById !== user.id)
         .slice(0, 10).forEach(t => {
           notifs.push({
             id: `task-${t.id}`, type: 'task',
@@ -1656,7 +1681,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
   };
 
   const quickActions = [
-    { label: 'Tiket Baru', icon: CheckSquare, view: 'tasks', color: 'text-blue-600 bg-blue-50' },
+    ...(user.role !== 'operasional' ? [{ label: 'Tiket Baru', icon: CheckSquare, view: 'tasks', color: 'text-blue-600 bg-blue-50' }] : []),
     { label: 'Creator Baru', icon: Users, view: 'creators', color: 'text-purple-600 bg-purple-50' },
     { label: 'Laporan Harian', icon: ClipboardList, view: 'daily-reports', color: 'text-blue-600 bg-blue-50' },
     { label: 'Ide Konten Baru', icon: Lightbulb, view: 'content-ideas', color: 'text-amber-600 bg-amber-50' },
@@ -1671,7 +1696,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
     {toasts.length > 0 && (
       <div className="fixed top-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm pointer-events-none">
         {toasts.map(t => {
-          const Icon = t.type === 'task' ? CheckSquare : t.type === 'comment' ? MessageSquare : t.type === 'calendar' ? CalendarDays : Megaphone;
+          const Icon = t.type === 'task' ? CheckSquare : t.type === 'comment' ? MessageSquare : t.type === 'calendar' ? CalendarDays : t.type === 'leave' ? Clock : Megaphone;
           const accent = t.type === 'task' ? '#2563EB' : t.type === 'comment' ? '#9333EA' : t.type === 'calendar' ? '#0284C7' : '#D97706';
           const bg = t.type === 'task' ? '#EFF6FF' : t.type === 'comment' ? '#FAF5FF' : t.type === 'calendar' ? '#E0F2FE' : '#FFFBEB';
           return (
@@ -1871,7 +1896,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                   <div>
                     {notifications.map(n => {
                       const isUnread = (n.time || '') > (lastNotifView || '');
-                      const icon = n.type === 'task' ? CheckSquare : n.type === 'comment' ? MessageSquare : n.type === 'calendar' ? CalendarDays : Megaphone;
+                      const icon = n.type === 'task' ? CheckSquare : n.type === 'comment' ? MessageSquare : n.type === 'calendar' ? CalendarDays : n.type === 'leave' ? Clock : Megaphone;
                       const Icon = icon;
                       const color = n.type === 'task' ? 'text-blue-600 bg-blue-50' : n.type === 'comment' ? 'text-purple-600 bg-purple-50' : n.type === 'calendar' ? 'text-sky-600 bg-sky-50' : 'text-amber-600 bg-amber-50';
                       return (
@@ -1932,6 +1957,8 @@ function Dashboard({ user, allUsers, setView, settings }) {
   const [partnerFeedback, setPartnerFeedback] = useState([]);
   const [externalSwot, setExternalSwot] = useState(null);
   const [lastBackup, setLastBackup] = useState(undefined);
+  const [reportTemplates, setReportTemplates] = useState([]);
+  const [leaves, setLeaves] = useState([]);
   const [showTargetsManager, setShowTargetsManager] = useState(false);
 
   const loadTargets = async () => setTargets(await storage.getList('targets:all'));
@@ -1955,6 +1982,8 @@ function Dashboard({ user, allUsers, setView, settings }) {
       setPartnerFeedback(await storage.getList('partner-feedback:all'));
       setExternalSwot(await storage.get('swot:external'));
       setLastBackup(await storage.get('backup:last'));
+      setReportTemplates(await storage.getList('daily-report-templates:all'));
+      setLeaves(await storage.getList('leave-requests:all'));
       await loadTargets();
     })();
   }, []);
@@ -2185,7 +2214,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
 
       {/* Fokus Hari Ini — 3 prioritas teratas per orang */}
       <FocusTodayWidget user={user} tasks={tasks} dailyReports={dailyReports}
-        affAccounts={affAccounts} affEntries={affEntries} problems={problems} setView={setView} />
+        affAccounts={affAccounts} affEntries={affEntries} problems={problems} templates={reportTemplates} setView={setView} />
 
       {/* Dashboard Bisnis: Keseluruhan + per-divisi MCN/TAP/Affiliator */}
       {canAccessFeature(user, 'gmv') && (
@@ -2195,18 +2224,19 @@ function Dashboard({ user, allUsers, setView, settings }) {
           partnerFeedback={partnerFeedback} externalSwot={externalSwot} settings={settings} user={user} />
       )}
 
-      {/* KPI Saya + Masalah Aktif */}
+      {/* KPI Saya + Masalah Aktif (ringkasan masalah hanya utk pengelola) */}
       <DashboardKpiProblemRow
-        kpi={computeKpi(user.id, { tasks, attendance: attendanceRecs, reports: dailyReports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers }, monthKey(), kpiConfig)}
+        kpi={computeKpi(user.id, { tasks, attendance: attendanceRecs, reports: dailyReports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, templates: reportTemplates, leaves }, monthKey(), kpiConfig)}
         target={kpiConfig.targetScore || 85}
         openProblems={problems.filter(p => p.status !== 'resolved')}
         canHandle={user.role === 'owner' || user.role === 'manajer' || user.role === 'leader'}
+        showProblems={user.role !== 'operasional'}
         onKpi={() => setView('kpi')} onProblems={() => setView('problems')} />
 
       {/* Evaluasi otomatis */}
       <DashboardEvalWidget user={user} tasks={tasks} attendance={attendanceRecs} reports={dailyReports}
         gmvEntries={gmvEntries} gmvTargets={gmvTargets} affAccounts={affAccounts} affEntries={affEntries}
-        problems={problems} kpiConfig={kpiConfig} allUsers={allUsers} onNavigate={setView} />
+        problems={problems} kpiConfig={kpiConfig} allUsers={allUsers} templates={reportTemplates} leaves={leaves} onNavigate={setView} />
 
       {/* Stats grid - compact with badges */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2411,7 +2441,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
 
 // ============ TARGET WIDGET (Dashboard) ============
 // Evaluasi otomatis (rule-based) — baca data, hasilkan insight prioritas
-function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, problems, kpiConfig, allUsers }) {
+function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, problems, kpiConfig, allUsers, templates = [], leaves = [] }) {
   const out = [];
   const mk = monthKey();
   const today = dayKey();
@@ -2476,16 +2506,17 @@ function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTar
 
   // 5) Belum lapor harian (untuk owner/manajer/leader: tim; lainnya: diri sendiri)
   const scopeUsers = isOwnerMgr ? allUsers : (user.role === 'leader' ? allUsers.filter(u => u.leaderId === user.id || u.id === user.id) : [user]);
+  const mustReport = (u) => u.role !== 'operasional' || templates.some(t => t.assignedUserIds?.includes(u.id));
   const reportedToday = new Set(reports.filter(r => r.date === today).map(r => r.authorId));
-  const notReported = scopeUsers.filter(u => !reportedToday.has(u.id));
+  const notReported = scopeUsers.filter(u => mustReport(u) && !reportedToday.has(u.id));
   if (isOwnerMgr || user.role === 'leader') {
     if (notReported.length > 0 && new Date().getHours() >= 12) out.push({ level: 'info', text: `${notReported.length} dari ${scopeUsers.length} anggota belum lapor harian.`, action: { label: 'Lihat', view: 'daily-reports' } });
   } else {
-    if (!reportedToday.has(user.id) && new Date().getHours() >= 12) out.push({ level: 'warning', text: `Anda belum mengisi laporan harian hari ini.`, action: { label: 'Lapor', view: 'daily-reports' } });
+    if (mustReport(user) && !reportedToday.has(user.id) && new Date().getHours() >= 12) out.push({ level: 'warning', text: `Anda belum mengisi laporan harian hari ini.`, action: { label: 'Lapor', view: 'daily-reports' } });
   }
 
   // 6) KPI pribadi
-  const myKpi = computeKpi(user.id, { tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers }, mk, kpiConfig);
+  const myKpi = computeKpi(user.id, { tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, templates, leaves }, mk, kpiConfig);
   const target = kpiConfig.targetScore || 85;
   if (myKpi.total < target) {
     const weak = [];
@@ -2515,6 +2546,11 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
   const [extSwot, setExtSwot] = useState(externalSwot);
   useEffect(() => { setExtSwot(externalSwot); }, [externalSwot]);
   const mKey = monthKey();
+
+  // Staff terkunci ke divisinya sendiri (MCN ya MCN saja) — SWOT/kontribusi/PPT khusus pengelola
+  const isMgmtUser = !user || user.role !== 'operasional' || (user.division || '') === 'manajemen' || (user.division || '') === 'keuangan';
+  const lockedDiv = !isMgmtUser && GMV_DIVISIONS[user.division] ? user.division : null;
+  useEffect(() => { if (lockedDiv) setScope(lockedDiv); }, [lockedDiv]);
   const dim = daysInMonth(mKey);
   const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
 
@@ -2625,18 +2661,20 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
           <p className="text-xs text-slate-500 mt-0.5">GMV {isAll ? 'gabungan semua lini' : GMV_DIVISIONS[scope].label} · {monthLabel}</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {TABS.map(t => (
+          {TABS.filter(t => !lockedDiv || t.id === lockedDiv).map(t => (
             <button key={t.id} onClick={() => setScope(t.id)}
               style={scope === t.id ? { backgroundColor: '#2563EB', color: '#fff', borderColor: '#2563EB' } : {}}
               className="text-xs font-bold px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 transition">
               {t.label}
             </button>
           ))}
-          <button onClick={() => setShowPpt(true)}
-            title="Download laporan pekanan/bulanan sebagai PPT presentasi"
-            className="text-xs font-bold px-3.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition flex items-center gap-1.5">
-            <Presentation className="w-3.5 h-3.5" /> Laporan PPT
-          </button>
+          {isMgmtUser && (
+            <button onClick={() => setShowPpt(true)}
+              title="Download laporan pekanan/bulanan sebagai PPT presentasi"
+              className="text-xs font-bold px-3.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition flex items-center gap-1.5">
+              <Presentation className="w-3.5 h-3.5" /> Laporan PPT
+            </button>
+          )}
         </div>
       </div>
 
@@ -2762,8 +2800,8 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
             </div>
           )}
 
-          {/* Evaluasi otomatis format SWOT — per fokus tab */}
-          <SwotPanel analysis={analysis} canEdit={canEditExternal} external={extSwot} onSaveExternal={saveExternalSwot} />
+          {/* Evaluasi otomatis format SWOT — khusus Owner/Manajer/Leader */}
+          {isMgmtUser && <SwotPanel analysis={analysis} canEdit={canEditExternal} external={extSwot} onSaveExternal={saveExternalSwot} />}
         </div>
       )}
 
@@ -3413,12 +3451,12 @@ function DashboardEvalWidget(props) {
   );
 }
 
-function DashboardKpiProblemRow({ kpi, target, openProblems, canHandle, onKpi, onProblems }) {
+function DashboardKpiProblemRow({ kpi, target, openProblems, canHandle, onKpi, onProblems, showProblems = true }) {
   const isMumtaz = kpi.total >= target;
   const ringColor = kpi.total >= target ? '#10B981' : kpi.total >= target * 0.7 ? '#F59E0B' : '#EF4444';
   const kritis = openProblems.filter(p => p.urgency === 'kritis').length;
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className={`grid grid-cols-1 ${showProblems ? 'sm:grid-cols-2' : ''} gap-4`}>
       {/* KPI Saya */}
       <button onClick={onKpi} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex items-center gap-4 text-left hover:border-slate-300 transition lift-on-hover">
         <div className="relative w-16 h-16 flex-shrink-0">
@@ -3436,7 +3474,8 @@ function DashboardKpiProblemRow({ kpi, target, openProblems, canHandle, onKpi, o
         <ArrowRight className="w-4 h-4 text-slate-300" />
       </button>
 
-      {/* Masalah Aktif */}
+      {/* Masalah Aktif — ringkasan hanya untuk Owner/Manajer/Leader */}
+      {showProblems && (
       <button onClick={onProblems} className={`rounded-2xl border shadow-sm p-5 flex items-center gap-4 text-left transition lift-on-hover ${openProblems.length > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
         <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${openProblems.length > 0 ? 'bg-red-100' : 'bg-emerald-100'}`}>
           {openProblems.length > 0 ? <AlertCircle className="w-7 h-7 text-red-600" /> : <CheckCircle2 className="w-7 h-7 text-emerald-600" />}
@@ -3448,29 +3487,32 @@ function DashboardKpiProblemRow({ kpi, target, openProblems, canHandle, onKpi, o
         </div>
         <ArrowRight className="w-4 h-4 text-slate-300" />
       </button>
+      )}
     </div>
   );
 }
 
 // Fokus Hari Ini — 3 prioritas teratas per orang, dihitung otomatis (prinsip: prioritas yang jelas)
-function FocusTodayWidget({ user, tasks, dailyReports, affAccounts, affEntries, problems, setView }) {
+function FocusTodayWidget({ user, tasks, dailyReports, affAccounts, affEntries, problems, templates = [], setView }) {
   const today = dayKey();
   const now = new Date();
   const items = [];
 
-  // 1) Tiket terlambat (paling urgent)
-  tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline && new Date(t.deadline) < now)
+  const isStaff = user.role === 'operasional';
+  // 1) Tiket terlambat (paling urgent) — staff tidak punya akses Tiket
+  if (!isStaff) tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline && new Date(t.deadline) < now)
     .sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''))
     .forEach(t => items.push({ level: 0, icon: '🔴', text: `Selesaikan tiket terlambat: "${t.title}"`, sub: `lewat ${Math.max(1, Math.ceil((now - new Date(t.deadline)) / 86400000))} hari`, view: 'tasks' }));
   // 2) Tiket deadline hari ini
-  tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline === today)
+  if (!isStaff) tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline === today)
     .forEach(t => items.push({ level: 1, icon: '⏰', text: `Deadline hari ini: "${t.title}"`, sub: 'jangan sampai lewat', view: 'tasks' }));
   // 3) Akun GMV yang saya pegang belum diisi hari ini
   affAccounts.filter(a => a.active !== false && a.picId === user.id)
     .filter(a => !affEntries.some(e => e.accountId === a.id && e.date === today))
     .forEach(a => items.push({ level: 2, icon: '💰', text: `Input GMV hari ini: akun ${a.name}`, sub: 'goal bulanan ikut ter-update', view: 'affiliate-accounts' }));
-  // 4) Laporan harian belum submit (mulai diingatkan jam 10)
-  if (now.getHours() >= 10 && !dailyReports.some(r => r.authorId === user.id && r.date === today)) {
+  // 4) Laporan harian belum submit (mulai diingatkan jam 10; staff hanya jika Leader sudah membuatkan form)
+  const wajibLapor = !isStaff || templates.some(t => t.assignedUserIds?.includes(user.id));
+  if (wajibLapor && now.getHours() >= 10 && !dailyReports.some(r => r.authorId === user.id && r.date === today)) {
     items.push({ level: 3, icon: '📝', text: 'Isi laporan harian', sub: 'bukti kerja + nilai KPI-mu', view: 'daily-reports' });
   }
   // 5) Masalah kritis (untuk pengelola)
@@ -3479,7 +3521,7 @@ function FocusTodayWidget({ user, tasks, dailyReports, affAccounts, affEntries, 
       .forEach(p => items.push({ level: 4, icon: '🚨', text: `Tangani masalah kritis: "${p.title}"`, sub: 'selesaikan sampai akar (5-Why)', view: 'problems' }));
   }
   // 6) Lanjutkan yang sedang dikerjakan
-  tasks.filter(t => t.assigneeId === user.id && t.status === 'in_progress')
+  if (!isStaff) tasks.filter(t => t.assigneeId === user.id && t.status === 'in_progress')
     .forEach(t => items.push({ level: 5, icon: '▶️', text: `Lanjutkan: "${t.title}"`, sub: 'sedang dikerjakan', view: 'tasks' }));
 
   const top3 = items.sort((a, b) => a.level - b.level).slice(0, 3);
@@ -4285,6 +4327,7 @@ function ResetPasswordModal({ target, onSave, onClose }) {
 
 // ============ TASKS ============
 function TasksView({ user, allUsers }) {
+  if (user.role === 'operasional') return <NoAccess />;
   const [tasks, setTasks] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -5441,6 +5484,7 @@ function ExportCreatorsButton({ creators }) {
 
 // ============ REPORTS ============
 function ReportsView({ user, allUsers }) {
+  if (user.role === 'operasional') return <NoAccess />;
   const [reports, setReports] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -5879,6 +5923,11 @@ function GmvView({ user, allUsers }) {
 
   const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
   const monthTargets = targets[mKey] || {};
+  // Scoping per divisi: MCN lihat MCN saja, TAP ya TAP, Affiliator ya Affiliator. Owner/Manajer/Manajemen/Keuangan lihat semua.
+  const myDiv = (isOwnerMgr || (user.division || '') === 'manajemen' || (user.division || '') === 'keuangan')
+    ? null
+    : (GMV_DIVISIONS[user.division] ? user.division : null);
+  const visibleDivs = Object.entries(GMV_DIVISIONS).filter(([div]) => !myDiv || div === myDiv);
 
   // Total bulan ini per divisi
   const monthTotals = useMemo(() => {
@@ -5940,7 +5989,7 @@ function GmvView({ user, allUsers }) {
   };
 
   // Entri bulan ini (untuk tabel), terbaru dulu
-  const monthEntries = entries.filter(e => e.date && e.date.startsWith(mKey))
+  const monthEntries = entries.filter(e => e.date && e.date.startsWith(mKey) && (!myDiv || e.division === myDiv))
     .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || ''));
 
   const canInputAny = isOwnerMgr || Object.keys(GMV_DIVISIONS).some(d => canInputGmv(user, d));
@@ -5976,9 +6025,9 @@ function GmvView({ user, allUsers }) {
         {mKey !== monthKey() && <button onClick={() => setMKey(monthKey())} className="text-xs text-blue-600 font-semibold hover:underline ml-1">Bulan ini</button>}
       </div>
 
-      {/* 3 Hero cards per divisi */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        {Object.entries(GMV_DIVISIONS).map(([div, cfg]) => {
+      {/* Hero cards per divisi (staff: hanya divisinya) */}
+      <div className={`grid grid-cols-1 ${visibleDivs.length > 1 ? 'md:grid-cols-3' : 'max-w-md'} gap-4 mb-6`}>
+        {visibleDivs.map(([div, cfg]) => {
           const total = monthTotals[div];
           const target = Number(monthTargets[div]) || 0;
           const pct = target > 0 ? Math.min(Math.round((total / target) * 100), 999) : 0;
@@ -6013,7 +6062,8 @@ function GmvView({ user, allUsers }) {
         })}
       </div>
 
-      {/* Total gabungan */}
+      {/* Total gabungan (disembunyikan saat tampilan terkunci per divisi) */}
+      {!myDiv && (
       <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-6 flex items-center justify-between">
         <div>
           <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Total GMV Gabungan · {monthLabel}</div>
@@ -6021,11 +6071,12 @@ function GmvView({ user, allUsers }) {
         </div>
         <Award className="w-10 h-10 text-amber-400" />
       </div>
+      )}
 
       {/* Traffic per divisi */}
       <h3 className="font-display font-bold text-slate-900 mb-3 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-600" /> Traffic Harian per Divisi</h3>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        {Object.entries(GMV_DIVISIONS).map(([div, cfg]) => {
+      <div className={`grid grid-cols-1 ${visibleDivs.length > 1 ? 'md:grid-cols-3' : ''} gap-4 mb-6`}>
+        {visibleDivs.map(([div, cfg]) => {
           const series = gmvDailySeries(entries, div, mKey);
           const ch = dailyChange[div];
           const isCurrentMonth = mKey === monthKey();
@@ -6716,6 +6767,8 @@ function KpiView({ user, allUsers }) {
   const [gmvTargets, setGmvTargets] = useState({});
   const [affAccounts, setAffAccounts] = useState([]);
   const [affEntries, setAffEntries] = useState([]);
+  const [kpiTemplates, setKpiTemplates] = useState([]);
+  const [kpiLeaves, setKpiLeaves] = useState([]);
   const [cfg, setCfg] = useState(DEFAULT_KPI_CONFIG);
   const [loading, setLoading] = useState(true);
   const [mKey, setMKey] = useState(monthKey());
@@ -6730,6 +6783,8 @@ function KpiView({ user, allUsers }) {
     setGmvTargets((await storage.get('gmv:targets')) || {});
     setAffAccounts(await storage.getList('affiliate-accounts:all'));
     setAffEntries(await storage.getList('affiliate-gmv:daily'));
+    setKpiTemplates(await storage.getList('daily-report-templates:all'));
+    setKpiLeaves(await storage.getList('leave-requests:all'));
     setCfg(normalizeKpiConfig(await storage.get('kpi:config')));
     setLoading(false);
   };
@@ -6744,7 +6799,7 @@ function KpiView({ user, allUsers }) {
     return allUsers.filter(u => u.id === user.id);
   }, [allUsers, user, isOwnerMgr]);
 
-  const kpiData = { tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers };
+  const kpiData = { tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, templates: kpiTemplates, leaves: kpiLeaves };
   const scored = useMemo(() => visibleUsers.map(u => ({
     user: u, kpi: computeKpi(u.id, kpiData, mKey, cfg)
   })).sort((a, b) => b.kpi.total - a.kpi.total), [visibleUsers, tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, mKey, cfg]);
@@ -6831,10 +6886,10 @@ function KpiView({ user, allUsers }) {
               {open && (
                 <div className="px-4 pb-4 pt-1 border-t border-slate-100">
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                    <KpiBreakdownItem label="Kehadiran" value={`${k.attendance.days}/${cfg.workdays} hari`} score={k.attendance.score} max={k.attendance.max} color="#10B981" />
-                    <KpiBreakdownItem label="Disiplin Waktu" value={`${k.punctuality.rate}% tepat waktu`} score={k.punctuality.score} max={k.punctuality.max} color="#06B6D4" sub={k.punctuality.late > 0 ? `${k.punctuality.late}× telat` : ''} />
+                    <KpiBreakdownItem label="Kehadiran" value={`${k.attendance.days} hadir${k.attendance.izin > 0 ? ` + ${k.attendance.izin} izin` : ''} / ${cfg.workdays} hari`} score={k.attendance.score} max={k.attendance.max} color="#10B981" sub={k.attendance.izin > 0 ? 'izin = kredit 50%' : ''} />
+                    <KpiBreakdownItem label="Disiplin Waktu" value={k.punctuality.hasData ? `${k.punctuality.rate}% tepat waktu` : 'belum pernah absen'} score={k.punctuality.score} max={k.punctuality.max} color="#06B6D4" sub={k.punctuality.late > 0 ? `${k.punctuality.late}× telat` : ''} />
                     <KpiBreakdownItem label="Tugas" value={`${k.tasks.done} selesai · ${k.tasks.rate}%`} score={k.tasks.score} max={k.tasks.max} color="#3B82F6" sub={k.tasks.missed > 0 ? `${k.tasks.missed} lewat deadline` : ''} />
-                    <KpiBreakdownItem label="Laporan Harian" value={`${k.reports.days}/${cfg.workdays} hari`} score={k.reports.score} max={k.reports.max} color="#8B5CF6" />
+                    <KpiBreakdownItem label="Laporan Harian" value={k.reports.required ? `${k.reports.days}/${cfg.workdays} hari` : 'belum ada form dari Leader'} score={k.reports.score} max={k.reports.max} color="#8B5CF6" sub={k.reports.required ? '' : 'tidak dinilai'} />
                     {k.target.applicable ? (
                       <KpiBreakdownItem label="Capaian Target" value={`${k.target.attain}% dari jalur (${k.target.info})`} score={k.target.score} max={k.target.max} color="#F59E0B" />
                     ) : (
@@ -8039,6 +8094,8 @@ function AttendanceView({ user, allUsers }) {
   const [showSettings, setShowSettings] = useState(false);
   const [editing, setEditing] = useState(null);  // record yang sedang diedit
   const [selfieFor, setSelfieFor] = useState(null); // 'in' | 'out' → buka kamera dulu
+  const [leaves, setLeaves] = useState([]);
+  const [showIzin, setShowIzin] = useState(false);
   const [lightbox, setLightbox] = useState(null);
   const [selfieLoading, setSelfieLoading] = useState(null); // recordId yang fotonya sedang dimuat
 
@@ -8047,6 +8104,7 @@ function AttendanceView({ user, allUsers }) {
   const load = async () => {
     const list = await storage.getList('attendance:all');
     setRecords(list);
+    setLeaves(await storage.getList('leave-requests:all'));
     const cfg = await storage.get('attendance:config');
     if (cfg) setConfig({ ...DEFAULT_ATTENDANCE_CONFIG, ...cfg });
     setLoading(false);
@@ -8173,6 +8231,44 @@ function AttendanceView({ user, allUsers }) {
       setBusy(false);
     }
   };
+
+  // ===== IZIN (pengajuan & persetujuan) =====
+  const izinHmin = Number(config.izinHmin ?? 1);
+  const canDecideLeave = (l) => {
+    if (user.role === 'owner' || user.role === 'manajer') return true;
+    if (user.role === 'leader') {
+      const target = allUsers.find(u => u.id === l.userId);
+      return target && target.leaderId === user.id;
+    }
+    return false;
+  };
+  const submitIzin = async (data) => {
+    const list = await storage.getList('leave-requests:all');
+    list.unshift({
+      id: uid(), userId: user.id, userName: user.name, division: user.division || '',
+      type: data.type, date: data.date, reason: data.reason,
+      status: 'pending', createdAt: new Date().toISOString()
+    });
+    await storage.set('leave-requests:all', list.slice(0, 1000));
+    await logActivity(`mengajukan ${data.type === 'sakit' ? 'izin sakit' : 'izin'} untuk ${fmtDate(data.date)}`, user.name);
+    setShowIzin(false); await load();
+  };
+  const cancelIzin = async (l) => {
+    if (!confirm(`Batalkan pengajuan izin ${fmtDate(l.date)}?`)) return;
+    await storage.set('leave-requests:all', (await storage.getList('leave-requests:all')).filter(x => x.id !== l.id));
+    await load();
+  };
+  const decideIzin = async (l, status) => {
+    const note = status === 'rejected' ? (prompt('Alasan penolakan (opsional):') || '') : '';
+    const list = (await storage.getList('leave-requests:all')).map(x => x.id === l.id
+      ? { ...x, status, note, decidedById: user.id, decidedByName: user.name, decidedAt: new Date().toISOString() } : x);
+    await storage.set('leave-requests:all', list);
+    await logActivity(`${status === 'approved' ? 'menyetujui' : 'menolak'} izin ${l.userName} (${fmtDate(l.date)})`, user.name);
+    await load();
+  };
+  const myLeaves = leaves.filter(l => l.userId === user.id).sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 6);
+  const pendingForMe = leaves.filter(l => l.status === 'pending' && canDecideLeave(l)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const approvedTodayLeave = leaves.find(l => l.userId === user.id && l.status === 'approved' && l.date === dayKey());
 
   // Lihat selfie sebuah record (dimuat saat diminta biar hemat data)
   const viewSelfie = async (r) => {
@@ -8319,6 +8415,62 @@ function AttendanceView({ user, allUsers }) {
     return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - d}%2C${lat - d}%2C${lng + d}%2C${lat + d}&layer=mapnik&marker=${lat}%2C${lng}`;
   };
 
+  // Kartu detail 1 record absen (dipakai tabel desktop & kartu mobile)
+  const renderRecDetail = (label, rec) => (
+                                <div key={label} className="bg-white rounded-xl border border-slate-200 p-3">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${label === 'Masuk' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{label.toUpperCase()}</span>
+                                    {rec ? (
+                                      <>
+                                        <span className="text-sm font-bold text-slate-800 tabular-nums">{fmtTime(rec.timestamp)}</span>
+                                        {rec.editedBy && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" title={`Diedit oleh ${rec.editedBy}`}>diedit</span>}
+                                        <span className="ml-auto flex items-center gap-0.5">
+                                          {rec.hasSelfie && (
+                                            <button onClick={() => viewSelfie(rec)} disabled={selfieLoading === rec.id} title="Lihat selfie"
+                                              className="text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition disabled:opacity-50">
+                                              <Camera className="w-4 h-4" />
+                                            </button>
+                                          )}
+                                          {rec.latitude && (
+                                            <a href={mapsLink(rec.latitude, rec.longitude)} target="_blank" rel="noreferrer" title="Buka Maps"
+                                              className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition">
+                                              <MapPin className="w-4 h-4" />
+                                            </a>
+                                          )}
+                                          {canEditRec(rec) && (
+                                            <button onClick={() => setEditing(rec)} title="Edit"
+                                              className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition">
+                                              <Edit2 className="w-4 h-4" />
+                                            </button>
+                                          )}
+                                          {canDeleteRec(rec) && (
+                                            <button onClick={() => deleteRecord(rec)} title="Hapus"
+                                              className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition">
+                                              <Trash2 className="w-4 h-4" />
+                                            </button>
+                                          )}
+                                        </span>
+                                      </>
+                                    ) : <span className="text-xs text-slate-400">belum ada data</span>}
+                                  </div>
+                                  {rec && (
+                                    <div className="mt-1.5 space-y-0.5">
+                                      <div className="text-[11px] text-slate-500 flex items-center gap-1 flex-wrap">
+                                        {rec.locationMismatch
+                                          ? <span className="text-rose-600 font-semibold">Lokasi tidak sesuai{rec.distanceM != null ? ` (±${rec.distanceM}m dari lokasi kerja)` : ''}</span>
+                                          : <span className="text-emerald-600 font-semibold">Lokasi sesuai</span>}
+                                        {rec.hasSelfie ? null : (config.selfieWajib !== false && <span className="text-slate-400">· tanpa selfie</span>)}
+                                        <a href={mapsLink(rec.latitude, rec.longitude)} target="_blank" rel="noreferrer"
+                                          className="text-blue-600 hover:underline inline-flex items-center gap-0.5">
+                                          Buka Maps <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                      </div>
+                                      {rec.note && <div className="text-[11px] text-slate-600 italic">"{rec.note}"</div>}
+                                    </div>
+                                  )}
+                                </div>
+  );
+
   if (loading) return <div className="text-slate-400 text-sm">Memuat absensi...</div>;
 
   return (
@@ -8411,6 +8563,75 @@ function AttendanceView({ user, allUsers }) {
         </div>
       </div>
 
+      {/* Banner izin hari ini */}
+      {approvedTodayLeave && (
+        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 text-sm text-blue-800 max-w-2xl">
+          ✋ Kamu <b>{approvedTodayLeave.type === 'sakit' ? 'izin sakit' : 'izin'}</b> hari ini (disetujui {approvedTodayLeave.decidedByName}). Tidak perlu absen.
+        </div>
+      )}
+
+      {/* IZIN: pengajuan saya + persetujuan utk pengelola */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="font-display font-bold text-slate-900">Izin Saya</h3>
+            <button onClick={() => setShowIzin(true)}
+              className="bg-white border border-blue-300 hover:bg-blue-50 text-blue-700 text-sm font-bold px-3.5 py-1.5 rounded-lg transition">
+              + Ajukan Izin
+            </button>
+          </div>
+          <div className="text-[11px] text-slate-400 mb-2">Izin biasa minimal H-{izinHmin} · sakit boleh hari-H · keputusan oleh Leader (atau Manajer bila Leader tidak ada) · izin yang disetujui tetap mengurangi poin KPI (kredit 50%), tanpa keterangan = 0.</div>
+          {myLeaves.length === 0 ? (
+            <div className="text-sm text-slate-400 text-center py-4">Belum ada pengajuan izin.</div>
+          ) : (
+            <div className="space-y-2">
+              {myLeaves.map(l => (
+                <div key={l.id} className="flex items-center gap-2 border border-slate-100 rounded-xl px-3 py-2">
+                  <span className="text-lg">{l.type === 'sakit' ? '🤒' : '✋'}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-slate-800">{fmtDate(l.date)} <span className="text-xs font-normal text-slate-500">· {l.type === 'sakit' ? 'Sakit' : 'Izin'}</span></div>
+                    <div className="text-[11px] text-slate-500 truncate">{l.reason}{l.note ? ` · catatan: ${l.note}` : ''}</div>
+                  </div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${l.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : l.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {l.status === 'approved' ? 'Disetujui' : l.status === 'rejected' ? 'Ditolak' : 'Menunggu'}
+                  </span>
+                  {l.status === 'pending' && (
+                    <button onClick={() => cancelIzin(l)} title="Batalkan" className="text-slate-300 hover:text-red-600 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {(user.role === 'owner' || user.role === 'manajer' || user.role === 'leader') && (
+          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4 sm:p-5">
+            <h3 className="font-display font-bold text-slate-900 mb-3">Persetujuan Izin {pendingForMe.length > 0 && <span className="text-xs font-bold text-white bg-amber-500 rounded-full px-2 py-0.5 ml-1">{pendingForMe.length}</span>}</h3>
+            {pendingForMe.length === 0 ? (
+              <div className="text-sm text-slate-400 text-center py-4">Tidak ada pengajuan menunggu. ✓</div>
+            ) : (
+              <div className="space-y-2">
+                {pendingForMe.map(l => (
+                  <div key={l.id} className="border border-amber-100 bg-amber-50/50 rounded-xl px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Avatar person={allUsers.find(u => u.id === l.userId) || { name: l.userName }} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-slate-800 truncate">{l.userName} · {fmtDate(l.date)}</div>
+                        <div className="text-[11px] text-slate-500 truncate">{l.type === 'sakit' ? '🤒 Sakit' : '✋ Izin'} — {l.reason}</div>
+                      </div>
+                      <button onClick={() => decideIzin(l, 'approved')}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg">Setujui</button>
+                      <button onClick={() => decideIzin(l, 'rejected')}
+                        className="bg-white border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold px-3 py-1.5 rounded-lg">Tolak</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Filter + Download (untuk leader/manajer/owner) */}
       {canSeeOthers && (
         <div className="mb-4 flex items-center gap-2 flex-wrap bg-white rounded-xl border border-slate-200 p-3">
@@ -8446,7 +8667,57 @@ function AttendanceView({ user, allUsers }) {
         <EmptyState icon={MapPin} text="Belum ada data absensi." />
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* MOBILE: kartu ringkas per orang per hari */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {dailyRows.map(row => {
+              const open = openRow === row.key;
+              const anyMismatch = (row.inRec?.locationMismatch || row.outRec?.locationMismatch);
+              const chips = [];
+              if (row.inRec?.late) chips.push({ t: `Telat ${row.inRec.lateBy || ''}m`, c: 'bg-red-100 text-red-700' });
+              if (row.outRec?.earlyLeave) chips.push({ t: `Pulang cepat ${row.outRec.earlyBy || ''}m`, c: 'bg-amber-100 text-amber-700' });
+              if (anyMismatch) chips.push({ t: 'Lokasi ✗', c: 'bg-rose-100 text-rose-700' });
+              if (chips.length === 0 && row.inRec) chips.push({ t: row.outRec ? '✓ Tepat waktu' : 'Belum pulang', c: row.outRec ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700' });
+              return (
+                <div key={row.key} className="p-3.5">
+                  <button onClick={() => setOpenRow(open ? null : row.key)} className="w-full text-left">
+                    <div className="flex items-center gap-2.5">
+                      <Avatar person={allUsers.find(u => u.id === row.userId) || { name: row.userName }} size="md" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-slate-900 truncate">{row.userName}</div>
+                        <div className="text-[11px] text-slate-500">{new Date(row.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short' })}</div>
+                      </div>
+                      <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mt-2.5">
+                      <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
+                        <div className="text-[9px] font-bold text-slate-400 uppercase">Masuk</div>
+                        <div className={`text-sm font-bold tabular-nums ${row.inRec ? (row.inRec.late ? 'text-red-600' : 'text-emerald-700') : 'text-slate-300'}`}>{row.inRec ? fmtTime(row.inRec.timestamp) : '–'}</div>
+                      </div>
+                      <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
+                        <div className="text-[9px] font-bold text-slate-400 uppercase">Pulang</div>
+                        <div className={`text-sm font-bold tabular-nums ${row.outRec ? (row.outRec.earlyLeave ? 'text-amber-600' : 'text-slate-700') : 'text-slate-300'}`}>{row.outRec ? fmtTime(row.outRec.timestamp) : '–'}</div>
+                      </div>
+                      <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
+                        <div className="text-[9px] font-bold text-slate-400 uppercase">Durasi</div>
+                        <div className="text-sm font-bold tabular-nums text-slate-700">{fmtDur(row.durMin)}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 flex-wrap mt-2">
+                      {chips.map((ch, i) => <span key={i} className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${ch.c}`}>{ch.t}</span>)}
+                    </div>
+                  </button>
+                  {open && (
+                    <div className="mt-3 space-y-2.5">
+                      {[['Masuk', row.inRec], ['Pulang', row.outRec]].map(([label, rec]) => renderRecDetail(label, rec))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* DESKTOP/TABLET LEBAR: tabel */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm min-w-[680px]">
               <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
                 <tr>
@@ -8503,60 +8774,7 @@ function AttendanceView({ user, allUsers }) {
                         <tr className="border-t border-blue-100 bg-blue-50/30">
                           <td colSpan={7} className="px-4 py-3">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {[['Masuk', row.inRec], ['Pulang', row.outRec]].map(([label, rec]) => (
-                                <div key={label} className="bg-white rounded-xl border border-slate-200 p-3">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${label === 'Masuk' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{label.toUpperCase()}</span>
-                                    {rec ? (
-                                      <>
-                                        <span className="text-sm font-bold text-slate-800 tabular-nums">{fmtTime(rec.timestamp)}</span>
-                                        {rec.editedBy && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" title={`Diedit oleh ${rec.editedBy}`}>diedit</span>}
-                                        <span className="ml-auto flex items-center gap-0.5">
-                                          {rec.hasSelfie && (
-                                            <button onClick={() => viewSelfie(rec)} disabled={selfieLoading === rec.id} title="Lihat selfie"
-                                              className="text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition disabled:opacity-50">
-                                              <Camera className="w-4 h-4" />
-                                            </button>
-                                          )}
-                                          {rec.latitude && (
-                                            <a href={mapsLink(rec.latitude, rec.longitude)} target="_blank" rel="noreferrer" title="Buka Maps"
-                                              className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition">
-                                              <MapPin className="w-4 h-4" />
-                                            </a>
-                                          )}
-                                          {canEditRec(rec) && (
-                                            <button onClick={() => setEditing(rec)} title="Edit"
-                                              className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition">
-                                              <Edit2 className="w-4 h-4" />
-                                            </button>
-                                          )}
-                                          {canDeleteRec(rec) && (
-                                            <button onClick={() => deleteRecord(rec)} title="Hapus"
-                                              className="text-slate-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition">
-                                              <Trash2 className="w-4 h-4" />
-                                            </button>
-                                          )}
-                                        </span>
-                                      </>
-                                    ) : <span className="text-xs text-slate-400">belum ada data</span>}
-                                  </div>
-                                  {rec && (
-                                    <div className="mt-1.5 space-y-0.5">
-                                      <div className="text-[11px] text-slate-500 flex items-center gap-1 flex-wrap">
-                                        {rec.locationMismatch
-                                          ? <span className="text-rose-600 font-semibold">Lokasi tidak sesuai{rec.distanceM != null ? ` (±${rec.distanceM}m dari lokasi kerja)` : ''}</span>
-                                          : <span className="text-emerald-600 font-semibold">Lokasi sesuai</span>}
-                                        {rec.hasSelfie ? null : (config.selfieWajib !== false && <span className="text-slate-400">· tanpa selfie</span>)}
-                                        <a href={mapsLink(rec.latitude, rec.longitude)} target="_blank" rel="noreferrer"
-                                          className="text-blue-600 hover:underline inline-flex items-center gap-0.5">
-                                          Buka Maps <ExternalLink className="w-3 h-3" />
-                                        </a>
-                                      </div>
-                                      {rec.note && <div className="text-[11px] text-slate-600 italic">"{rec.note}"</div>}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
+                              {[['Masuk', row.inRec], ['Pulang', row.outRec]].map(([label, rec]) => renderRecDetail(label, rec))}
                             </div>
                           </td>
                         </tr>
@@ -8579,6 +8797,9 @@ function AttendanceView({ user, allUsers }) {
       {editing && (
         <AttendanceEditModal record={editing} config={effectiveAttConfig(config, editing.userId)} toLocalInput={toLocalInput} canManage={canManageAtt} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
+      {showIzin && (
+        <LeaveRequestModal izinHmin={izinHmin} onSave={submitIzin} onClose={() => setShowIzin(false)} />
+      )}
       {selfieFor && (
         <SelfieCaptureModal type={selfieFor} userName={user.name}
           onCapture={(img) => proceedAbsen(selfieFor, img)}
@@ -8586,6 +8807,51 @@ function AttendanceView({ user, allUsers }) {
       )}
       {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.title} onClose={() => setLightbox(null)} />}
     </div>
+  );
+}
+
+// Modal pengajuan izin (H-n untuk izin biasa, sakit boleh hari-H)
+function LeaveRequestModal({ izinHmin, onSave, onClose }) {
+  const minIzin = dayKey(new Date(Date.now() + izinHmin * 86400000));
+  const [form, setForm] = useState({ type: 'izin', date: '', reason: '' });
+  const [error, setError] = useState('');
+  const minDate = form.type === 'sakit' ? dayKey() : minIzin;
+  const submit = () => {
+    setError('');
+    if (!form.date) return setError('Pilih tanggal izin.');
+    if (!form.reason.trim()) return setError('Tulis alasan izin.');
+    if (form.type === 'izin' && form.date < minIzin) return setError(`Izin biasa harus diajukan minimal H-${izinHmin} (paling cepat ${fmtDate(minIzin)}). Kalau mendadak karena sakit, pilih jenis "Sakit".`);
+    if (form.type === 'sakit' && form.date < dayKey()) return setError('Tanggal tidak boleh di masa lalu.');
+    onSave({ type: form.type, date: form.date, reason: form.reason.trim() });
+  };
+  return (
+    <Modal title="Ajukan Izin" onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Jenis">
+          <div className="grid grid-cols-2 gap-2">
+            {[['izin', '✋ Izin', `minimal H-${izinHmin}`], ['sakit', '🤒 Sakit', 'boleh hari-H']].map(([k, label, sub]) => (
+              <button key={k} onClick={() => setForm({ ...form, type: k })}
+                className={`px-3 py-2.5 rounded-xl border-2 text-left transition ${form.type === k ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                <div className={`text-sm font-bold ${form.type === k ? 'text-blue-700' : 'text-slate-700'}`}>{label}</div>
+                <div className="text-[10px] text-slate-500">{sub}</div>
+              </button>
+            ))}
+          </div>
+        </Field>
+        <Field label="Tanggal Izin *">
+          <input type="date" value={form.date} min={minDate} onChange={e => setForm({ ...form, date: e.target.value })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </Field>
+        <Field label="Alasan *">
+          <textarea value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} rows={3}
+            placeholder="mis. acara keluarga / kontrol ke dokter"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </Field>
+        <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-3 py-2">Pengajuan dikirim ke Leader-mu (atau Manajer/Owner bila Leader tidak ada). Izin disetujui = kredit kehadiran 50% di KPI; tanpa keterangan = 0.</div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
+        <FormActions onCancel={onClose} onSave={submit} saveLabel="Kirim Pengajuan" />
+      </div>
+    </Modal>
   );
 }
 
@@ -8727,6 +8993,11 @@ function AttendanceSettingsModal({ config, allUsers = [], onSave, onClose, getLo
           <input type="number" min="0" value={form.toleransiMenit} onChange={e => setForm({ ...form, toleransiMenit: Number(e.target.value) })}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           <div className="text-[11px] text-slate-500 mt-1">Absen masuk lewat dari jam masuk + toleransi = ditandai "Terlambat".</div>
+        </Field>
+        <Field label="Pengajuan izin minimal H-">
+          <input type="number" min="0" value={form.izinHmin ?? 1} onChange={e => setForm({ ...form, izinHmin: Number(e.target.value) })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <div className="text-[11px] text-slate-500 mt-1">Izin biasa wajib diajukan minimal sekian hari sebelumnya. Jenis "Sakit" boleh hari-H.</div>
         </Field>
 
         {/* Selfie wajib */}
@@ -8884,12 +9155,12 @@ function LeaderboardView({ allUsers }) {
 
   useEffect(() => {
     (async () => {
-      const [tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, savedCfg] = await Promise.all([
+      const [tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, templates, leaves, savedCfg] = await Promise.all([
         storage.getList('tasks:all'), storage.getList('attendance:all'), storage.getList('daily-reports:all'),
         storage.getList('gmv:daily'), storage.get('gmv:targets'), storage.getList('affiliate-accounts:all'),
-        storage.getList('affiliate-gmv:daily'), storage.get('kpi:config')
+        storage.getList('affiliate-gmv:daily'), storage.getList('daily-report-templates:all'), storage.getList('leave-requests:all'), storage.get('kpi:config')
       ]);
-      setData({ tasks, attendance, reports, gmvEntries, gmvTargets: gmvTargets || {}, affAccounts, affEntries, allUsers });
+      setData({ tasks, attendance, reports, gmvEntries, gmvTargets: gmvTargets || {}, affAccounts, affEntries, allUsers, templates, leaves });
       setCfg(normalizeKpiConfig(savedCfg));
     })();
   }, [allUsers]);
@@ -10455,6 +10726,7 @@ function DailyReportsView({ user, allUsers }) {
   }, [filtered]);
 
   const myAssignedTemplate = getUserTemplate(user.id);
+  const staffNoForm = user.role === 'operasional' && !myAssignedTemplate;
 
   return (
     <div className="max-w-6xl">
@@ -10472,14 +10744,20 @@ function DailyReportsView({ user, allUsers }) {
               className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
               <FileDown className="w-4 h-4" /> Download Laporan
             </button>
-            <button onClick={() => { setEditing(null); setShowForm(true); }}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            <button onClick={() => { setEditing(null); setShowForm(true); }} disabled={staffNoForm}
+              title={staffNoForm ? 'Leader belum membuatkan form laporan untukmu' : ''}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
               <Plus className="w-4 h-4" /> Laporan Hari Ini
             </button>
           </div>
         } />
 
       {/* User template info */}
+      {staffNoForm && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-sm text-amber-800">
+          📋 Leader belum membuatkan form laporan untukmu — kamu belum diwajibkan lapor harian (KPI laporan tidak dinilai). Hubungi Leader-mu bila seharusnya ada.
+        </div>
+      )}
       {myAssignedTemplate && (
         <div className="bg-gradient-to-r from-blue-50 to-violet-50 border border-blue-200 rounded-xl p-3 mb-4 flex items-center gap-3">
           <ClipboardList className="w-5 h-5 text-blue-700 flex-shrink-0" />
@@ -10850,13 +11128,16 @@ function DynamicFieldInput({ field, value, onChange }) {
 function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
   const today = new Date().toISOString().split('T')[0];
 
-  // Determine which template to use
-  const userTemplate = templates.find(t => t.assignedUserIds?.includes(user.id));
+  // Aturan GForm: Leader membuatkan form → staff mengisi. Staff tanpa form = tidak ada yang dilaporkan.
+  const isStaff = user.role === 'operasional';
+  const myTemplates = templates.filter(t => t.assignedUserIds?.includes(user.id));
+  const userTemplate = myTemplates[0];
   const initialTemplateId = report?.templateId || userTemplate?.id || '';
 
   const [selectedTemplateId, setSelectedTemplateId] = useState(initialTemplateId);
-  const activeTemplate = templates.find(t => t.id === selectedTemplateId);
-  const fieldDefs = activeTemplate?.fields || DEFAULT_DAILY_FIELDS;
+  const pickableTemplates = isStaff ? myTemplates : templates;
+  const activeTemplate = pickableTemplates.find(t => t.id === selectedTemplateId) || (isStaff ? myTemplates[0] : templates.find(t => t.id === selectedTemplateId));
+  const fieldDefs = activeTemplate?.fields || (isStaff ? [] : DEFAULT_DAILY_FIELDS);
 
   // Initialize form values
   const [form, setForm] = useState(() => {
@@ -10924,6 +11205,21 @@ function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
     });
   };
 
+  if (isStaff && myTemplates.length === 0) {
+    return (
+      <Modal title="Laporan Harian" onClose={onClose}>
+        <div className="space-y-3">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 leading-relaxed">
+            📋 <b>Belum ada form laporan untukmu.</b> Laporan harian mengikuti form yang dibuatkan Leader (seperti Google Form).
+            Minta Leader-mu membuka <b>Laporan Harian → Kelola Template Form</b>, membuat form, lalu assign ke kamu.
+            Selama belum ada form, kamu tidak diwajibkan lapor & KPI laporanmu tidak dinilai.
+          </div>
+          <button onClick={onClose} className="w-full py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg font-semibold">Mengerti</button>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal title={report ? 'Edit Laporan Harian' : 'Laporan Harian'} onClose={onClose} wide>
       <div className="space-y-3">
@@ -10932,12 +11228,12 @@ function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
             className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
         </Field>
 
-        {canPickTemplate && templates.length > 0 && (
+        {canPickTemplate && pickableTemplates.length > 0 && (
           <Field label="Template Form">
             <select value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
-              <option value="">Default (form standar)</option>
-              {templates.map(t => (
+              {!isStaff && <option value="">Default (form standar)</option>}
+              {pickableTemplates.map(t => (
                 <option key={t.id} value={t.id}>{t.name}{t.assignedUserIds?.includes(user.id) ? ' (untuk Anda)' : ''}</option>
               ))}
             </select>
