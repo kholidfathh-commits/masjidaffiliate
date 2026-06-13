@@ -4415,7 +4415,8 @@ function TasksView({ user, allUsers }) {
   // Assignable users
   const assignableUsers = useMemo(() => {
     if ((user.role === 'manajer' || user.role === 'owner')) return allUsers;
-    if (user.role === 'leader') return allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
+    // Leader boleh menugaskan ke staff/Leader divisi mana pun (lintas divisi: TAP→MCN dst), termasuk dirinya.
+    if (user.role === 'leader') return allUsers.filter(u => u.id === user.id || u.role === 'operasional' || u.role === 'leader');
     return [user];
   }, [user, allUsers]);
 
@@ -4847,8 +4848,8 @@ function TaskForm({ task, user, assignableUsers, onSave, onClose }) {
             <SearchableSelect
               value={form.assigneeId}
               onChange={(v) => setForm({ ...form, assigneeId: v })}
-              options={assignableUsers.map(m => ({ value: m.id, label: `${m.name}${m.jobTitle ? ' · ' + m.jobTitle : ''} — ${ROLES[m.role].label}` }))}
-              placeholder="Ketik nama untuk cari..." />
+              options={assignableUsers.map(m => ({ value: m.id, label: `${m.name}${DIVISIONS[m.division] ? ' · ' + DIVISIONS[m.division].label : ''} — ${displayJobTitle(m) || ROLES[m.role].label}` }))}
+              placeholder="Ketik nama / divisi untuk cari..." />
           </Field>
           <Field label="Deadline">
             <input type="date" value={form.deadline} onChange={e => setForm({ ...form, deadline: e.target.value })}
