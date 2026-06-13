@@ -318,17 +318,38 @@ const DEFAULT_ATTENDANCE_CONFIG = {
   radiusM: 200,
   selfieWajib: true,   // wajib foto selfie saat absen (anti-kecurangan)
   izinHmin: 1,         // pengajuan izin minimal H-berapa (sakit boleh hari-H)
+  // Jadwal jam kerja per hari (0=Min ... 6=Sab). libur=true → tidak ditandai telat/pulang cepat.
+  perDay: {
+    enabled: true,
+    days: {
+      1: { jamMasuk: '08:00', jamPulang: '17:00', libur: false },
+      2: { jamMasuk: '08:00', jamPulang: '17:00', libur: false },
+      3: { jamMasuk: '08:00', jamPulang: '17:00', libur: false },
+      4: { jamMasuk: '08:00', jamPulang: '17:00', libur: false },
+      5: { jamMasuk: '08:00', jamPulang: '17:00', libur: false },
+      6: { jamMasuk: '08:00', jamPulang: '15:00', libur: false },
+      0: { jamMasuk: '08:00', jamPulang: '15:00', libur: true }
+    }
+  },
   custom: {}           // jam kerja per karyawan: { [userId]: { jamMasuk, jamPulang, toleransiMenit, flexible } }
 };
+const HARI_ID = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
-// Jam kerja efektif seorang user: override per-user (freelance/shift) > default tim
-function effectiveAttConfig(config, userId) {
+// Jam kerja efektif: override per-user (freelance/shift) > jadwal per hari > default tim.
+// dateObj opsional — kalau diberi & perDay aktif, jam ikut hari tsb (mis. Sabtu 08-15).
+function effectiveAttConfig(config, userId, dateObj) {
+  let base = { jamMasuk: config.jamMasuk, jamPulang: config.jamPulang, libur: false };
+  if (config.perDay?.enabled && dateObj) {
+    const d = (config.perDay.days || {})[new Date(dateObj).getDay()];
+    if (d) base = { jamMasuk: d.jamMasuk || config.jamMasuk, jamPulang: d.jamPulang || config.jamPulang, libur: !!d.libur };
+  }
   const ov = (config.custom || {})[userId];
-  if (!ov) return { ...config, flexible: false };
+  if (!ov) return { ...config, ...base, flexible: false };
   return {
     ...config,
-    jamMasuk: ov.jamMasuk || config.jamMasuk,
-    jamPulang: ov.jamPulang || config.jamPulang,
+    jamMasuk: ov.jamMasuk || base.jamMasuk,
+    jamPulang: ov.jamPulang || base.jamPulang,
+    libur: base.libur,
     toleransiMenit: ov.toleransiMenit !== undefined && ov.toleransiMenit !== '' ? ov.toleransiMenit : config.toleransiMenit,
     flexible: !!ov.flexible
   };
@@ -2635,13 +2656,14 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
 
   const TABS = [{ id: 'all', label: 'Keseluruhan' }, { id: 'mcn', label: 'MCN' }, { id: 'tap', label: 'TAP' }, { id: 'internal', label: 'Affiliator' }];
 
-  // Analisis SWOT bulan berjalan untuk tab/fokus yang aktif
+  // Analisis SWOT — periode bisa dipilih (default bulan ini)
   const monthStart = `${mKey}-01`;
   const monthEnd = `${mKey}-${String(dim).padStart(2, '0')}`;
+  const [swotPeriod, setSwotPeriod] = useState({ id: 'this-month', label: 'Bulan Ini', start: monthStart, end: monthEnd });
   const dataBundle = { gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, tasks, partnerFeedback, externalSwot: extSwot };
   const analysis = useMemo(
-    () => analyzeBusiness({ scope, start: monthStart, end: monthEnd, ...dataBundle }),
-    [scope, gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, tasks, partnerFeedback, extSwot, mKey]
+    () => analyzeBusiness({ scope, start: swotPeriod.start, end: swotPeriod.end, ...dataBundle }),
+    [scope, swotPeriod, gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, tasks, partnerFeedback, extSwot]
   );
   const canEditExternal = user && (user.role === 'owner' || user.role === 'manajer');
   const saveExternalSwot = async (val) => {
@@ -2801,7 +2823,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
           )}
 
           {/* Evaluasi otomatis format SWOT — khusus Owner/Manajer/Leader */}
-          {isMgmtUser && <SwotPanel analysis={analysis} canEdit={canEditExternal} external={extSwot} onSaveExternal={saveExternalSwot} />}
+          {isMgmtUser && <SwotPanel analysis={analysis} canEdit={canEditExternal} external={extSwot} onSaveExternal={saveExternalSwot} period={swotPeriod} onPeriodChange={setSwotPeriod} />}
         </div>
       )}
 
@@ -2973,7 +2995,64 @@ function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, af
 }
 
 // Panel SWOT di Dashboard Bisnis (+ faktor eksternal manual oleh owner/manajer)
-function SwotPanel({ analysis, canEdit = false, external = null, onSaveExternal }) {
+// Daftar preset periode (dipakai SWOT, Evaluasi, dll)
+function periodPresets() {
+  const now = new Date();
+  const d = now.getDay();
+  const mon = new Date(now); mon.setDate(now.getDate() - d + (d === 0 ? -6 : 1));
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  const lastMon = new Date(mon); lastMon.setDate(mon.getDate() - 7);
+  const lastSun = new Date(mon); lastSun.setDate(mon.getDate() - 1);
+  const mStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const mEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const lmStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lmEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+  const back = (n) => { const x = new Date(now); x.setDate(now.getDate() - n); return x; };
+  return [
+    { id: 'today', label: 'Hari Ini', start: dayKey(now), end: dayKey(now) },
+    { id: 'yesterday', label: 'Kemarin', start: dayKey(back(1)), end: dayKey(back(1)) },
+    { id: 'last7', label: '7 Hari', start: dayKey(back(6)), end: dayKey(now) },
+    { id: 'this-week', label: 'Pekan Ini', start: dayKey(mon), end: dayKey(sun) },
+    { id: 'last-week', label: 'Pekan Lalu', start: dayKey(lastMon), end: dayKey(lastSun) },
+    { id: 'this-month', label: 'Bulan Ini', start: dayKey(mStart), end: dayKey(mEnd) },
+    { id: 'last-month', label: 'Bulan Lalu', start: dayKey(lmStart), end: dayKey(lmEnd) }
+  ];
+}
+
+// Kontrol pemilih periode: preset cepat + rentang tanggal custom
+function PeriodPicker({ value, onChange }) {
+  const [showCustom, setShowCustom] = useState(false);
+  const presets = periodPresets();
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {presets.map(p => (
+        <button key={p.id} onClick={() => { onChange({ id: p.id, label: p.label, start: p.start, end: p.end }); setShowCustom(false); }}
+          style={value.id === p.id ? { backgroundColor: '#2563EB', color: '#fff', borderColor: '#2563EB' } : {}}
+          className="text-[11px] font-bold px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 transition">
+          {p.label}
+        </button>
+      ))}
+      <button onClick={() => setShowCustom(s => !s)}
+        style={value.id === 'custom' ? { backgroundColor: '#2563EB', color: '#fff', borderColor: '#2563EB' } : {}}
+        className="text-[11px] font-bold px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 transition">
+        Pilih Tanggal
+      </button>
+      {showCustom && (
+        <div className="flex items-center gap-1.5 w-full sm:w-auto mt-1.5 sm:mt-0">
+          <input type="date" value={value.start} max={value.end || dayKey()}
+            onChange={e => onChange({ id: 'custom', label: 'Custom', start: e.target.value, end: value.end || e.target.value })}
+            className="px-2 py-1 border border-slate-300 rounded-lg text-xs" />
+          <span className="text-xs text-slate-400">s/d</span>
+          <input type="date" value={value.end} min={value.start} max={dayKey()}
+            onChange={e => onChange({ id: 'custom', label: 'Custom', start: value.start || e.target.value, end: e.target.value })}
+            className="px-2 py-1 border border-slate-300 rounded-lg text-xs" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SwotPanel({ analysis, canEdit = false, external = null, onSaveExternal, period, onPeriodChange }) {
   const [showExt, setShowExt] = useState(false);
   const quad = [
     { key: 'strengths', title: 'Strengths · Kekuatan', icon: '💪', bg: '#ECFDF5', border: '#A7F3D0', accent: '#047857' },
@@ -2983,7 +3062,7 @@ function SwotPanel({ analysis, canEdit = false, external = null, onSaveExternal 
   ];
   return (
     <div className="rounded-2xl border border-slate-200 p-4">
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+      <div className="flex items-start justify-between flex-wrap gap-2 mb-2">
         <div>
           <div className="text-sm font-bold text-slate-700 flex items-center gap-2"><Sparkles className="w-4 h-4 text-blue-600" /> Evaluasi Otomatis — Format SWOT</div>
           <div className="text-[11px] text-slate-400 mt-0.5">{analysis.scopeLabel} · {fmtDate(analysis.start)} – {fmtDate(analysis.end)} · data internal otomatis + faktor eksternal manual</div>
@@ -3000,6 +3079,12 @@ function SwotPanel({ analysis, canEdit = false, external = null, onSaveExternal 
           </div>
         </div>
       </div>
+      {period && onPeriodChange && (
+        <div className="mb-3 pb-3 border-b border-slate-100">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1.5">Periode analisis</div>
+          <PeriodPicker value={period} onChange={onPeriodChange} />
+        </div>
+      )}
       {showExt && <ExternalSwotModal external={external} onSave={async (v) => { await onSaveExternal(v); setShowExt(false); }} onClose={() => setShowExt(false)} />}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {quad.map(q => (
@@ -8128,6 +8213,8 @@ function AttendanceView({ user, allUsers }) {
   const computeFlags = (type, dateObj, loc, cfg) => {
     const mins = dateObj.getHours() * 60 + dateObj.getMinutes();
     let late = false, lateBy = 0, earlyLeave = false, earlyBy = 0;
+    // Hari libur (mis. Minggu) → tidak dihitung telat/pulang cepat
+    if (cfg.libur) cfg = { ...cfg, flexible: true };
     if (!cfg.flexible && type === 'in' && parseHM(cfg.jamMasuk) != null) {
       const sched = parseHM(cfg.jamMasuk);
       if (mins > sched + (Number(cfg.toleransiMenit) || 0)) { late = true; lateBy = mins - sched; }
@@ -8184,7 +8271,7 @@ function AttendanceView({ user, allUsers }) {
       const loc = await getLocation();
       const address = await getAddress(loc.lat, loc.lng);
       const now = new Date();
-      const myCfg = effectiveAttConfig(config, user.id);
+      const myCfg = effectiveAttConfig(config, user.id, now);
       const flags = computeFlags(type, now, loc, myCfg);
       const rec = {
         id: uid(),
@@ -8291,7 +8378,7 @@ function AttendanceView({ user, allUsers }) {
   // Simpan hasil edit absensi (recompute telat/lokasi dari waktu baru)
   const saveEdit = async (rec, { timestamp, note, clearLocationWarn }) => {
     const d = new Date(timestamp);
-    const flags = computeFlags(rec.type, d, { lat: rec.latitude, lng: rec.longitude }, effectiveAttConfig(config, rec.userId));
+    const flags = computeFlags(rec.type, d, { lat: rec.latitude, lng: rec.longitude }, effectiveAttConfig(config, rec.userId, d));
     if (clearLocationWarn) { flags.locationMismatch = false; }
     const updated = { ...rec, timestamp: d.toISOString(), note: (note || '').trim(), ...flags, editedBy: user.name, editedAt: new Date().toISOString() };
     const list = await storage.getList('attendance:all');
@@ -8512,12 +8599,12 @@ function AttendanceView({ user, allUsers }) {
             </div>
           </div>
           {(() => {
-            const my = effectiveAttConfig(config, user.id);
+            const my = effectiveAttConfig(config, user.id, new Date());
             return (
               <div className="text-right">
-                <div className="text-[10px] font-bold text-slate-400 uppercase">Jam Kerjamu</div>
+                <div className="text-[10px] font-bold text-slate-400 uppercase">Jam Kerja {HARI_ID[new Date().getDay()]}</div>
                 <div className="text-sm font-bold text-slate-800">
-                  {my.flexible ? 'Fleksibel' : `${my.jamMasuk}–${my.jamPulang}`}
+                  {my.libur ? 'Libur' : my.flexible ? 'Fleksibel' : `${my.jamMasuk}–${my.jamPulang}`}
                 </div>
                 {(config.custom || {})[user.id] && <div className="text-[10px] text-blue-600 font-semibold">jadwal khusus</div>}
               </div>
@@ -8796,7 +8883,7 @@ function AttendanceView({ user, allUsers }) {
         <AttendanceSettingsModal config={config} allUsers={allUsers} onSave={saveConfig} onClose={() => setShowSettings(false)} getLocation={getLocation} />
       )}
       {editing && (
-        <AttendanceEditModal record={editing} config={effectiveAttConfig(config, editing.userId)} toLocalInput={toLocalInput} canManage={canManageAtt} onSave={saveEdit} onClose={() => setEditing(null)} />
+        <AttendanceEditModal record={editing} config={effectiveAttConfig(config, editing.userId, new Date(editing.timestamp))} toLocalInput={toLocalInput} canManage={canManageAtt} onSave={saveEdit} onClose={() => setEditing(null)} />
       )}
       {showIzin && (
         <LeaveRequestModal izinHmin={izinHmin} onSave={submitIzin} onClose={() => setShowIzin(false)} />
@@ -8948,10 +9035,18 @@ function SelfieCaptureModal({ type, userName, onCapture, onClose }) {
 
 // Modal: atur jam kerja & lokasi kerja (owner/manajer)
 function AttendanceSettingsModal({ config, allUsers = [], onSave, onClose, getLocation }) {
-  const [form, setForm] = useState({ ...DEFAULT_ATTENDANCE_CONFIG, ...config, custom: { ...(config.custom || {}) } });
+  const [form, setForm] = useState({
+    ...DEFAULT_ATTENDANCE_CONFIG, ...config,
+    custom: { ...(config.custom || {}) },
+    perDay: config.perDay ? { enabled: config.perDay.enabled, days: { ...DEFAULT_ATTENDANCE_CONFIG.perDay.days, ...(config.perDay.days || {}) } } : { ...DEFAULT_ATTENDANCE_CONFIG.perDay, days: { ...DEFAULT_ATTENDANCE_CONFIG.perDay.days } }
+  });
   const [locBusy, setLocBusy] = useState(false);
   const [locErr, setLocErr] = useState('');
   const [pickUserId, setPickUserId] = useState('');
+
+  // Edit jadwal per hari (0=Min..6=Sab)
+  const setDay = (d, key, val) => setForm(f => ({ ...f, perDay: { ...f.perDay, days: { ...f.perDay.days, [d]: { ...f.perDay.days[d], [key]: val } } } }));
+  const dayOrder = [1, 2, 3, 4, 5, 6, 0];
 
   // Jadwal khusus per karyawan (freelance / shift beda)
   const customIds = Object.keys(form.custom || {});
@@ -8980,15 +9075,51 @@ function AttendanceSettingsModal({ config, allUsers = [], onSave, onClose, getLo
   return (
     <Modal title="Atur Jam & Lokasi Kerja" onClose={onClose}>
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Jam Masuk">
-            <input type="time" value={form.jamMasuk} onChange={e => setForm({ ...form, jamMasuk: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </Field>
-          <Field label="Jam Pulang">
-            <input type="time" value={form.jamPulang} onChange={e => setForm({ ...form, jamPulang: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </Field>
+        {/* Jadwal jam kerja per hari */}
+        <div className="border border-slate-200 rounded-xl p-3">
+          <label className="flex items-center gap-2 cursor-pointer mb-2">
+            <input type="checkbox" checked={form.perDay.enabled}
+              onChange={e => setForm({ ...form, perDay: { ...form.perDay, enabled: e.target.checked } })}
+              className="w-4 h-4 rounded accent-blue-600" />
+            <span className="text-sm font-semibold text-slate-800">Jam kerja beda tiap hari</span>
+          </label>
+          {form.perDay.enabled ? (
+            <div className="space-y-1.5">
+              <div className="text-[11px] text-slate-500 mb-1">Mis. Sen–Jum 08:00–17:00, Sabtu 08:00–15:00, Minggu libur. Centang "Libur" untuk hari tanpa kerja.</div>
+              {dayOrder.map(d => {
+                const day = form.perDay.days[d] || {};
+                return (
+                  <div key={d} className="flex items-center gap-2 flex-wrap">
+                    <span className="w-14 text-xs font-bold text-slate-700">{HARI_ID[d]}</span>
+                    <label className="flex items-center gap-1 text-[11px] text-slate-500">
+                      <input type="checkbox" checked={!!day.libur} onChange={e => setDay(d, 'libur', e.target.checked)} className="w-3.5 h-3.5 accent-blue-600 rounded" /> Libur
+                    </label>
+                    {!day.libur && (
+                      <>
+                        <input type="time" value={day.jamMasuk || '08:00'} onChange={e => setDay(d, 'jamMasuk', e.target.value)}
+                          className="px-2 py-1 border border-slate-300 rounded-lg text-xs" />
+                        <span className="text-xs text-slate-400">–</span>
+                        <input type="time" value={day.jamPulang || '17:00'} onChange={e => setDay(d, 'jamPulang', e.target.value)}
+                          className="px-2 py-1 border border-slate-300 rounded-lg text-xs" />
+                      </>
+                    )}
+                    {day.libur && <span className="text-[11px] text-slate-400 italic">tidak dihitung telat/pulang cepat</span>}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Jam Masuk">
+                <input type="time" value={form.jamMasuk} onChange={e => setForm({ ...form, jamMasuk: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </Field>
+              <Field label="Jam Pulang">
+                <input type="time" value={form.jamPulang} onChange={e => setForm({ ...form, jamPulang: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </Field>
+            </div>
+          )}
         </div>
         <Field label="Toleransi telat (menit)">
           <input type="number" min="0" value={form.toleransiMenit} onChange={e => setForm({ ...form, toleransiMenit: Number(e.target.value) })}
