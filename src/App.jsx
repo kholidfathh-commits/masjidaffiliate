@@ -11,7 +11,7 @@ import {
   GripVertical, MapPin, ArrowRight, ArrowLeft, BarChart3, Pin, MessageSquare,
   Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle,
   Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2,
-  Database, Camera, Paperclip, Presentation, Calculator
+  Database, Camera, Paperclip, Presentation, Calculator, Heart
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -275,6 +275,9 @@ const EVENT_TYPE = {
   kegiatan: { label: 'Kegiatan', icon: '🎯', color: 'bg-amber-100 text-amber-800 border-amber-300' },
   training: { label: 'Training', icon: '🎓', color: 'bg-blue-100 text-blue-700 border-blue-300' },
   briefing: { label: 'Briefing', icon: '🗣️', color: 'bg-cyan-100 text-cyan-700 border-cyan-300' },
+  live:        { label: 'Live Shopping', icon: '🔴', color: 'bg-rose-100 text-rose-700 border-rose-300' },
+  piket_admin: { label: 'Piket Admin',   icon: '💼', color: 'bg-violet-100 text-violet-700 border-violet-300' },
+  piket_grup:  { label: 'Piket Grup',    icon: '🧑‍🤝‍🧑', color: 'bg-teal-100 text-teal-700 border-teal-300' },
   lain:     { label: 'Lainnya',  icon: '📌', color: 'bg-slate-100 text-slate-700 border-slate-300' }
 };
 
@@ -336,7 +339,8 @@ const BACKUP_KEYS = [
   'sellers:all', 'attendance:all', 'attendance:config', 'activities:all', 'announcements:all', 'schedule:all', 'calendar:all',
   'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all', 'content-ideas:all',
   'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all',
-  'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history'
+  'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history',
+  'partner-feedback:all', 'swot:external', 'backup:last'
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
@@ -689,13 +693,13 @@ export default function App() {
             {view === 'creator-management' && <CreatorManagementView user={currentUser} allUsers={allUsers} />}
             {view === 'sellers' && <SellersView user={currentUser} allUsers={allUsers} />}
             {view === 'tap-commission' && <TapCommissionView user={currentUser} />}
+            {view === 'partner-feedback' && <PartnerFeedbackView user={currentUser} />}
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
             {view === 'affiliate-accounts' && <AffiliateAccountsView user={currentUser} allUsers={allUsers} />}
             {view === 'kpi' && <KpiView user={currentUser} allUsers={allUsers} />}
             {view === 'problems' && <ProblemsView user={currentUser} allUsers={allUsers} />}
             {view === 'reports' && <ReportsView user={currentUser} allUsers={allUsers} />}
             {view === 'daily-reports' && <DailyReportsView user={currentUser} allUsers={allUsers} />}
-            {view === 'schedule' && <ScheduleView user={currentUser} allUsers={allUsers} />}
             {view === 'calendar' && <CalendarView user={currentUser} allUsers={allUsers} />}
             {view === 'attendance' && <AttendanceView user={currentUser} allUsers={allUsers} />}
             {view === 'leaderboard' && <LeaderboardView allUsers={allUsers} />}
@@ -1283,7 +1287,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       label: 'Operasional',
       items: [
         { id: 'tasks', label: 'Tiket', icon: CheckSquare, show: true },
-        { id: 'todos', label: 'To-Do List', icon: KanbanSquare, show: true },
+        { id: 'todos', label: 'To-Do Pribadi', icon: KanbanSquare, show: true },
         { id: 'daily-reports', label: 'Laporan Harian', icon: ClipboardList, show: true },
         { id: 'attendance', label: 'Absensi', icon: MapPin, show: true },
         { id: 'calendar', label: 'Kalender Tim', icon: CalendarDays, show: true },
@@ -1297,6 +1301,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'creator-management', label: 'Pengelolaan Creator', icon: Network, show: canAccessFeature(user, 'creator-management') },
         { id: 'sellers', label: 'Database Seller', icon: Briefcase, show: canAccessFeature(user, 'sellers') },
         { id: 'tap-commission', label: 'Kalkulator Komisi', icon: Calculator, show: canAccessFeature(user, 'tap-commission') },
+        { id: 'partner-feedback', label: 'Kepuasan Mitra', icon: Heart, show: true },
         { id: 'content-ideas', label: 'Bank Ide Konten', icon: Lightbulb, show: true },
         { id: 'media-tasks', label: 'Eksekusi Konten', icon: Clapperboard, show: canAccessFeature(user, 'media-tasks') }
       ]
@@ -1914,7 +1919,6 @@ function Dashboard({ user, allUsers, setView, settings }) {
   const [creators, setCreators] = useState([]);
   const [activities, setActivities] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
-  const [schedules, setSchedules] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [targets, setTargets] = useState([]);
@@ -1925,6 +1929,9 @@ function Dashboard({ user, allUsers, setView, settings }) {
   const [kpiConfig, setKpiConfig] = useState(DEFAULT_KPI_CONFIG);
   const [affAccounts, setAffAccounts] = useState([]);
   const [affEntries, setAffEntries] = useState([]);
+  const [partnerFeedback, setPartnerFeedback] = useState([]);
+  const [externalSwot, setExternalSwot] = useState(null);
+  const [lastBackup, setLastBackup] = useState(undefined);
   const [showTargetsManager, setShowTargetsManager] = useState(false);
 
   const loadTargets = async () => setTargets(await storage.getList('targets:all'));
@@ -1935,7 +1942,6 @@ function Dashboard({ user, allUsers, setView, settings }) {
       setCreators(await storage.getList('creators:all'));
       setActivities(await storage.getList('activities:all'));
       setAnnouncements(await storage.getList('announcements:all'));
-      setSchedules(await storage.getList('schedule:all'));
       setDailyReports(await storage.getList('daily-reports:all'));
       setCalendarEvents(await storage.getList('calendar:all'));
       await syncInternalFromAccounts(); // GMV akun affiliator otomatis masuk divisi internal
@@ -1946,9 +1952,16 @@ function Dashboard({ user, allUsers, setView, settings }) {
       setKpiConfig((await storage.get('kpi:config')) || DEFAULT_KPI_CONFIG);
       setAffAccounts(await storage.getList('affiliate-accounts:all'));
       setAffEntries(await storage.getList('affiliate-gmv:daily'));
+      setPartnerFeedback(await storage.getList('partner-feedback:all'));
+      setExternalSwot(await storage.get('swot:external'));
+      setLastBackup(await storage.get('backup:last'));
       await loadTargets();
     })();
   }, []);
+
+  // Disiplin backup mingguan (jaring pengaman data — Supabase gratis tidak punya backup otomatis)
+  const backupOverdue = (user.role === 'owner' || user.role === 'manajer') && lastBackup !== undefined &&
+    (!lastBackup || (Date.now() - new Date(lastBackup.at)) / 86400000 > 7);
 
   const canManageTargets = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader';
   const handleSaveTargets = async (newList) => {
@@ -1964,9 +1977,9 @@ function Dashboard({ user, allUsers, setView, settings }) {
   const totalGmv = visibleCreators.reduce((s, c) => s + (Number(c.totalGmv) || 0), 0);
   const activeCreators = visibleCreators.filter(c => c.status === 'aktif').length;
   const today = new Date().toISOString().split('T')[0];
-  const upcomingSchedule = schedules
-    .filter(s => s.date >= today && s.status !== 'cancelled')
-    .sort((a, b) => new Date(a.date) - new Date(b.date))
+  const upcomingEvents = calendarEvents
+    .filter(e => e.date >= today)
+    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')))
     .slice(0, 4);
   const latest = announcements[0];
 
@@ -2071,6 +2084,18 @@ function Dashboard({ user, allUsers, setView, settings }) {
 
   return (
     <div className="space-y-5 max-w-7xl">
+      {/* Pengingat backup mingguan */}
+      {backupOverdue && (
+        <button onClick={() => setView('settings')}
+          className="w-full text-left bg-amber-50 border border-amber-300 rounded-2xl px-4 py-3 flex items-center gap-3 hover:bg-amber-100 transition">
+          <Database className="w-5 h-5 text-amber-600 flex-shrink-0" />
+          <div className="flex-1 text-sm text-amber-800">
+            <b>Backup data sudah {lastBackup ? `${Math.floor((Date.now() - new Date(lastBackup.at)) / 86400000)} hari` : 'belum pernah'} dilakukan.</b> Supabase gratis tidak punya backup otomatis — luangkan 30 detik: Pengaturan App → Export Semua Data.
+          </div>
+          <ArrowRight className="w-4 h-4 text-amber-600 flex-shrink-0" />
+        </button>
+      )}
+
       {/* Hero Section — navy gelap + glow biru elektrik (3D look) */}
       <div style={{ background: 'linear-gradient(135deg, #070D1F 0%, #0B1B45 45%, #0A1230 100%)', color: '#FFFFFF', boxShadow: '0 24px 60px -20px rgba(37,99,235,0.45)' }}
         className="relative overflow-hidden rounded-3xl p-6 sm:p-7 text-white shine-hover">
@@ -2158,11 +2183,16 @@ function Dashboard({ user, allUsers, setView, settings }) {
         </div>
       </div>
 
+      {/* Fokus Hari Ini — 3 prioritas teratas per orang */}
+      <FocusTodayWidget user={user} tasks={tasks} dailyReports={dailyReports}
+        affAccounts={affAccounts} affEntries={affEntries} problems={problems} setView={setView} />
+
       {/* Dashboard Bisnis: Keseluruhan + per-divisi MCN/TAP/Affiliator */}
       {canAccessFeature(user, 'gmv') && (
         <BusinessDashboard gmvEntries={gmvEntries} gmvTargets={gmvTargets}
           affAccounts={affAccounts} affEntries={affEntries} allUsers={allUsers} onNavigate={setView}
-          problems={problems} attendance={attendanceRecs} reports={dailyReports} tasks={tasks} settings={settings} user={user} />
+          problems={problems} attendance={attendanceRecs} reports={dailyReports} tasks={tasks}
+          partnerFeedback={partnerFeedback} externalSwot={externalSwot} settings={settings} user={user} />
       )}
 
       {/* KPI Saya + Masalah Aktif */}
@@ -2247,26 +2277,26 @@ function Dashboard({ user, allUsers, setView, settings }) {
         <div className="bg-white rounded-2xl border border-slate-200/70 p-6 shadow-sm shadow-slate-200/40">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-display font-bold text-lg text-slate-900">Jadwal Mendatang</h3>
-              <p className="text-xs text-slate-500">{upcomingSchedule.length} agenda</p>
+              <h3 className="font-display font-bold text-lg text-slate-900">Agenda Mendatang</h3>
+              <p className="text-xs text-slate-500">{upcomingEvents.length} agenda · kalender tim</p>
             </div>
-            <button onClick={() => setView('schedule')} className="text-xs text-blue-700 hover:text-blue-800 font-semibold">Semua →</button>
+            <button onClick={() => setView('calendar')} className="text-xs text-blue-700 hover:text-blue-800 font-semibold">Semua →</button>
           </div>
-          {upcomingSchedule.length === 0 ? (
+          {upcomingEvents.length === 0 ? (
             <div className="text-center py-6 text-slate-400 text-sm">
-              <Calendar className="w-8 h-8 mx-auto mb-2 text-slate-200" />Belum ada jadwal
+              <Calendar className="w-8 h-8 mx-auto mb-2 text-slate-200" />Belum ada agenda
             </div>
           ) : (
             <div className="space-y-2">
-              {upcomingSchedule.map(s => (
-                <div key={s.id} className="p-3 rounded-lg border border-slate-100 hover:bg-slate-50">
+              {upcomingEvents.map(ev => (
+                <div key={ev.id} className="p-3 rounded-lg border border-slate-100 hover:bg-slate-50">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-base">{SCHEDULE_TYPE[s.type].icon}</span>
-                    <span className="text-xs font-semibold text-slate-700">{s.time}</span>
-                    <span className="text-[10px] text-slate-500">{fmtDate(s.date)}</span>
+                    <span className="text-base">{EVENT_TYPE[ev.type]?.icon || '📌'}</span>
+                    <span className="text-xs font-semibold text-slate-700">{ev.time}</span>
+                    <span className="text-[10px] text-slate-500">{fmtDate(ev.date)}</span>
                   </div>
-                  <div className="text-sm font-medium text-slate-800">{s.product || s.creatorName || SCHEDULE_TYPE[s.type].label}</div>
-                  <div className="text-xs text-slate-500">PIC: {s.adminName}</div>
+                  <div className="text-sm font-medium text-slate-800">{ev.title}</div>
+                  {(ev.attendeeNames || []).length > 0 && <div className="text-xs text-slate-500">{ev.attendeeNames.slice(0, 2).join(', ')}{ev.attendeeNames.length > 2 ? ` +${ev.attendeeNames.length - 2}` : ''}</div>}
                 </div>
               ))}
             </div>
@@ -2391,6 +2421,14 @@ function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTar
   const kritis = problems.filter(p => p.status !== 'resolved' && p.urgency === 'kritis');
   if (kritis.length > 0) out.push({ level: 'danger', text: `${kritis.length} masalah kritis belum selesai: "${kritis[0].title}"${kritis.length > 1 ? ' dll' : ''}.`, action: { label: 'Tangani', view: 'problems' } });
 
+  // 1b) Masalah menua: terbuka > 7 hari = pelanggaran prinsip "selesaikan sampai akar"
+  const aging = problems.filter(p => p.status !== 'resolved' && p.createdAt && (Date.now() - new Date(p.createdAt)) / 86400000 > 7);
+  if (aging.length > 0) {
+    const oldest = aging.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))[0];
+    const days = Math.floor((Date.now() - new Date(oldest.createdAt)) / 86400000);
+    out.push({ level: 'warning', text: `${aging.length} masalah sudah terbuka > 7 hari (terlama: "${oldest.title}", ${days} hari). Selesaikan sampai akar atau tutup dengan keputusan.`, action: { label: 'Bereskan', view: 'problems' } });
+  }
+
   // 2) GMV divisi turun (untuk owner/manajer)
   if (isOwnerMgr) {
     Object.entries(GMV_DIVISIONS).forEach(([div, cfg]) => {
@@ -2470,10 +2508,12 @@ function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTar
 }
 
 // ============ DASHBOARD BISNIS (Keseluruhan + per-divisi MCN/TAP/Affiliator) ============
-function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, onNavigate, problems = [], attendance = [], reports = [], tasks = [], settings, user }) {
+function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, onNavigate, problems = [], attendance = [], reports = [], tasks = [], partnerFeedback = [], externalSwot = null, settings, user }) {
   const [scope, setScope] = useState('all'); // all | mcn | tap | internal
   const [affGoal, setAffGoal] = useState(DEFAULT_AFFILIATE_GOAL);
   const [showPpt, setShowPpt] = useState(false);
+  const [extSwot, setExtSwot] = useState(externalSwot);
+  useEffect(() => { setExtSwot(externalSwot); }, [externalSwot]);
   const mKey = monthKey();
   const dim = daysInMonth(mKey);
   const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
@@ -2562,11 +2602,17 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
   // Analisis SWOT bulan berjalan untuk tab/fokus yang aktif
   const monthStart = `${mKey}-01`;
   const monthEnd = `${mKey}-${String(dim).padStart(2, '0')}`;
-  const dataBundle = { gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, tasks };
+  const dataBundle = { gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, tasks, partnerFeedback, externalSwot: extSwot };
   const analysis = useMemo(
     () => analyzeBusiness({ scope, start: monthStart, end: monthEnd, ...dataBundle }),
-    [scope, gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, mKey]
+    [scope, gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, tasks, partnerFeedback, extSwot, mKey]
   );
+  const canEditExternal = user && (user.role === 'owner' || user.role === 'manajer');
+  const saveExternalSwot = async (val) => {
+    await storage.set('swot:external', val);
+    setExtSwot(val);
+    await logActivity('memperbarui faktor eksternal SWOT', user?.name || '');
+  };
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/40">
@@ -2717,7 +2763,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
           )}
 
           {/* Evaluasi otomatis format SWOT — per fokus tab */}
-          <SwotPanel analysis={analysis} />
+          <SwotPanel analysis={analysis} canEdit={canEditExternal} external={extSwot} onSaveExternal={saveExternalSwot} />
         </div>
       )}
 
@@ -2731,7 +2777,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
 }
 
 // ====== ANALISIS BISNIS OTOMATIS — format SWOT (berbasis data nyata aplikasi) ======
-function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, affAccounts = [], affEntries = [], problems = [], attendance = [], reports = [], allUsers = [], tasks = [] }) {
+function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, affAccounts = [], affEntries = [], problems = [], attendance = [], reports = [], allUsers = [], tasks = [], partnerFeedback = [], externalSwot = null }) {
   const inRange = (d) => d && d >= start && d <= end;
   const dayList = [];
   {
@@ -2852,11 +2898,25 @@ function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, af
   if (divs.includes('internal') && accRows.length > 0 && accRows.length < 5) O.push(`Baru ${accRows.length} akun affiliator aktif — menambah akun = menambah slot komisi & jangkauan.`);
   if (O.length === 0 && total > 0) O.push(`Pertahankan ritme input & evaluasi harian; data periode ini jadi baseline untuk naikkan target periode depan.`);
 
+  // Kepuasan mitra (seller/creator) dalam periode → masuk SWOT
+  const pfRows = partnerFeedback.filter(f => inRange(f.date));
+  const pfAvg = pfRows.length ? pfRows.reduce((s, f) => s + (Number(f.rating) || 0), 0) / pfRows.length : null;
+  if (pfAvg !== null && pfRows.length >= 3) {
+    if (pfAvg >= 4.3) S.push(`Kepuasan mitra tinggi: rata-rata ${pfAvg.toFixed(1)}★ dari ${pfRows.length} catatan seller/creator.`);
+    else if (pfAvg < 3.5) W.push(`Kepuasan mitra rendah (${pfAvg.toFixed(1)}★ dari ${pfRows.length} catatan) — cek keluhan di menu Kepuasan Mitra, follow-up yang ≤2★.`);
+  }
+  const pfBad = pfRows.filter(f => f.rating <= 2);
+  if (pfBad.length > 0) T.push(`${pfBad.length} mitra memberi rating ≤2★ (${pfBad.slice(0, 2).map(f => f.name).join(', ')}${pfBad.length > 2 ? ', dll' : ''}) — risiko putus kerja sama kalau tidak ditindak.`);
+
   if (urgentProblems.length > 0) T.push(`${urgentProblems.length} masalah prioritas (kritis/tinggi) masih terbuka: "${urgentProblems[0].title}"${urgentProblems.length > 1 ? ', dll' : ''} — selesaikan sampai akar (5 Why).`);
   if (growthPct !== null && growthPct <= -15) T.push(`GMV turun ${Math.abs(growthPct)}% dibanding periode sebelumnya — cari akar penyebabnya sebelum jadi tren.`);
   if (scope === 'all' && topShare && topShare.share > 85) T.push(`Ketergantungan tinggi pada ${topShare.label} (${topShare.share}%) — kalau channel ini terganggu, hampir seluruh omzet ikut jatuh.`);
   if (target > 0 && projection < target && remainingDays > 0) T.push(`Dengan laju sekarang, proyeksi akhir periode ${fmtRupiah(projection)} — di bawah target ${fmtRupiah(target)}.`);
   if (needPerDay > 0 && avgPerDay > 0 && needPerDay > avgPerDay * 2.5) T.push(`Kebutuhan ${fmtRupiah(needPerDay)}/hari untuk kejar target = ${(needPerDay / avgPerDay).toFixed(1)}× laju sekarang — target periode ini realistisnya perlu strategi luar biasa atau penyesuaian.`);
+
+  // Faktor EKSTERNAL yang ditulis manual owner/manajer (kompetitor, kebijakan TikTok, musim, dll)
+  const extO = (externalSwot?.opportunities || []).filter(Boolean).map(t => `[Eksternal] ${t}`);
+  const extT = (externalSwot?.threats || []).filter(Boolean).map(t => `[Eksternal] ${t}`);
 
   const fallback = (arr, text) => arr.length === 0 ? [text] : arr;
   return {
@@ -2864,17 +2924,19 @@ function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, af
     series, byDiv, shares, accRows, best, avgPerDay, projection, remainingDays, needPerDay,
     lateRate, reportRate, openProblems, urgentProblems, resolvedInRange, team, zeroDays,
     targetOfDiv, expectedSoFar,
+    partner: { count: pfRows.length, avg: pfAvg, badCount: pfBad.length },
     swot: {
       strengths: fallback(S, 'Belum ada kekuatan menonjol terdeteksi dari data periode ini — perbanyak input data agar analisis tajam.').slice(0, 4),
       weaknesses: fallback(W, 'Tidak ada kelemahan signifikan terdeteksi pada periode ini.').slice(0, 4),
-      opportunities: fallback(O, 'Lengkapi target & data harian untuk membuka analisis peluang.').slice(0, 4),
-      threats: fallback(T, 'Tidak ada ancaman mendesak terdeteksi. Tetap pantau tren harian.').slice(0, 4)
+      opportunities: fallback([...O, ...extO], 'Lengkapi target & data harian untuk membuka analisis peluang.').slice(0, 5),
+      threats: fallback([...T, ...extT], 'Tidak ada ancaman mendesak terdeteksi. Tetap pantau tren harian.').slice(0, 5)
     }
   };
 }
 
-// Panel SWOT di Dashboard Bisnis
-function SwotPanel({ analysis }) {
+// Panel SWOT di Dashboard Bisnis (+ faktor eksternal manual oleh owner/manajer)
+function SwotPanel({ analysis, canEdit = false, external = null, onSaveExternal }) {
+  const [showExt, setShowExt] = useState(false);
   const quad = [
     { key: 'strengths', title: 'Strengths · Kekuatan', icon: '💪', bg: '#ECFDF5', border: '#A7F3D0', accent: '#047857' },
     { key: 'weaknesses', title: 'Weaknesses · Kelemahan', icon: '⚠️', bg: '#FFFBEB', border: '#FDE68A', accent: '#B45309' },
@@ -2886,12 +2948,21 @@ function SwotPanel({ analysis }) {
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <div>
           <div className="text-sm font-bold text-slate-700 flex items-center gap-2"><Sparkles className="w-4 h-4 text-blue-600" /> Evaluasi Otomatis — Format SWOT</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">{analysis.scopeLabel} · {fmtDate(analysis.start)} – {fmtDate(analysis.end)} · dihitung dari data nyata aplikasi</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">{analysis.scopeLabel} · {fmtDate(analysis.start)} – {fmtDate(analysis.end)} · data internal otomatis + faktor eksternal manual</div>
         </div>
-        <div className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-lg px-2.5 py-1">
-          Pace {analysis.pacePct !== null ? `${analysis.pacePct}%` : '—'} · Growth {analysis.growthPct !== null ? `${analysis.growthPct > 0 ? '+' : ''}${analysis.growthPct}%` : '—'}
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <button onClick={() => setShowExt(true)}
+              className="text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg px-2.5 py-1 transition">
+              + Faktor Eksternal
+            </button>
+          )}
+          <div className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-lg px-2.5 py-1">
+            Pace {analysis.pacePct !== null ? `${analysis.pacePct}%` : '—'} · Growth {analysis.growthPct !== null ? `${analysis.growthPct > 0 ? '+' : ''}${analysis.growthPct}%` : '—'}
+          </div>
         </div>
       </div>
+      {showExt && <ExternalSwotModal external={external} onSave={async (v) => { await onSaveExternal(v); setShowExt(false); }} onClose={() => setShowExt(false)} />}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {quad.map(q => (
           <div key={q.key} className="rounded-xl p-3.5" style={{ backgroundColor: q.bg, border: `1px solid ${q.border}` }}>
@@ -2910,6 +2981,42 @@ function SwotPanel({ analysis }) {
         ))}
       </div>
     </div>
+  );
+}
+
+// Modal: tulis faktor eksternal SWOT (kompetitor, kebijakan platform, musim/event) — satu per baris
+function ExternalSwotModal({ external, onSave, onClose }) {
+  const [opp, setOpp] = useState((external?.opportunities || []).join('\n'));
+  const [thr, setThr] = useState((external?.threats || []).join('\n'));
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true);
+    await onSave({
+      opportunities: opp.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 5),
+      threats: thr.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 5),
+      updatedAt: new Date().toISOString()
+    });
+    setBusy(false);
+  };
+  return (
+    <Modal title="Faktor Eksternal SWOT" onClose={onClose}>
+      <div className="space-y-3">
+        <div className="text-xs text-slate-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+          Mesin hanya bisa membaca data internal. Hal di luar aplikasi — kompetitor, kebijakan TikTok, tren produk, musim (Ramadan, gajian, 12.12) — tulis di sini. Otomatis tampil di SWOT dashboard & laporan PPT dengan tanda [Eksternal]. Disarankan direview tiap awal bulan.
+        </div>
+        <Field label="Peluang eksternal (satu per baris, maks. 5)">
+          <textarea value={opp} onChange={e => setOpp(e.target.value)} rows={4}
+            placeholder={"contoh:\nRamadan bulan depan — produk muslim naik\nTikTok buka program komisi baru"}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </Field>
+        <Field label="Ancaman eksternal (satu per baris, maks. 5)">
+          <textarea value={thr} onChange={e => setThr(e.target.value)} rows={4}
+            placeholder={"contoh:\nKompetitor agency X rekrut creator besar-besaran\nIsu kenaikan biaya iklan"}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </Field>
+        <FormActions onCancel={onClose} onSave={submit} disabled={busy} saveLabel={busy ? 'Menyimpan…' : 'Simpan Faktor Eksternal'} />
+      </div>
+    </Modal>
   );
 }
 
@@ -3341,6 +3448,70 @@ function DashboardKpiProblemRow({ kpi, target, openProblems, canHandle, onKpi, o
         </div>
         <ArrowRight className="w-4 h-4 text-slate-300" />
       </button>
+    </div>
+  );
+}
+
+// Fokus Hari Ini — 3 prioritas teratas per orang, dihitung otomatis (prinsip: prioritas yang jelas)
+function FocusTodayWidget({ user, tasks, dailyReports, affAccounts, affEntries, problems, setView }) {
+  const today = dayKey();
+  const now = new Date();
+  const items = [];
+
+  // 1) Tiket terlambat (paling urgent)
+  tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline && new Date(t.deadline) < now)
+    .sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''))
+    .forEach(t => items.push({ level: 0, icon: '🔴', text: `Selesaikan tiket terlambat: "${t.title}"`, sub: `lewat ${Math.max(1, Math.ceil((now - new Date(t.deadline)) / 86400000))} hari`, view: 'tasks' }));
+  // 2) Tiket deadline hari ini
+  tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline === today)
+    .forEach(t => items.push({ level: 1, icon: '⏰', text: `Deadline hari ini: "${t.title}"`, sub: 'jangan sampai lewat', view: 'tasks' }));
+  // 3) Akun GMV yang saya pegang belum diisi hari ini
+  affAccounts.filter(a => a.active !== false && a.picId === user.id)
+    .filter(a => !affEntries.some(e => e.accountId === a.id && e.date === today))
+    .forEach(a => items.push({ level: 2, icon: '💰', text: `Input GMV hari ini: akun ${a.name}`, sub: 'goal bulanan ikut ter-update', view: 'affiliate-accounts' }));
+  // 4) Laporan harian belum submit (mulai diingatkan jam 10)
+  if (now.getHours() >= 10 && !dailyReports.some(r => r.authorId === user.id && r.date === today)) {
+    items.push({ level: 3, icon: '📝', text: 'Isi laporan harian', sub: 'bukti kerja + nilai KPI-mu', view: 'daily-reports' });
+  }
+  // 5) Masalah kritis (untuk pengelola)
+  if (user.role === 'owner' || user.role === 'manajer' || user.role === 'leader') {
+    problems.filter(p => p.status !== 'resolved' && p.urgency === 'kritis')
+      .forEach(p => items.push({ level: 4, icon: '🚨', text: `Tangani masalah kritis: "${p.title}"`, sub: 'selesaikan sampai akar (5-Why)', view: 'problems' }));
+  }
+  // 6) Lanjutkan yang sedang dikerjakan
+  tasks.filter(t => t.assigneeId === user.id && t.status === 'in_progress')
+    .forEach(t => items.push({ level: 5, icon: '▶️', text: `Lanjutkan: "${t.title}"`, sub: 'sedang dikerjakan', view: 'tasks' }));
+
+  const top3 = items.sort((a, b) => a.level - b.level).slice(0, 3);
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm shadow-slate-200/40 p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-display font-bold text-slate-900 flex items-center gap-2">
+          <Target className="w-5 h-5 text-blue-600" /> Fokus Hari Ini
+        </h3>
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">3 prioritas teratasmu</span>
+      </div>
+      {top3.length === 0 ? (
+        <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+          ✓ Tidak ada prioritas mendesak. Waktu terbaik untuk bantu tim, kejar target, atau cari peluang baru.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {top3.map((it, i) => (
+            <button key={i} onClick={() => setView(it.view)}
+              className="text-left rounded-xl border-2 p-3.5 transition hover:-translate-y-0.5"
+              style={{ borderColor: i === 0 ? '#FCA5A5' : i === 1 ? '#FCD34D' : '#BFDBFE', backgroundColor: i === 0 ? '#FEF2F2' : i === 1 ? '#FFFBEB' : '#EFF6FF' }}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-5 h-5 rounded-full bg-white border border-slate-200 text-[11px] font-bold text-slate-700 flex items-center justify-center">{i + 1}</span>
+                <span>{it.icon}</span>
+              </div>
+              <div className="text-sm font-semibold text-slate-800 leading-snug">{it.text}</div>
+              <div className="text-[11px] text-slate-500 mt-1">{it.sub} →</div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -5273,11 +5444,55 @@ function ReportsView({ user, allUsers }) {
   const [reports, setReports] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [prefill, setPrefill] = useState(null);
+  const [genBusy, setGenBusy] = useState(false);
   const [filterWeek, setFilterWeek] = useState('all');
   const [lightbox, setLightbox] = useState(null);
 
   const load = async () => setReports(await storage.getList('reports:all'));
   useEffect(() => { load(); }, []);
+
+  // Anti kerja dobel: rangkum otomatis laporan-laporan HARIAN minggu ini → draft laporan mingguan
+  const generateFromDaily = async () => {
+    setGenBusy(true);
+    const week = getWeekRange();
+    const daily = (await storage.getList('daily-reports:all'))
+      .filter(r => r.authorId === user.id && r.date >= week.start && r.date <= week.end)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    setGenBusy(false);
+    if (daily.length === 0) {
+      alert('Belum ada laporan harian milikmu minggu ini. Isi Laporan Harian dulu, atau tulis laporan mingguan manual.');
+      return;
+    }
+    const dayLabel = (d) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric' });
+    const fieldsOf = (r) => r.fieldsSnapshot && Array.isArray(r.fieldsSnapshot)
+      ? r.fieldsSnapshot
+      : DEFAULT_DAILY_FIELDS.map(f => ({ id: f.id, label: f.label, type: f.type, value: r[f.id] }));
+    const achievements = [], blockers = [];
+    let gmv = 0, contentCount = 0, lastPlan = '';
+    daily.forEach(r => {
+      const fs = fieldsOf(r).filter(f => f.value !== undefined && f.value !== null && f.value !== '');
+      const texts = fs.filter(f => (f.type === 'textarea' || f.type === 'text'));
+      const main = texts.filter(f => !/kendala|hambatan|besok|rencana/i.test(f.label || ''));
+      if (main.length > 0) achievements.push(`${dayLabel(r.date)}: ${main.map(f => String(f.value).trim()).join(' · ')}`);
+      texts.filter(f => /kendala|hambatan/i.test(f.label || '')).forEach(f => blockers.push(`${dayLabel(r.date)}: ${String(f.value).trim()}`));
+      const planF = texts.find(f => /besok|rencana/i.test(f.label || ''));
+      if (planF) lastPlan = String(planF.value).trim();
+      fs.filter(f => f.type === 'number').forEach(f => {
+        const v = Number(f.value) || 0;
+        if (/gmv/i.test(f.label || '') || f.id === 'gmv') gmv += v;
+        else if (/konten/i.test(f.label || '') || f.id === 'contentCount') contentCount += v;
+      });
+    });
+    setPrefill({
+      weekStart: week.start, weekEnd: week.end,
+      achievements: achievements.join('\n'),
+      blockers: blockers.join('\n'),
+      plans: lastPlan ? `Lanjutan dari rencana terakhir: ${lastPlan}` : '',
+      gmv, contentCount
+    });
+    setEditing(null); setShowForm(true);
+  };
 
   const handleSave = async (data) => {
     let list = await storage.getList('reports:all');
@@ -5318,10 +5533,17 @@ function ReportsView({ user, allUsers }) {
     <div className="max-w-5xl">
       <PageHeader title="Laporan Mingguan" subtitle="Pencapaian, kendala, dan rencana minggu depan"
         action={
-          <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Laporan Baru
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={generateFromDaily} disabled={genBusy}
+              title="Rangkum otomatis dari laporan harianmu minggu ini — tinggal review & kirim"
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              <Sparkles className="w-4 h-4" /> {genBusy ? 'Merangkum…' : 'Buat dari Laporan Harian'}
+            </button>
+            <button onClick={() => { setEditing(null); setPrefill(null); setShowForm(true); }}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Laporan Baru
+            </button>
+          </div>
         } />
 
       {weeks.length > 0 && (
@@ -5392,23 +5614,24 @@ function ReportsView({ user, allUsers }) {
       )}
       {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.title} onClose={() => setLightbox(null)} />}
 
-      {showForm && <ReportForm report={editing} onSave={handleSave} onClose={() => { setShowForm(false); setEditing(null); }} />}
+      {showForm && <ReportForm report={editing} prefill={prefill} onSave={handleSave} onClose={() => { setShowForm(false); setEditing(null); setPrefill(null); }} />}
     </div>
   );
 }
 function ReportBlock({ title, content }) {
   return <div><div className="text-xs font-semibold text-slate-700 mb-1">{title}</div><div className="text-sm text-slate-600 whitespace-pre-wrap">{content || '-'}</div></div>;
 }
-function ReportForm({ report, onSave, onClose }) {
+function ReportForm({ report, prefill, onSave, onClose }) {
   const week = getWeekRange();
+  const src = report || prefill;
   const [form, setForm] = useState({
-    weekStart: report?.weekStart || week.start,
-    weekEnd: report?.weekEnd || week.end,
-    achievements: report?.achievements || '',
-    blockers: report?.blockers || '',
-    plans: report?.plans || '',
-    gmv: report?.gmv || 0,
-    contentCount: report?.contentCount || 0
+    weekStart: src?.weekStart || week.start,
+    weekEnd: src?.weekEnd || week.end,
+    achievements: src?.achievements || '',
+    blockers: src?.blockers || '',
+    plans: src?.plans || '',
+    gmv: src?.gmv || 0,
+    contentCount: src?.contentCount || 0
   });
   const [attachments, setAttachments] = useState(report?.attachments || []);
   const [attBusy, setAttBusy] = useState(false);
@@ -5483,214 +5706,6 @@ function ReportForm({ report, onSave, onClose }) {
           <div className="text-[11px] text-slate-500 mt-1">💡 Mis. screenshot GMV mingguan supaya laporan tervalidasi.</div>
         </Field>
         <FormActions onCancel={onClose} onSave={() => onSave({ ...form, attachments })} disabled={!form.achievements.trim()} />
-      </div>
-    </Modal>
-  );
-}
-
-// ============ SCHEDULE ============
-function ScheduleView({ user, allUsers }) {
-  const [schedules, setSchedules] = useState([]);
-  const [creators, setCreators] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [filter, setFilter] = useState({ type: 'all', view: 'upcoming' });
-
-  const load = async () => {
-    setSchedules(await storage.getList('schedule:all'));
-    setCreators(await storage.getList('creators:all'));
-  };
-  useEffect(() => { load(); }, []);
-
-  const handleSave = async (data) => {
-    let list = await storage.getList('schedule:all');
-    if (editing) {
-      list = list.map(s => s.id === editing.id ? { ...s, ...data } : s);
-    } else {
-      const admin = allUsers.find(u => u.id === data.adminId);
-      const creator = creators.find(c => c.id === data.creatorId);
-      list.unshift({
-        id: uid(), ...data,
-        adminName: admin?.name || '-', creatorName: creator?.name || '-',
-        status: 'scheduled', createdAt: new Date().toISOString()
-      });
-      await logActivity(`menambah jadwal ${SCHEDULE_TYPE[data.type].label} ${fmtDate(data.date)}`, user.name);
-    }
-    await storage.set('schedule:all', list);
-    setShowForm(false); setEditing(null); load();
-  };
-  const handleDelete = async (s) => {
-    if (!confirm('Hapus jadwal ini?')) return;
-    const list = (await storage.getList('schedule:all')).filter(x => x.id !== s.id);
-    await storage.set('schedule:all', list);
-    load();
-  };
-  const updateStatus = async (s, status) => {
-    const list = (await storage.getList('schedule:all')).map(x => x.id === s.id ? { ...x, status } : x);
-    await storage.set('schedule:all', list);
-    load();
-  };
-
-  // Visibility: Operasional sees only their own schedules
-  const visible = schedules.filter(s => {
-    if ((user.role === 'manajer' || user.role === 'owner') || user.role === 'leader') return true;
-    return s.adminId === user.id;
-  });
-  const today = new Date().toISOString().split('T')[0];
-  const filtered = visible
-    .filter(s => filter.type === 'all' || s.type === filter.type)
-    .filter(s => {
-      if (filter.view === 'upcoming') return s.date >= today;
-      if (filter.view === 'past') return s.date < today;
-      return true;
-    })
-    .sort((a, b) => filter.view === 'past' ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date));
-
-  // Assignable admins
-  const assignableAdmins = user.role === 'operasional' ? [user] :
-    user.role === 'leader' ? allUsers.filter(u => u.id === user.id || u.leaderId === user.id) :
-    allUsers;
-
-  return (
-    <div className="max-w-7xl">
-      <PageHeader title="Jadwal Live & Piket" subtitle="Atur jadwal live shopping, piket admin, dan piket grup"
-        action={can.manageSchedule(user) ? (
-          <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Jadwal Baru
-          </button>
-        ) : null} />
-
-      <div className="flex gap-3 mb-4 flex-wrap">
-        <div className="bg-white rounded-lg border border-slate-200 p-1 flex">
-          {[{ id: 'upcoming', label: 'Mendatang' }, { id: 'past', label: 'Sudah Lewat' }, { id: 'all', label: 'Semua' }].map(t => (
-            <button key={t.id} onClick={() => setFilter({ ...filter, view: t.id })}
-              className={`px-3 py-1.5 rounded text-xs font-semibold transition ${filter.view === t.id ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <select value={filter.type} onChange={e => setFilter({ ...filter, type: e.target.value })}
-          className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-          <option value="all">Semua Tipe</option>
-          {Object.entries(SCHEDULE_TYPE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-        </select>
-      </div>
-
-      {filtered.length === 0 ? (
-        <EmptyState icon={Calendar} text="Tidak ada jadwal pada filter ini." />
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filtered.map(s => {
-            const canEdit = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader' || s.adminId === user.id;
-            return (
-              <div key={s.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{SCHEDULE_TYPE[s.type].icon}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded font-semibold ${SCHEDULE_TYPE[s.type].color}`}>{SCHEDULE_TYPE[s.type].label}</span>
-                    </div>
-                    <div className="font-display font-bold text-slate-900 mt-2">{fmtDate(s.date)}</div>
-                    <div className="text-sm text-slate-600">⏰ {s.time}</div>
-                  </div>
-                  {canEdit && (
-                    <div className="flex gap-1">
-                      <button onClick={() => { setEditing(s); setShowForm(true); }} className="text-slate-400 hover:text-blue-600 p-1">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(s)} className="text-slate-400 hover:text-red-600 p-1">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {s.product && <div className="text-sm font-medium text-slate-800 mt-1">📦 {s.product}</div>}
-                <div className="text-xs text-slate-500 mt-2 space-y-0.5">
-                  <div>Admin: <b className="text-slate-700">{s.adminName}</b></div>
-                  {s.creatorName && s.creatorName !== '-' && <div>Creator: <b className="text-slate-700">{s.creatorName}</b></div>}
-                </div>
-                {s.notes && <div className="text-xs text-slate-500 mt-2 italic">{s.notes}</div>}
-                <select value={s.status} onChange={e => updateStatus(s, e.target.value)} disabled={!canEdit}
-                  className="w-full mt-3 text-xs px-2 py-1 border border-slate-200 rounded bg-white disabled:bg-slate-50">
-                  <option value="scheduled">📅 Terjadwal</option>
-                  <option value="ongoing">🟢 Berlangsung</option>
-                  <option value="done">✅ Selesai</option>
-                  <option value="cancelled">❌ Dibatalkan</option>
-                </select>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {showForm && <ScheduleForm schedule={editing} assignableAdmins={assignableAdmins}
-        creators={creators} onSave={handleSave} onClose={() => { setShowForm(false); setEditing(null); }} />}
-    </div>
-  );
-}
-
-function ScheduleForm({ schedule, assignableAdmins, creators, onSave, onClose }) {
-  const [form, setForm] = useState({
-    type: schedule?.type || 'live',
-    date: schedule?.date || new Date().toISOString().split('T')[0],
-    time: schedule?.time || '19:00',
-    adminId: schedule?.adminId || assignableAdmins[0]?.id || '',
-    creatorId: schedule?.creatorId || '',
-    product: schedule?.product || '',
-    notes: schedule?.notes || ''
-  });
-  return (
-    <Modal title={schedule ? 'Edit Jadwal' : 'Jadwal Baru'} onClose={onClose}>
-      <div className="space-y-3">
-        <Field label="Tipe Jadwal">
-          <div className="grid grid-cols-3 gap-2">
-            {Object.entries(SCHEDULE_TYPE).map(([k, v]) => (
-              <button key={k} onClick={() => setForm({ ...form, type: k })}
-                className={`px-3 py-2 rounded-lg border-2 text-sm font-semibold transition ${form.type === k ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
-                <div className="text-lg">{v.icon}</div>
-                <div className="text-xs">{v.label}</div>
-              </button>
-            ))}
-          </div>
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Tanggal *">
-            <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-          </Field>
-          <Field label="Jam *">
-            <input type="time" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-          </Field>
-        </div>
-        <Field label="PIC Admin *">
-          <select value={form.adminId} onChange={e => setForm({ ...form, adminId: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
-            {assignableAdmins.map(m => <option key={m.id} value={m.id}>{m.name}{m.jobTitle ? ` · ${m.jobTitle}` : ""} — {ROLES[m.role].label}</option>)}
-          </select>
-        </Field>
-        {form.type === 'live' && (
-          <>
-            <Field label="Creator">
-              <select value={form.creatorId} onChange={e => setForm({ ...form, creatorId: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
-                <option value="">- Pilih creator -</option>
-                {creators.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </Field>
-            <Field label="Produk yang Dilive">
-              <input type="text" value={form.product} onChange={e => setForm({ ...form, product: e.target.value })}
-                placeholder="Mis. Skincare A, Hijab Premium"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-            </Field>
-          </>
-        )}
-        <Field label="Catatan">
-          <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
-            rows={2} className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none" />
-        </Field>
-        <FormActions onCancel={onClose} onSave={() => onSave(form)} disabled={!form.date || !form.time || !form.adminId} />
       </div>
     </Modal>
   );
@@ -7503,6 +7518,153 @@ function SellersView({ user, allUsers }) {
 }
 
 // ============ ABSENSI (Attendance + Lokasi GPS) ============
+// ============ KEPUASAN MITRA (seller & creator — prinsip customer satisfaction) ============
+function PartnerFeedbackView({ user }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ type: 'seller', name: '', rating: 0, note: '' });
+  const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState('all');
+
+  const isManager = user.role === 'owner' || user.role === 'manajer';
+  const load = async () => { setItems(await storage.getList('partner-feedback:all')); setLoading(false); };
+  useEffect(() => { load(); }, []);
+
+  const submit = async () => {
+    if (!form.name.trim() || form.rating < 1) return;
+    setBusy(true);
+    const list = await storage.getList('partner-feedback:all');
+    list.unshift({
+      id: uid(), type: form.type, name: form.name.trim(), rating: form.rating, note: form.note.trim(),
+      date: dayKey(), byId: user.id, byName: user.name, createdAt: new Date().toISOString()
+    });
+    await storage.set('partner-feedback:all', list.slice(0, 1000));
+    await logActivity(`mencatat kepuasan ${form.type} "${form.name}" (${form.rating}★)`, user.name);
+    setForm({ type: form.type, name: '', rating: 0, note: '' });
+    setBusy(false); load();
+  };
+
+  const del = async (it) => {
+    if (!confirm(`Hapus catatan kepuasan "${it.name}"?`)) return;
+    await storage.set('partner-feedback:all', (await storage.getList('partner-feedback:all')).filter(x => x.id !== it.id));
+    load();
+  };
+
+  // Ringkasan bulan ini vs bulan lalu
+  const mk = monthKey();
+  const lastMk = monthKey(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1));
+  const statsOf = (m, type) => {
+    const rows = items.filter(i => (i.date || '').startsWith(m) && (type === 'all' || i.type === type));
+    const avg = rows.length ? rows.reduce((s, i) => s + i.rating, 0) / rows.length : null;
+    return { count: rows.length, avg };
+  };
+  const nowAll = statsOf(mk, 'all'), prevAll = statsOf(lastMk, 'all');
+  const nowSeller = statsOf(mk, 'seller'), nowCreator = statsOf(mk, 'creator');
+  const filtered = filter === 'all' ? items : items.filter(i => i.type === filter);
+
+  const Stars = ({ value, onPick, size = 'w-7 h-7' }) => (
+    <div className="flex gap-1">
+      {[1, 2, 3, 4, 5].map(n => (
+        <button key={n} type="button" onClick={onPick ? () => onPick(n) : undefined}
+          className={`${size} ${onPick ? 'cursor-pointer hover:scale-110' : 'cursor-default'} transition text-xl leading-none ${n <= value ? 'text-amber-400' : 'text-slate-200'}`}>★</button>
+      ))}
+    </div>
+  );
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat kepuasan mitra...</div>;
+
+  return (
+    <div className="max-w-4xl">
+      <PageHeader title="Kepuasan Mitra"
+        subtitle="Catat kepuasan seller & creator setiap follow-up — pelanggan puas = bisnis bertahan. Rata-rata bulanan otomatis masuk analisis SWOT." />
+
+      {/* Ringkasan */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        {[
+          { label: 'Rata-rata Bulan Ini', value: nowAll.avg !== null ? `${nowAll.avg.toFixed(1)} ★` : '—', sub: `${nowAll.count} catatan`, hl: true },
+          { label: 'Bulan Lalu', value: prevAll.avg !== null ? `${prevAll.avg.toFixed(1)} ★` : '—', sub: `${prevAll.count} catatan` },
+          { label: 'Seller', value: nowSeller.avg !== null ? `${nowSeller.avg.toFixed(1)} ★` : '—', sub: `${nowSeller.count} catatan bln ini` },
+          { label: 'Creator', value: nowCreator.avg !== null ? `${nowCreator.avg.toFixed(1)} ★` : '—', sub: `${nowCreator.count} catatan bln ini` }
+        ].map((c, i) => (
+          <div key={i} className={`rounded-2xl border p-4 ${c.hl ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{c.label}</div>
+            <div className={`font-display font-bold text-2xl mt-1 ${c.hl ? 'text-blue-700' : 'text-slate-900'}`}>{c.value}</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">{c.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Form catat cepat */}
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-5 mb-5">
+        <h3 className="font-display font-bold text-slate-900 mb-3">Catat Kepuasan (30 detik)</h3>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {[['seller', '🏪 Seller'], ['creator', '🎬 Creator']].map(([k, label]) => (
+            <button key={k} onClick={() => setForm({ ...form, type: k })}
+              className={`text-sm font-semibold px-4 py-1.5 rounded-lg border-2 transition ${form.type === k ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+          <Field label={`Nama ${form.type === 'seller' ? 'Seller' : 'Creator'} *`}>
+            <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+              placeholder={form.type === 'seller' ? 'mis. Toko Berkah' : 'mis. @adadynda'}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </Field>
+          <Field label="Seberapa puas mereka? *">
+            <Stars value={form.rating} onPick={(n) => setForm({ ...form, rating: n })} />
+          </Field>
+        </div>
+        <Field label="Catatan (apa kata mereka / kenapa)">
+          <input type="text" value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}
+            placeholder="mis. puas dengan kecepatan respon · komplain komisi telat cair"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mt-2" />
+        </Field>
+        <button onClick={submit} disabled={busy || !form.name.trim() || form.rating < 1}
+          className="mt-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-bold px-5 py-2.5 rounded-xl transition flex items-center gap-2">
+          <Heart className="w-4 h-4" /> {busy ? 'Menyimpan…' : 'Simpan Catatan'}
+        </button>
+      </div>
+
+      {/* Daftar */}
+      <div className="flex gap-1.5 mb-3">
+        {[['all', 'Semua'], ['seller', 'Seller'], ['creator', 'Creator']].map(([k, label]) => (
+          <button key={k} onClick={() => setFilter(k)}
+            style={filter === k ? { backgroundColor: '#2563EB', color: '#fff' } : {}}
+            className="text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 transition">
+            {label}
+          </button>
+        ))}
+      </div>
+      {filtered.length === 0 ? (
+        <EmptyState icon={Heart} text="Belum ada catatan kepuasan. Mulai dari follow-up berikutnya." />
+      ) : (
+        <div className="space-y-2">
+          {filtered.slice(0, 50).map(it => (
+            <div key={it.id} className="bg-white rounded-xl border border-slate-200 p-3.5 flex items-start gap-3">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${it.type === 'seller' ? 'bg-orange-50' : 'bg-purple-50'}`}>
+                {it.type === 'seller' ? '🏪' : '🎬'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-slate-900 text-sm">{it.name}</span>
+                  <Stars value={it.rating} size="w-4 h-4" />
+                  {it.rating <= 2 && <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-100 text-red-700">perlu follow-up</span>}
+                </div>
+                {it.note && <div className="text-xs text-slate-600 mt-0.5">"{it.note}"</div>}
+                <div className="text-[10px] text-slate-400 mt-1">{fmtDate(it.date)} · dicatat {it.byName}</div>
+              </div>
+              {(isManager || it.byId === user.id) && (
+                <button onClick={() => del(it)} className="text-slate-300 hover:text-red-600 p-1 flex-shrink-0"><Trash2 className="w-4 h-4" /></button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ KALKULATOR PEMBAGIAN KOMISI TAP ============
 function TapCommissionView({ user }) {
   const [tab, setTab] = useState('calc'); // calc | history | tiers
@@ -9564,6 +9726,7 @@ function SettingsView({ user, settings, onSave }) {
       a.download = `alkahfi-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
+      await storage.set('backup:last', { at: new Date().toISOString(), by: user.name });
     } catch (e) { alert('Gagal export: ' + e.message); }
     setBackupBusy(false);
   };
@@ -9950,7 +10113,7 @@ function TodosView({ user, allUsers }) {
 
   return (
     <div className="max-w-7xl">
-      <PageHeader title="To-Do List" subtitle="Tugas semua anggota tim — terbuka untuk dilihat, supaya tim tahu siapa sedang mengerjakan apa"
+      <PageHeader title="To-Do Pribadi" subtitle="Catatan kerja pribadi tiap anggota — terbuka dilihat tim. Beda dengan Tiket: Tiket = penugasan resmi antar orang."
         action={
           <button onClick={() => { setEditing(null); setShowForm(true); }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
@@ -11180,7 +11343,31 @@ function CalendarView({ user, allUsers }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const canManage = canManageCalendar(user);
 
-  const load = async () => setEvents(await storage.getList('calendar:all'));
+  // Migrasi sekali jalan: data "Jadwal" lama (live/piket) dilebur ke Kalender Tim
+  const migrateOldSchedule = async () => {
+    if (await storage.get('calendar:schedule-migrated')) return;
+    const oldSchedules = await storage.getList('schedule:all');
+    if (oldSchedules.length > 0) {
+      const list = await storage.getList('calendar:all');
+      oldSchedules.filter(s => s.status !== 'cancelled').forEach(s => {
+        if (list.some(e => e.id === `sch-${s.id}`)) return;
+        const tipe = SCHEDULE_TYPE[s.type] ? s.type : 'lain';
+        list.push({
+          id: `sch-${s.id}`,
+          title: s.type === 'live' ? `Live: ${s.product || s.creatorName || 'Live Shopping'}` : `${SCHEDULE_TYPE[s.type]?.label || 'Piket'} — ${s.adminName || ''}`.trim(),
+          description: [s.creatorName ? `Creator: ${s.creatorName}` : '', s.product ? `Produk: ${s.product}` : '', s.note || ''].filter(Boolean).join('\n'),
+          type: tipe, date: s.date, time: s.time || '09:00', endTime: '',
+          location: '', attendeeIds: [], attendeeNames: s.adminName ? [s.adminName] : [],
+          createdById: s.adminId || null, createdByName: s.adminName || 'Migrasi Jadwal',
+          createdAt: s.createdAt || new Date().toISOString(), migratedFromSchedule: true
+        });
+      });
+      await storage.set('calendar:all', list);
+    }
+    await storage.set('calendar:schedule-migrated', true);
+  };
+
+  const load = async () => { await migrateOldSchedule(); setEvents(await storage.getList('calendar:all')); };
   useEffect(() => { load(); }, []);
 
   const handleSave = async (data) => {
