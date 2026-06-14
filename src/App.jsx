@@ -1310,7 +1310,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
     {
       label: 'Operasional',
       items: [
-        { id: 'tasks', label: 'Tiket', icon: CheckSquare, show: user.role !== 'operasional' },
+        { id: 'tasks', label: 'Tiket', icon: CheckSquare, show: true },
         { id: 'todos', label: 'To-Do Pribadi', icon: KanbanSquare, show: true },
         { id: 'daily-reports', label: 'Laporan Harian', icon: ClipboardList, show: true },
         { id: 'attendance', label: 'Absensi', icon: MapPin, show: true },
@@ -1587,13 +1587,13 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
           action: () => setView('attendance')
         }));
 
-      // Tasks assigned to me (Tiket = fitur pengelola)
-      if (user.role !== 'operasional') tasks.filter(t => t.assigneeId === user.id && t.createdById !== user.id)
+      // Tiket yang ditugaskan ke saya (termasuk untuk penerima/operasional) — supaya tahu ada tugas baru utk dikerjakan
+      tasks.filter(t => t.assigneeId === user.id && t.createdById !== user.id)
         .slice(0, 10).forEach(t => {
           notifs.push({
             id: `task-${t.id}`, type: 'task',
-            title: `Tiket baru: ${t.title}`,
-            subtitle: `Dari ${t.createdByName || 'Sistem'}`,
+            title: `Tugas baru untukmu: ${t.title}`,
+            subtitle: `Dari ${t.createdByName || 'Sistem'}${t.deadline ? ` · deadline ${fmtDate(t.deadline)}` : ''} — segera dikerjakan`,
             time: t.createdAt,
             action: () => setView('tasks')
           });
@@ -3595,12 +3595,12 @@ function FocusTodayWidget({ user, tasks, dailyReports, affAccounts, affEntries, 
   const items = [];
 
   const isStaff = user.role === 'operasional';
-  // 1) Tiket terlambat (paling urgent) — staff tidak punya akses Tiket
-  if (!isStaff) tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline && new Date(t.deadline) < now)
+  // 1) Tiket terlambat (paling urgent) — termasuk untuk penerima/staff
+  tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline && new Date(t.deadline) < now)
     .sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''))
-    .forEach(t => items.push({ level: 0, icon: '🔴', text: `Selesaikan tiket terlambat: "${t.title}"`, sub: `lewat ${Math.max(1, Math.ceil((now - new Date(t.deadline)) / 86400000))} hari`, view: 'tasks' }));
+    .forEach(t => items.push({ level: 0, icon: '🔴', text: `Selesaikan tugas terlambat: "${t.title}"`, sub: `lewat ${Math.max(1, Math.ceil((now - new Date(t.deadline)) / 86400000))} hari`, view: 'tasks' }));
   // 2) Tiket deadline hari ini
-  if (!isStaff) tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline === today)
+  tasks.filter(t => t.assigneeId === user.id && t.status !== 'done' && t.deadline === today)
     .forEach(t => items.push({ level: 1, icon: '⏰', text: `Deadline hari ini: "${t.title}"`, sub: 'jangan sampai lewat', view: 'tasks' }));
   // 3) Akun GMV yang saya pegang belum diisi hari ini
   affAccounts.filter(a => a.active !== false && a.picId === user.id)
@@ -3617,7 +3617,7 @@ function FocusTodayWidget({ user, tasks, dailyReports, affAccounts, affEntries, 
       .forEach(p => items.push({ level: 4, icon: '🚨', text: `Tangani masalah kritis: "${p.title}"`, sub: 'selesaikan sampai akar (5-Why)', view: 'problems' }));
   }
   // 6) Lanjutkan yang sedang dikerjakan
-  if (!isStaff) tasks.filter(t => t.assigneeId === user.id && t.status === 'in_progress')
+  tasks.filter(t => t.assigneeId === user.id && t.status === 'in_progress')
     .forEach(t => items.push({ level: 5, icon: '▶️', text: `Lanjutkan: "${t.title}"`, sub: 'sedang dikerjakan', view: 'tasks' }));
 
   const top3 = items.sort((a, b) => a.level - b.level).slice(0, 3);
@@ -4423,7 +4423,6 @@ function ResetPasswordModal({ target, onSave, onClose }) {
 
 // ============ TASKS ============
 function TasksView({ user, allUsers }) {
-  if (user.role === 'operasional') return <NoAccess />;
   const [tasks, setTasks] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -4526,7 +4525,7 @@ function TasksView({ user, allUsers }) {
   return (
     <div className="max-w-7xl">
       <PageHeader title="Tiket" subtitle="Kelola semua tiket pekerjaan tim dalam satu tempat"
-        action={can.createTasks(user) || user.role === 'operasional' ? (
+        action={can.createTasks(user) ? (
           <button onClick={() => { setEditing(null); setShowForm(true); }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
             <Plus className="w-4 h-4" /> Tiket Baru
@@ -4572,7 +4571,7 @@ function TasksView({ user, allUsers }) {
               <tbody>
                 {filtered.map(t => {
                   const days = daysUntil(t.deadline);
-                  const canEdit = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id || t.assigneeId === user.id;
+                  const canEdit = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id;
                   return (
                     <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50">
                       <td className="p-3">
@@ -4643,7 +4642,7 @@ function TasksView({ user, allUsers }) {
         ) : (
           filtered.map(t => {
             const days = daysUntil(t.deadline);
-            const canEdit = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id || t.assigneeId === user.id;
+            const canEdit = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id;
             const canChangeStatus = (user.role === 'manajer' || user.role === 'owner') || t.assigneeId === user.id || t.createdById === user.id;
             return (
               <div key={t.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
@@ -4729,7 +4728,7 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
     (user.role === 'manajer' || user.role === 'owner') ||
     (user.role === 'leader' && assigneeUser?.leaderId === user.id);
 
-  const canEdit = (user.role === 'manajer' || user.role === 'owner') || task.createdById === user.id || task.assigneeId === user.id;
+  const canEdit = (user.role === 'manajer' || user.role === 'owner') || task.createdById === user.id;
   const canDelete = (user.role === 'manajer' || user.role === 'owner') || task.createdById === user.id;
 
   const submitComment = () => {
