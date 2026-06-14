@@ -1695,6 +1695,17 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
     return notifications.filter(n => (n.time || '') > lastNotifView).length;
   }, [notifications, lastNotifView]);
 
+  // Badge angka di ikon app (PWA terpasang di HP/desktop). Jumlah = notif belum dibaca.
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+    try {
+      if ('setAppBadge' in navigator) {
+        if (unreadCount > 0) navigator.setAppBadge(unreadCount).catch(() => {});
+        else if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => {});
+      }
+    } catch (e) {}
+  }, [unreadCount]);
+
   const markNotifSeen = async () => {
     const now = new Date().toISOString();
     await storage.set('ui:last-notif-view', now, false);
@@ -8175,6 +8186,7 @@ function AttendanceView({ user, allUsers }) {
   const [note, setNote] = useState('');
   const [filterUser, setFilterUser] = useState('all');
   const [filterDiv, setFilterDiv] = useState('all');
+  const [filterDate, setFilterDate] = useState(''); // '' = semua tanggal
   const [config, setConfig] = useState(DEFAULT_ATTENDANCE_CONFIG);
   const [result, setResult] = useState(null);   // banner hasil absen (telat/lokasi)
   const [showSettings, setShowSettings] = useState(false);
@@ -8414,8 +8426,16 @@ function AttendanceView({ user, allUsers }) {
     }
     if (filterDiv !== 'all') list = list.filter(r => (r.division || 'internal') === filterDiv);
     if (filterUser !== 'all') list = list.filter(r => r.userId === filterUser);
+    if (filterDate) list = list.filter(r => (r.timestamp || '').slice(0, 10) === filterDate);
     return list;
-  }, [records, user, allUsers, filterUser, filterDiv]);
+  }, [records, user, allUsers, filterUser, filterDiv, filterDate]);
+
+  // Ringkasan jumlah yang hadir pada tanggal terpilih (dihitung dari absen masuk, per orang unik)
+  const presentSummary = useMemo(() => {
+    if (!filterDate) return null;
+    const hadir = new Set(visibleRecords.filter(r => r.type === 'in').map(r => r.userId));
+    return { hadir: hadir.size };
+  }, [filterDate, visibleRecords]);
 
   // Rekap harian: gabungkan absen masuk & pulang per orang per tanggal → 1 baris rapi
   const [openRow, setOpenRow] = useState(null);
@@ -8750,7 +8770,28 @@ function AttendanceView({ user, allUsers }) {
       )}
 
       {/* Riwayat absensi — tabel rekap harian (Tanggal · Nama · Masuk · Pulang · Durasi · Status) */}
-      <h3 className="font-display font-bold text-slate-900 mb-3">Riwayat Absensi</h3>
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <h3 className="font-display font-bold text-slate-900">Riwayat Absensi</h3>
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 font-semibold">Tanggal:</span>
+          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)}
+            className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <button onClick={() => setFilterDate(new Date().toISOString().slice(0, 10))}
+            className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">Hari ini</button>
+          {filterDate && (
+            <button onClick={() => setFilterDate('')}
+              className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-500">Semua</button>
+          )}
+        </div>
+      </div>
+      {presentSummary && (
+        <div className="mb-3 flex items-center gap-2 text-sm bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
+          <Users className="w-4 h-4 text-emerald-600" />
+          <span className="text-slate-700">
+            <b className="text-emerald-700">{presentSummary.hadir} orang</b> hadir pada {new Date(filterDate + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </span>
+        </div>
+      )}
       {visibleRecords.length === 0 ? (
         <EmptyState icon={MapPin} text="Belum ada data absensi." />
       ) : (
