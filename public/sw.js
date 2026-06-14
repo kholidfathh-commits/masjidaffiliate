@@ -5,7 +5,7 @@
  *   - Aset statis hash Vite (js/css/png) -> CACHE FIRST (nama file berubah tiap deploy, jadi aman)
  *   - Permintaan ke Supabase / font / CDN -> dibiarkan lewat (tidak di-cache)
  */
-const CACHE = 'alkahfi-pwa-v1';
+const CACHE = 'alkahfi-pwa-v2';
 const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
