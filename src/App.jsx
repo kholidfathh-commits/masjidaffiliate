@@ -248,7 +248,8 @@ const PRIORITIES = {
 const TASK_STATUS = {
   todo:        { label: 'Belum Mulai', color: 'bg-slate-100 text-slate-700', dot: 'bg-slate-400' },
   in_progress: { label: 'Dikerjakan',  color: 'bg-blue-100 text-blue-700',   dot: 'bg-blue-500' },
-  done:        { label: 'Selesai',     color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' }
+  qc:          { label: 'Menunggu QC', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  done:        { label: 'Selesai',     color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' }
 };
 const CREATOR_STATUS = {
   aktif:   { label: 'Aktif',   color: 'bg-blue-100 text-blue-700' },
@@ -1611,6 +1612,30 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
             subtitle: `Dari ${t.createdByName || 'Sistem'}${t.deadline ? ` · deadline ${fmtDate(t.deadline)}` : ''} — segera dikerjakan`,
             time: t.createdAt,
             action: () => setView('tasks')
+          });
+        });
+      // QC: ke PEMBERI tugas saat penerima sudah kirim untuk QC
+      tasks.filter(t => t.status === 'qc' && t.createdById === user.id && t.qcSubmittedAt)
+        .forEach(t => notifs.push({
+          id: `qc-wait-${t.id}-${t.qcSubmittedAt}`, type: 'task',
+          title: `🔎 Menunggu QC: ${t.title}`,
+          subtitle: `${t.assigneeName || 'Penerima'} sudah selesai — mohon cek & setujui/revisi`,
+          time: t.qcSubmittedAt, action: () => setView('tasks')
+        }));
+      // QC: ke PENERIMA saat ada keputusan QC (revisi / disetujui)
+      tasks.filter(t => t.assigneeId === user.id && t.qcDecidedAt && t.qcDecidedById !== user.id)
+        .forEach(t => {
+          if (t.qcResult === 'revisi' && t.status === 'in_progress') notifs.push({
+            id: `qc-rev-${t.id}-${t.qcDecidedAt}`, type: 'task',
+            title: `↩ Revisi diminta: ${t.title}`,
+            subtitle: `${t.qcDecidedByName || 'Pemberi tugas'}: ${(t.qcNote || 'perlu diperbaiki').slice(0, 50)}`,
+            time: t.qcDecidedAt, action: () => setView('tasks')
+          });
+          if (t.qcResult === 'approved' && t.status === 'done') notifs.push({
+            id: `qc-ok-${t.id}-${t.qcDecidedAt}`, type: 'task',
+            title: `✅ Tugas disetujui (QC lolos): ${t.title}`,
+            subtitle: `Disetujui ${t.qcDecidedByName || 'pemberi tugas'} — kerja bagus!`,
+            time: t.qcDecidedAt, action: () => setView('tasks')
           });
         });
       // New comments on my tasks
@@ -4482,14 +4507,42 @@ function TasksView({ user, allUsers }) {
     if (viewing?.id === t.id) setViewing(null);
     load();
   };
-  const updateStatus = async (t, status) => {
-    const list = (await storage.getList('tasks:all')).map(x =>
-      x.id === t.id ? { ...x, status, completedAt: status === 'done' ? new Date().toISOString() : null } : x
-    );
+  const patchTask = async (id, patch, activity) => {
+    const list = (await storage.getList('tasks:all')).map(x => x.id === id ? { ...x, ...patch } : x);
     await storage.set('tasks:all', list);
-    if (status === 'done') await logActivity(`menyelesaikan tugas "${t.title}"`, user.name);
+    if (activity) await logActivity(activity, user.name);
     load();
   };
+  const updateStatus = async (t, status) => {
+    const now = new Date().toISOString();
+    const patch = { status };
+    if (status === 'qc') { patch.qcSubmittedAt = now; patch.qcResult = null; patch.qcNote = ''; patch.completedAt = null; }
+    else if (status === 'done') { patch.completedAt = now; patch.qcResult = 'approved'; patch.qcDecidedAt = now; patch.qcDecidedById = user.id; patch.qcDecidedByName = user.name; }
+    else { patch.completedAt = null; }
+    await patchTask(t.id, patch,
+      status === 'qc' ? `mengirim tugas "${t.title}" untuk QC` :
+      status === 'done' ? `menyelesaikan tugas "${t.title}"` : null);
+  };
+  // QC oleh pemberi tugas: setujui → Selesai, atau minta revisi → balik Dikerjakan + catatan
+  const qcApprove = (t) => updateStatus(t, 'done');
+  const qcRevise = async (t) => {
+    const note = prompt('Catatan revisi untuk penerima (apa yang perlu diperbaiki):', '');
+    if (note === null) return;
+    await patchTask(t.id, {
+      status: 'in_progress', qcResult: 'revisi', qcNote: note.trim(),
+      qcDecidedAt: new Date().toISOString(), qcDecidedById: user.id, qcDecidedByName: user.name, completedAt: null
+    }, `meminta revisi tugas "${t.title}"`);
+  };
+  // Opsi status sesuai peran: penerima TIDAK bisa langsung "Selesai" (harus lewat QC)
+  const statusOptionsFor = (t) => {
+    const isMgr = user.role === 'manajer' || user.role === 'owner';
+    const isCreator = t.createdById === user.id;
+    const isAssignee = t.assigneeId === user.id;
+    let opts = isMgr || isCreator ? ['todo', 'in_progress', 'qc', 'done'] : isAssignee ? ['todo', 'in_progress', 'qc'] : [t.status];
+    if (!opts.includes(t.status)) opts = [...opts, t.status];
+    return opts;
+  };
+  const canQC = (t) => (user.role === 'manajer' || user.role === 'owner' || t.createdById === user.id);
 
   const handleAddComment = async (task, text) => {
     if (!text.trim()) return;
@@ -4591,10 +4644,19 @@ function TasksView({ user, allUsers }) {
                     <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50">
                       <td className="p-3">
                         <select value={t.status} onChange={e => updateStatus(t, e.target.value)}
-                          disabled={!((user.role === 'manajer' || user.role === 'owner') || t.assigneeId === user.id || t.createdById === user.id)}
+                          disabled={!((user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id || (t.assigneeId === user.id && t.status !== 'done'))}
                           className={`text-xs px-2 py-1 rounded font-semibold border-0 cursor-pointer ${TASK_STATUS[t.status].color}`}>
-                          {Object.entries(TASK_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                          {statusOptionsFor(t).map(k => <option key={k} value={k}>{TASK_STATUS[k].label}</option>)}
                         </select>
+                        {t.status === 'qc' && canQC(t) && (
+                          <div className="flex gap-1 mt-1.5">
+                            <button onClick={() => qcApprove(t)} className="text-[10px] font-bold px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white">✓ Setujui</button>
+                            <button onClick={() => qcRevise(t)} className="text-[10px] font-bold px-2 py-1 rounded bg-white border border-amber-300 text-amber-700 hover:bg-amber-50">↩ Revisi</button>
+                          </div>
+                        )}
+                        {t.qcResult === 'revisi' && t.status === 'in_progress' && (
+                          <div className="text-[10px] text-amber-700 mt-1 max-w-[140px]" title={t.qcNote}>↩ Revisi: {(t.qcNote || '').slice(0, 30)}{(t.qcNote || '').length > 30 ? '…' : ''}</div>
+                        )}
                       </td>
                       <td className="p-3">
                         <button onClick={() => setViewing(t)} className="text-left w-full group">
@@ -4658,7 +4720,7 @@ function TasksView({ user, allUsers }) {
           filtered.map(t => {
             const days = daysUntil(t.deadline);
             const canEdit = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id;
-            const canChangeStatus = (user.role === 'manajer' || user.role === 'owner') || t.assigneeId === user.id || t.createdById === user.id;
+            const canChangeStatus = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id || (t.assigneeId === user.id && t.status !== 'done');
             return (
               <div key={t.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
                 <div className="flex items-start justify-between gap-2 mb-2">
@@ -4686,11 +4748,20 @@ function TasksView({ user, allUsers }) {
                   )}
                 </div>
 
+                {t.status === 'qc' && canQC(t) && (
+                  <div className="flex gap-2 mb-2">
+                    <button onClick={() => qcApprove(t)} className="flex-1 text-xs font-bold px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white">✓ Setujui (Selesai)</button>
+                    <button onClick={() => qcRevise(t)} className="flex-1 text-xs font-bold px-3 py-2 rounded-lg bg-white border border-amber-300 text-amber-700 hover:bg-amber-50">↩ Minta Revisi</button>
+                  </div>
+                )}
+                {t.qcResult === 'revisi' && t.status === 'in_progress' && (
+                  <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 mb-2">↩ <b>Revisi diminta:</b> {t.qcNote || '(tanpa catatan)'}</div>
+                )}
                 <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100">
                   <select value={t.status} onChange={e => updateStatus(t, e.target.value)}
                     disabled={!canChangeStatus}
                     className={`text-xs px-2.5 py-1.5 rounded-lg font-semibold border-0 cursor-pointer ${TASK_STATUS[t.status].color}`}>
-                    {Object.entries(TASK_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    {statusOptionsFor(t).map(k => <option key={k} value={k}>{TASK_STATUS[k].label}</option>)}
                   </select>
                   <div className="flex items-center gap-1">
                     <button onClick={() => setViewing(t)} title="Detail & komentar" className="text-slate-400 hover:text-blue-600 p-1.5">
@@ -4721,13 +4792,16 @@ function TasksView({ user, allUsers }) {
         onDelete={() => handleDelete(viewing)}
         onAddComment={(text) => handleAddComment(viewing, text)}
         onDeleteComment={(commentId) => handleDeleteComment(viewing, commentId)}
+        canQC={canQC(viewing)}
+        onQcApprove={() => { qcApprove(viewing); setViewing(null); }}
+        onQcRevise={() => { qcRevise(viewing); setViewing(null); }}
         onClose={() => setViewing(null)} />}
     </div>
   );
 }
 
 // ============ TASK DETAIL MODAL (with Comments) ============
-function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment, onDeleteComment, onClose }) {
+function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment, onDeleteComment, canQC, onQcApprove, onQcRevise, onClose }) {
   const [commentText, setCommentText] = useState('');
   const days = daysUntil(task.deadline);
 
@@ -4766,6 +4840,32 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
           <h3 className="font-display font-bold text-slate-900 text-xl">{task.title}</h3>
           {task.description && <p className="text-sm text-slate-600 mt-2 whitespace-pre-wrap">{task.description}</p>}
         </div>
+
+        {/* Panel QC */}
+        {task.status === 'qc' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+            <div className="text-sm font-semibold text-amber-800 flex items-center gap-1.5"><Check className="w-4 h-4" /> Menunggu QC</div>
+            <div className="text-xs text-amber-700 mt-0.5">{task.assigneeName} sudah menandai selesai. {canQC ? 'Cek hasilnya lalu setujui atau minta revisi.' : 'Menunggu pemberi tugas mengecek.'}</div>
+            {canQC && (
+              <div className="flex gap-2 mt-2.5">
+                <button onClick={onQcApprove} className="flex-1 text-sm font-bold px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white">✓ Setujui (Selesai)</button>
+                <button onClick={onQcRevise} className="flex-1 text-sm font-bold px-3 py-2 rounded-lg bg-white border border-amber-300 text-amber-700 hover:bg-amber-50">↩ Minta Revisi</button>
+              </div>
+            )}
+          </div>
+        )}
+        {task.qcResult === 'revisi' && task.status === 'in_progress' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm">
+            <span className="font-semibold text-amber-800">↩ Revisi diminta</span>
+            <span className="text-amber-700"> oleh {task.qcDecidedByName || 'pemberi tugas'}:</span>
+            <div className="text-slate-700 mt-1 whitespace-pre-wrap">{task.qcNote || '(tanpa catatan)'}</div>
+          </div>
+        )}
+        {task.qcResult === 'approved' && task.status === 'done' && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-800">
+            ✅ <b>Lolos QC</b> — disetujui {task.qcDecidedByName || 'pemberi tugas'}{task.qcDecidedAt ? ` · ${fmtDateTime(task.qcDecidedAt)}` : ''}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div className="bg-slate-50 p-3 rounded-lg">
@@ -10774,6 +10874,8 @@ function DailyReportsView({ user, allUsers }) {
     date: dayKey(),
     author: 'all'
   });
+  const [viewMode, setViewMode] = useState('kartu'); // 'kartu' | 'tabel'
+  const [exporting, setExporting] = useState(false);
 
   const load = async () => {
     setReports(await storage.getList('daily-reports:all'));
@@ -10912,6 +11014,49 @@ function DailyReportsView({ user, allUsers }) {
     return Object.entries(g).sort(([a], [b]) => b.localeCompare(a));
   }, [filtered]);
 
+  // Susun laporan PER TEMPLATE/FORM jadi tabel (baris = laporan, kolom = pertanyaan form)
+  const valStr = (v) => Array.isArray(v) ? v.join(', ') : (v ?? '');
+  const reportsByTemplate = useMemo(() => {
+    const g = {};
+    filtered.forEach(r => { const k = r.templateName || 'Laporan Umum'; (g[k] = g[k] || []).push(r); });
+    return Object.entries(g).map(([name, reps]) => {
+      const labels = [];
+      reps.forEach(r => getReportFields(r).forEach(f => { if (!labels.includes(f.label)) labels.push(f.label); }));
+      const sorted = reps.slice().sort((a, b) => (b.date + (b.submittedAt || '')).localeCompare(a.date + (a.submittedAt || '')));
+      return { name, reps: sorted, labels };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  }, [filtered]);
+
+  // Export Excel (.xlsx) — 1 sheet per template/form, kolom = pertanyaan
+  const exportExcel = async () => {
+    if (filtered.length === 0) { alert('Tidak ada laporan pada filter ini untuk diexport.'); return; }
+    setExporting(true);
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.utils.book_new();
+      const usedNames = new Set();
+      reportsByTemplate.forEach(({ name, reps, labels }) => {
+        const header = ['Nama', 'Peran', 'Posisi', 'Tanggal', 'Waktu Kirim', ...labels];
+        const aoa = [header];
+        reps.forEach(r => {
+          const map = {}; getReportFields(r).forEach(f => { map[f.label] = valStr(f.value); });
+          aoa.push([
+            r.authorName, ROLES[r.authorRole]?.label || r.authorRole, r.authorJobTitle || '-',
+            fmtDate(r.date), fmtDateTime(r.submittedAt), ...labels.map(l => map[l] ?? '')
+          ]);
+        });
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = header.map((h, i) => ({ wch: i < 5 ? 16 : Math.min(45, Math.max(14, String(h).length + 2)) }));
+        let sheetName = (name || 'Laporan').replace(/[\\/?*\[\]:]/g, ' ').slice(0, 28);
+        let nm = sheetName, c = 2; while (usedNames.has(nm)) { nm = `${sheetName} ${c++}`; }
+        usedNames.add(nm);
+        XLSX.utils.book_append_sheet(wb, ws, nm);
+      });
+      XLSX.writeFile(wb, `Laporan-Harian-${dayKey()}.xlsx`);
+    } catch (e) { alert('Gagal membuat Excel: ' + (e?.message || e)); }
+    setExporting(false);
+  };
+
   const myAssignedTemplate = getUserTemplate(user.id);
   const staffNoForm = user.role === 'operasional' && !myAssignedTemplate;
 
@@ -10927,9 +11072,13 @@ function DailyReportsView({ user, allUsers }) {
                 <Edit2 className="w-4 h-4" /> Kelola Template Form
               </button>
             )}
+            <button onClick={exportExcel} disabled={exporting}
+              className="bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-700 disabled:opacity-50 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              <FileSpreadsheet className="w-4 h-4" /> {exporting ? 'Menyiapkan…' : 'Export Excel'}
+            </button>
             <button onClick={() => setShowDownloadModal(true)}
               className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-              <FileDown className="w-4 h-4" /> Download Laporan
+              <FileDown className="w-4 h-4" /> Download CSV
             </button>
             <button onClick={() => { setEditing(null); setShowForm(true); }} disabled={staffNoForm}
               title={staffNoForm ? 'Leader belum membuatkan form laporan untukmu' : ''}
@@ -10980,11 +11129,57 @@ function DailyReportsView({ user, allUsers }) {
             </select>
           </div>
         )}
+        <div className="ml-auto">
+          <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Tampilan</label>
+          <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden">
+            <button onClick={() => setViewMode('kartu')}
+              className={`text-xs font-semibold px-3 py-1.5 ${viewMode === 'kartu' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Kartu</button>
+            <button onClick={() => setViewMode('tabel')}
+              className={`text-xs font-semibold px-3 py-1.5 ${viewMode === 'tabel' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Tabel</button>
+          </div>
+        </div>
       </div>
 
       {/* List */}
       {filtered.length === 0 ? (
         <EmptyState icon={ClipboardList} text="Belum ada laporan harian pada filter ini." />
+      ) : viewMode === 'tabel' ? (
+        <div className="space-y-6">
+          {reportsByTemplate.map(({ name, reps, labels }) => (
+            <div key={name}>
+              <div className="text-sm font-display font-bold text-slate-700 mb-2 px-1">
+                📋 {name} <span className="text-xs text-slate-500 font-normal">({reps.length} laporan)</span>
+              </div>
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="text-sm min-w-full whitespace-nowrap">
+                    <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="text-left px-3 py-2.5 font-bold sticky left-0 bg-slate-50 z-10">Nama</th>
+                        <th className="text-left px-3 py-2.5 font-bold">Tanggal</th>
+                        {labels.map(l => <th key={l} className="text-left px-3 py-2.5 font-bold">{l}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reps.map(r => {
+                        const map = {}; getReportFields(r).forEach(f => { map[f.label] = valStr(f.value); });
+                        return (
+                          <tr key={r.id} className="hover:bg-slate-50 align-top">
+                            <td className="px-3 py-2 font-semibold text-slate-800 sticky left-0 bg-white">
+                              {r.authorName}<div className="text-[10px] font-normal text-slate-400">{ROLES[r.authorRole]?.label}</div>
+                            </td>
+                            <td className="px-3 py-2 text-slate-600">{fmtDate(r.date)}</td>
+                            {labels.map(l => <td key={l} className="px-3 py-2 text-slate-700 max-w-[280px] whitespace-pre-wrap">{String(map[l] ?? '') || '–'}</td>)}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="space-y-5">
           {groupedByDate.map(([date, reps]) => (
@@ -11818,6 +12013,74 @@ function canManageCalendar(u) {
   return u.role === 'owner' || u.role === 'manajer' || u.role === 'leader' || !!u.isSecretariat;
 }
 
+// ====== INTEGRASI GOOGLE CALENDAR (OAuth, tanpa backend — pakai Google Identity Services) ======
+// Agenda otomatis masuk ke Google Calendar akun Google si pembuat. Butuh VITE_GOOGLE_CLIENT_ID.
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+let _gisPromise = null;
+function loadGis() {
+  if (_gisPromise) return _gisPromise;
+  _gisPromise = new Promise((resolve, reject) => {
+    if (window.google?.accounts?.oauth2) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true; s.defer = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Gagal memuat Google (cek koneksi internet).'));
+    document.head.appendChild(s);
+  });
+  return _gisPromise;
+}
+let _gcalToken = null; // { token, exp }
+async function getGcalToken(forceConsent = false) {
+  if (!GOOGLE_CLIENT_ID) throw new Error('Integrasi Google Calendar belum diaktifkan (VITE_GOOGLE_CLIENT_ID belum diisi).');
+  await loadGis();
+  if (!forceConsent && _gcalToken && _gcalToken.exp > Date.now() + 60000) return _gcalToken.token;
+  return new Promise((resolve, reject) => {
+    const tc = window.google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: GCAL_SCOPE,
+      callback: (resp) => {
+        if (resp.error) return reject(new Error(resp.error_description || resp.error));
+        _gcalToken = { token: resp.access_token, exp: Date.now() + (resp.expires_in || 3600) * 1000 };
+        resolve(resp.access_token);
+      },
+      error_callback: (err) => reject(new Error(err?.message || 'Login Google dibatalkan.')),
+    });
+    tc.requestAccessToken({ prompt: _gcalToken ? '' : 'consent' });
+  });
+}
+const _addOneHour = (hm) => {
+  const [h, m] = (hm || '09:00').split(':').map(Number);
+  const d = new Date(2000, 0, 1, h, m); d.setHours(d.getHours() + 1);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+// Buat 1 event di Google Calendar primary akun pembuat. Tamu yang punya email otomatis diundang.
+async function addEventToGoogleCalendar(event) {
+  const token = await getGcalToken();
+  const startT = event.time || '09:00';
+  const endT = event.endTime || _addOneHour(startT);
+  const body = {
+    summary: event.title,
+    description: event.description || '',
+    location: event.location || '',
+    start: { dateTime: `${event.date}T${startT}:00`, timeZone: 'Asia/Jakarta' },
+    end: { dateTime: `${event.date}T${endT}:00`, timeZone: 'Asia/Jakarta' },
+    attendees: (event.attendeeEmails || []).map(email => ({ email })),
+    reminders: { useDefault: true },
+  };
+  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`Google Calendar (${res.status}): ${t.slice(0, 140)}`);
+  }
+  return res.json(); // { htmlLink, id, ... }
+}
+
 function CalendarView({ user, allUsers }) {
   const [events, setEvents] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -11850,8 +12113,12 @@ function CalendarView({ user, allUsers }) {
     await storage.set('calendar:schedule-migrated', true);
   };
 
+  const setEvents0 = async () => setEvents(await storage.getList('calendar:all'));
   const load = async () => { await migrateOldSchedule(); setEvents(await storage.getList('calendar:all')); };
-  useEffect(() => { load(); }, []);
+  // Muat saat buka + auto-refresh tiap 10 detik (biar agenda baru dari device lain ikut muncul)
+  useEffect(() => { load(); const iv = setInterval(() => setEvents0(), 10000); return () => clearInterval(iv); }, []);
+  // Preload Google Identity Services agar popup saat simpan tidak diblokir
+  useEffect(() => { if (GOOGLE_CLIENT_ID) loadGis().catch(() => {}); }, []);
 
   const handleSave = async (data) => {
     let list = await storage.getList('calendar:all');
@@ -11865,15 +12132,19 @@ function CalendarView({ user, allUsers }) {
       });
       await logActivity(`menambah agenda kalender: "${data.title}" (${fmtDate(data.date)})`, user.name);
     }
+    setEvents(list);            // tampilkan langsung (optimistic) — agenda baru muncul seketika
+    setShowForm(false); setEditing(null);
     await storage.set('calendar:all', list);
-    setShowForm(false); setEditing(null); load();
+    setEvents0();               // sinkron ulang dari server
   };
 
   const handleDelete = async (ev) => {
     if (!confirm(`Hapus agenda "${ev.title}"?`)) return;
-    const list = (await storage.getList('calendar:all')).filter(x => x.id !== ev.id);
-    await storage.set('calendar:all', list);
-    setViewing(null); load();
+    const list = events.filter(x => x.id !== ev.id);
+    setEvents(list); setViewing(null);   // hilangkan langsung
+    const fresh = (await storage.getList('calendar:all')).filter(x => x.id !== ev.id);
+    await storage.set('calendar:all', fresh);
+    setEvents0();
   };
 
   // Calendar grid for currentMonth
@@ -11934,7 +12205,11 @@ function CalendarView({ user, allUsers }) {
         <div className="flex-1 text-sm">
           <div className="font-semibold text-blue-900">Integrasi Google Calendar</div>
           <div className="text-blue-800 mt-0.5">
-            Pilih peserta saat membuat agenda → peserta yang sudah isi <b>Gmail</b> (di Profil) akan otomatis <b>diundang</b> ke Google Calendar saat agenda dibuka & disimpan lewat tombol <b>"Google Calendar"</b>. Bisa juga download <b>.ics</b> untuk Outlook/Apple Calendar. 🔔 Peserta otomatis dapat <b>notifikasi di lonceng</b> (pengingat H-1 sore & pagi hari-H) + pop-up saat aplikasi terbuka.
+            {GOOGLE_CLIENT_ID ? (
+              <>Saat membuat agenda baru, centang <b>"Tambahkan otomatis ke Google Calendar saya"</b> → agenda langsung masuk Google Calendar akun Google pembuat (pertama kali diminta login & izin). Peserta yang sudah isi <b>Gmail</b> (di Profil) otomatis <b>diundang via email</b>. 🔔 Peserta juga dapat <b>notifikasi di lonceng</b> aplikasi (H-1 sore & pagi hari-H).</>
+            ) : (
+              <>Pilih peserta saat membuat agenda → peserta yang sudah isi <b>Gmail</b> (di Profil) akan diundang ke Google Calendar saat agenda dibuka & disimpan lewat tombol <b>"Google Calendar"</b>. Bisa juga download <b>.ics</b>. 🔔 Peserta dapat <b>notifikasi di lonceng</b> (H-1 sore & pagi hari-H). <span className="block mt-1 text-amber-700">⚙️ Mode otomatis (tanpa klik) belum aktif — perlu setup Google Client ID (lihat panduan dari admin).</span></>
+            )}
             {!canManage && <span className="block mt-1 text-blue-700">Kamu bisa <b>melihat</b> agenda. Penambahan agenda dilakukan oleh Leader/Manajer/CEO/Sekretariat.</span>}
           </div>
         </div>
@@ -12035,6 +12310,9 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
   // Scope peserta: owner/manajer/sekretariat → semua tim; leader → hanya timnya + dirinya
   const canAll = user.role === 'owner' || user.role === 'manajer' || !!user.isSecretariat;
   const selectableUsers = canAll ? allUsers : allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
+  const gcalReady = !!GOOGLE_CLIENT_ID && !event?.id; // hanya untuk agenda baru
+  const [addGcal, setAddGcal] = useState(true);
+  const [busy, setBusy] = useState(false);
 
   const toggleAttendee = (id) => {
     const list = form.attendeeIds.includes(id)
@@ -12043,11 +12321,27 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
     setForm({ ...form, attendeeIds: list });
   };
 
-  const submit = () => {
+  const submit = async () => {
     const chosen = allUsers.filter(u => form.attendeeIds.includes(u.id));
     const attendees = chosen.map(u => u.name);
     const attendeeEmails = chosen.map(u => (u.gmail || '').trim()).filter(Boolean);
-    onSave({ ...form, attendeeNames: attendees, attendeeEmails });
+    const payload = { ...form, attendeeNames: attendees, attendeeEmails };
+    // Auto-tambah ke Google Calendar (dipanggil langsung dari klik → popup tidak diblokir)
+    if (gcalReady && addGcal) {
+      setBusy(true);
+      try {
+        await addEventToGoogleCalendar(payload);
+        alert('✅ Agenda berhasil ditambahkan ke Google Calendar kamu.' + (attendeeEmails.length ? ` ${attendeeEmails.length} peserta diundang via email.` : ''));
+      } catch (e) {
+        const lanjut = confirm('Gagal menambah ke Google Calendar:\n' + (e?.message || e) + '\n\nTetap simpan agenda di aplikasi?');
+        setBusy(false);
+        if (!lanjut) return;
+        onSave(payload);
+        return;
+      }
+      setBusy(false);
+    }
+    onSave(payload);
   };
 
   return (
@@ -12120,7 +12414,17 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
           </div>
           <div className="text-[11px] text-slate-500 mt-1">{form.attendeeIds.length} dari {selectableUsers.length} anggota dipilih{!canAll ? ' (timmu)' : ''}. Yang sudah isi Gmail akan diundang otomatis ke Google Calendar.</div>
         </Field>
-        <FormActions onCancel={onClose} onSave={submit} disabled={!form.title.trim() || !form.date || !form.time} />
+        {gcalReady && (
+          <label className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3 cursor-pointer">
+            <input type="checkbox" checked={addGcal} onChange={e => setAddGcal(e.target.checked)} className="mt-0.5" />
+            <span className="text-sm text-emerald-800">
+              <b>Tambahkan otomatis ke Google Calendar saya</b>
+              <span className="block text-[11px] text-emerald-700 mt-0.5">Saat disimpan, agenda langsung masuk Google Calendar akun Google yang kamu pilih (pertama kali akan diminta login & izin). Peserta yang punya Gmail otomatis diundang via email.</span>
+            </span>
+          </label>
+        )}
+        <FormActions onCancel={onClose} onSave={submit} disabled={busy || !form.title.trim() || !form.date || !form.time}
+          saveLabel={busy ? 'Menyimpan ke Google…' : (event?.id ? 'Update Agenda' : 'Simpan Agenda')} />
       </div>
     </Modal>
   );
@@ -12128,6 +12432,15 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
 
 function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
   const canEdit = user.role === 'manajer' || user.role === 'owner' || !!user.isSecretariat || event.createdById === user.id;
+  const [gcalBusy, setGcalBusy] = useState(false);
+  const addToGcalAuto = async () => {
+    setGcalBusy(true);
+    try {
+      await addEventToGoogleCalendar(event);
+      alert('✅ Agenda ditambahkan ke Google Calendar kamu.' + (event.attendeeEmails?.length ? ` ${event.attendeeEmails.length} peserta diundang.` : ''));
+    } catch (e) { alert('Gagal: ' + (e?.message || e)); }
+    setGcalBusy(false);
+  };
 
   // Generate Google Calendar URL (+ undang peserta yang punya Gmail)
   const googleCalendarUrl = useMemo(() => {
@@ -12242,10 +12555,16 @@ function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
               📨 {event.attendeeEmails.length} peserta akan <b>diundang otomatis</b> (Google kirim undangan ke Gmail mereka) saat kamu klik tombol Google Calendar lalu <b>Simpan</b>.
             </div>
           )}
+          {GOOGLE_CLIENT_ID && (
+            <button onClick={addToGcalAuto} disabled={gcalBusy}
+              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 mb-1">
+              <CalendarDays className="w-4 h-4" /> {gcalBusy ? 'Menambahkan…' : 'Tambah Otomatis ke Google Calendar'}
+            </button>
+          )}
           <div className="flex gap-2 flex-wrap">
             <a href={googleCalendarUrl} target="_blank" rel="noopener noreferrer"
               className="flex-1 bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-              <CalendarDays className="w-4 h-4" /> Google Calendar {event.attendeeEmails?.length ? '+ Undang Tim' : ''}
+              <CalendarDays className="w-4 h-4" /> {GOOGLE_CLIENT_ID ? 'Buka di Google Calendar' : 'Google Calendar'} {event.attendeeEmails?.length ? '+ Undang Tim' : ''}
             </a>
             <button onClick={downloadICS}
               className="flex-1 bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
