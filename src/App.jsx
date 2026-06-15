@@ -159,8 +159,20 @@ function playNotifSound() {
     });
   } catch (e) { /* browser belum izinkan audio */ }
 }
-const fmtDate = d => d ? new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
-const fmtDateTime = d => d ? new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-';
+// Cek string tanggal-saja "YYYY-MM-DD" (tanpa jam) — ini tanggal kalender, JANGAN digeser timezone.
+const isDateOnly = (d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d);
+// Tanggal-saja → tampilkan apa adanya (parse jam 00:00 lokal, tidak bergeser hari di device manapun).
+// Timestamp lengkap (createdAt dll) → selalu tampilkan dalam WIB (Asia/Jakarta) supaya HP & laptop SAMA.
+const fmtDate = d => {
+  if (!d) return '-';
+  if (isDateOnly(d)) return new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Jakarta' });
+};
+const fmtDateTime = d => {
+  if (!d) return '-';
+  if (isDateOnly(d)) return new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+  return new Date(d).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
+};
 const fmtNumber = n => new Intl.NumberFormat('id-ID').format(n || 0);
 const fmtRupiah = n => 'Rp ' + fmtNumber(n);
 const daysUntil = d => d ? Math.ceil((new Date(d) - new Date()) / 86400000) : null;
@@ -169,7 +181,7 @@ const getWeekRange = (offset = 0) => {
   const day = now.getDay();
   const monday = new Date(now.setDate(now.getDate() - day + (day === 0 ? -6 : 1)));
   const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
-  return { start: monday.toISOString().split('T')[0], end: sunday.toISOString().split('T')[0] };
+  return { start: dayKey(monday), end: dayKey(sunday) };
 };
 
 // Kompres file gambar → dataURL JPEG (dipakai: feedback, laporan, selfie absen)
@@ -424,6 +436,9 @@ const monthKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() +
 const dayKey = (d = new Date()) => {
   const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
 };
+// Tanggal kalender (YYYY-MM-DD) dalam WIB dari sebuah timestamp — supaya pengelompokan tanggal
+// (mis. absensi yang disimpan sebagai timestamp UTC) konsisten di semua device, bukan ikut zona perangkat.
+const wibDayKey = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(d));
 const daysInMonth = (mKey) => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m, 0).getDate(); };
 const DEFAULT_AFFILIATE_GOAL = 1000000000; // target Affiliator Internal default 1 Miliar/bulan
 
@@ -2037,7 +2052,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
   const overdue = myTasks.filter(t => t.deadline && new Date(t.deadline) < new Date()).length;
   const totalGmv = visibleCreators.reduce((s, c) => s + (Number(c.totalGmv) || 0), 0);
   const activeCreators = visibleCreators.filter(c => c.status === 'aktif').length;
-  const today = new Date().toISOString().split('T')[0];
+  const today = dayKey();
   const upcomingEvents = calendarEvents
     .filter(e => e.date >= today)
     .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')))
@@ -2917,7 +2932,7 @@ function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, af
   const accNoTarget = accRows.filter(r => r.target <= 0);
 
   // Disiplin & laporan dalam periode
-  const attIn = attendance.filter(r => r.type === 'in' && inRange((r.timestamp || '').slice(0, 10)));
+  const attIn = attendance.filter(r => r.type === 'in' && inRange(wibDayKey(r.timestamp)));
   const lateRate = attIn.length > 0 ? Math.round(attIn.filter(r => r.late).length / attIn.length * 100) : null;
   const staff = allUsers.filter(u => u.role !== 'owner');
   const repDays = new Set(reports.filter(r => inRange(r.date)).map(r => `${r.authorId}|${r.date}`)).size;
@@ -5566,7 +5581,7 @@ function ExportCreatorsButton({ creators }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Data-Creator-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `Data-Creator-${dayKey()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -6215,7 +6230,7 @@ function GmvView({ user, allUsers }) {
               <div key={e.id} className="p-3">
                 <div className="flex items-center justify-between">
                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${DIVISIONS[e.division]?.color || 'bg-slate-100'}`}>{GMV_DIVISIONS[e.division]?.label || e.division}</span>
-                  <span className="text-xs text-slate-500">{new Date(e.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span>
+                  <span className="text-xs text-slate-500">{new Date(e.date + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span>
                 </div>
                 <div className="font-bold text-slate-900 mt-1">{fmtRupiah(e.gmv)}</div>
                 <div className="flex items-center justify-between mt-1">
@@ -6245,7 +6260,7 @@ function GmvView({ user, allUsers }) {
             <tbody className="divide-y divide-slate-100">
               {monthEntries.map(e => (
                 <tr key={e.id} className="hover:bg-slate-50">
-                  <td className="p-3 text-sm text-slate-700">{new Date(e.date).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
+                  <td className="p-3 text-sm text-slate-700">{new Date(e.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
                   <td className="p-3"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${DIVISIONS[e.division]?.color || 'bg-slate-100'}`}>{GMV_DIVISIONS[e.division]?.label || e.division}</span></td>
                   <td className="p-3 text-sm text-right font-bold tabular-nums text-slate-800">{fmtRupiah(e.gmv)}</td>
                   <td className="p-3 text-sm text-right tabular-nums text-slate-500">{e.orders ? fmtNumber(e.orders) : '-'}</td>
@@ -7195,7 +7210,7 @@ function ProblemsView({ user, allUsers }) {
                     {p.division && DIVISIONS[p.division] && <span className={`text-[10px] px-2 py-0.5 rounded-full ${DIVISIONS[p.division].color}`}>{DIVISIONS[p.division].label}</span>}
                   </div>
                   {p.description && <p className="text-sm text-slate-600 mt-1">{p.description}</p>}
-                  <div className="text-[11px] text-slate-400 mt-1.5">Dilapor: {p.reportedByName} · {new Date(p.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{p.relatedType && p.relatedType !== 'umum' ? ` · terkait: ${p.relatedType}` : ''}</div>
+                  <div className="text-[11px] text-slate-400 mt-1.5">Dilapor: {p.reportedByName} · {fmtDateTime(p.createdAt)}{p.relatedType && p.relatedType !== 'umum' ? ` · terkait: ${p.relatedType}` : ''}</div>
 
                   {p.status === 'resolved' && p.rootCause && (
                     <button onClick={() => setViewing(p)} className="mt-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg inline-flex items-center gap-1">
@@ -7359,7 +7374,7 @@ function RootCauseViewModal({ problem, onClose }) {
       <div className="space-y-3">
         <div className="bg-slate-50 rounded-lg px-3 py-2">
           <div className="font-semibold text-slate-900">{problem.title}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Diselesaikan {problem.resolvedByName} · {problem.resolvedAt ? new Date(problem.resolvedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Diselesaikan {problem.resolvedByName} · {problem.resolvedAt ? fmtDate(problem.resolvedAt) : ''}</div>
         </div>
         <div>
           <div className="text-xs font-semibold text-slate-500 uppercase mb-1">Rantai 5-Why</div>
@@ -7431,7 +7446,7 @@ function MediaTasksView({ user, allUsers }) {
     await storage.set('content-ideas:all', all); load();
   };
 
-  const fmtDate = ts => ts ? new Date(ts).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '-';
+  const fmtDate = ts => ts ? new Date(isDateOnly(ts) ? ts + 'T00:00:00' : ts).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', ...(isDateOnly(ts) ? {} : { timeZone: 'Asia/Jakarta' }) }) : '-';
 
   if (loading) return <div className="text-slate-400 text-sm">Memuat...</div>;
 
@@ -8425,7 +8440,7 @@ function AttendanceView({ user, allUsers }) {
     }
     if (filterDiv !== 'all') list = list.filter(r => (r.division || 'internal') === filterDiv);
     if (filterUser !== 'all') list = list.filter(r => r.userId === filterUser);
-    if (filterDate) list = list.filter(r => (r.timestamp || '').slice(0, 10) === filterDate);
+    if (filterDate) list = list.filter(r => wibDayKey(r.timestamp) === filterDate);
     return list;
   }, [records, user, allUsers, filterUser, filterDiv, filterDate]);
 
@@ -8441,7 +8456,7 @@ function AttendanceView({ user, allUsers }) {
   const dailyRows = useMemo(() => {
     const map = {};
     visibleRecords.forEach(r => {
-      const d = (r.timestamp || '').slice(0, 10);
+      const d = wibDayKey(r.timestamp);
       const k = `${d}|${r.userId}`;
       if (!map[k]) map[k] = { key: k, date: d, userId: r.userId, userName: r.userName, division: r.division, ins: [], outs: [] };
       (r.type === 'in' ? map[k].ins : map[k].outs).push(r);
@@ -8494,7 +8509,7 @@ function AttendanceView({ user, allUsers }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Rekap-Absensi-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `Rekap-Absensi-${dayKey()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -8775,7 +8790,7 @@ function AttendanceView({ user, allUsers }) {
           <span className="text-xs text-slate-500 font-semibold">Tanggal:</span>
           <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)}
             className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          <button onClick={() => setFilterDate(new Date().toISOString().slice(0, 10))}
+          <button onClick={() => setFilterDate(wibDayKey())}
             className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">Hari ini</button>
           {filterDate && (
             <button onClick={() => setFilterDate('')}
@@ -10756,7 +10771,7 @@ function DailyReportsView({ user, allUsers }) {
   const [showTemplateManager, setShowTemplateManager] = useState(false);
   const [lightbox, setLightbox] = useState(null);
   const [filter, setFilter] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: dayKey(),
     author: 'all'
   });
 
@@ -11053,7 +11068,7 @@ function DailyReportsView({ user, allUsers }) {
 // ============ DOWNLOAD RANGE MODAL ============
 function DownloadRangeModal({ filterableAuthors, reportsCount, onDownload, onClose }) {
   const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
+  const todayStr = dayKey(today);
   // Default: minggu ini
   const day = today.getDay();
   const monday = new Date(today);
@@ -11062,8 +11077,8 @@ function DownloadRangeModal({ filterableAuthors, reportsCount, onDownload, onClo
   sunday.setDate(monday.getDate() + 6);
 
   const [form, setForm] = useState({
-    start: monday.toISOString().split('T')[0],
-    end: sunday.toISOString().split('T')[0],
+    start: dayKey(monday),
+    end: dayKey(sunday),
     authorId: 'all'
   });
   const [preset, setPreset] = useState('this-week');
@@ -11075,32 +11090,32 @@ function DownloadRangeModal({ filterableAuthors, reportsCount, onDownload, onClo
       s = e = todayStr;
     } else if (key === 'yesterday') {
       const y = new Date(now); y.setDate(y.getDate() - 1);
-      s = e = y.toISOString().split('T')[0];
+      s = e = dayKey(y);
     } else if (key === 'this-week') {
       const d = now.getDay();
       const mon = new Date(now); mon.setDate(now.getDate() - d + (d === 0 ? -6 : 1));
       const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-      s = mon.toISOString().split('T')[0];
-      e = sun.toISOString().split('T')[0];
+      s = dayKey(mon);
+      e = dayKey(sun);
     } else if (key === 'last-week') {
       const d = now.getDay();
       const mon = new Date(now); mon.setDate(now.getDate() - d + (d === 0 ? -6 : 1) - 7);
       const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-      s = mon.toISOString().split('T')[0];
-      e = sun.toISOString().split('T')[0];
+      s = dayKey(mon);
+      e = dayKey(sun);
     } else if (key === 'this-month') {
       const first = new Date(now.getFullYear(), now.getMonth(), 1);
       const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      s = first.toISOString().split('T')[0];
-      e = last.toISOString().split('T')[0];
+      s = dayKey(first);
+      e = dayKey(last);
     } else if (key === 'last-month') {
       const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const last = new Date(now.getFullYear(), now.getMonth(), 0);
-      s = first.toISOString().split('T')[0];
-      e = last.toISOString().split('T')[0];
+      s = dayKey(first);
+      e = dayKey(last);
     } else if (key === 'last-30') {
       const back = new Date(now); back.setDate(back.getDate() - 29);
-      s = back.toISOString().split('T')[0];
+      s = dayKey(back);
       e = todayStr;
     } else {
       return; // custom: tidak ubah tanggal
@@ -11298,7 +11313,7 @@ function DynamicFieldInput({ field, value, onChange }) {
 }
 
 function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = dayKey();
 
   // Aturan GForm: Leader membuatkan form → staff mengisi. Staff tanpa form = tidak ada yang dilaporkan.
   const isStaff = user.role === 'operasional';
@@ -11871,7 +11886,7 @@ function CalendarView({ user, allUsers }) {
   // Calendar starts on Monday in Indonesia convention; convert: Sun=0 -> 6, Mon=1->0
   const startOffset = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
   const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = dayKey();
 
   const cells = [];
   for (let i = 0; i < totalCells; i++) {
@@ -12010,7 +12025,7 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
     title: event?.title || '',
     description: event?.description || '',
     type: event?.type || 'meeting',
-    date: event?.date || new Date().toISOString().split('T')[0],
+    date: event?.date || dayKey(),
     time: event?.time || '09:00',
     endTime: event?.endTime || '',
     location: event?.location || '',
@@ -12151,7 +12166,7 @@ function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
       'CALSCALE:GREGORIAN',
       'BEGIN:VEVENT',
       `UID:${event.id}@alkahfi-corp`,
-      `DTSTAMP:${formatICSDate(new Date().toISOString().split('T')[0], '00:00')}`,
+      `DTSTAMP:${formatICSDate(dayKey(), '00:00')}`,
       `DTSTART:${formatICSDate(event.date, startTime)}`,
       `DTEND:${formatICSDate(event.date, endTime)}`,
       `SUMMARY:${event.title}`,
