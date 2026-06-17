@@ -8308,6 +8308,8 @@ function AttendanceView({ user, allUsers }) {
   const [selfieFor, setSelfieFor] = useState(null); // 'in' | 'out' → buka kamera dulu
   const [leaves, setLeaves] = useState([]);
   const [showIzin, setShowIzin] = useState(false);
+  const [leaveDetail, setLeaveDetail] = useState(null); // izin yang dibuka detailnya
+  const [boardDate, setBoardDate] = useState(wibDayKey()); // tanggal status harian tim
   const [lightbox, setLightbox] = useState(null);
   const [selfieLoading, setSelfieLoading] = useState(null); // recordId yang fotonya sedang dimuat
 
@@ -8470,7 +8472,7 @@ function AttendanceView({ user, allUsers }) {
   const cancelIzin = async (l) => {
     if (!confirm(`Batalkan pengajuan izin ${fmtDate(l.date)}?`)) return;
     await storage.set('leave-requests:all', (await storage.getList('leave-requests:all')).filter(x => x.id !== l.id));
-    await load();
+    setLeaveDetail(null); await load();
   };
   const decideIzin = async (l, status) => {
     const note = status === 'rejected' ? (prompt('Alasan penolakan (opsional):') || '') : '';
@@ -8478,11 +8480,45 @@ function AttendanceView({ user, allUsers }) {
       ? { ...x, status, note, decidedById: user.id, decidedByName: user.name, decidedAt: new Date().toISOString() } : x);
     await storage.set('leave-requests:all', list);
     await logActivity(`${status === 'approved' ? 'menyetujui' : 'menolak'} izin ${l.userName} (${fmtDate(l.date)})`, user.name);
-    await load();
+    setLeaveDetail(null); await load();
   };
   const myLeaves = leaves.filter(l => l.userId === user.id).sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 6);
   const pendingForMe = leaves.filter(l => l.status === 'pending' && canDecideLeave(l)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const approvedTodayLeave = leaves.find(l => l.userId === user.id && l.status === 'approved' && l.date === dayKey());
+
+  // ===== STATUS HARIAN TIM: per tanggal, siapa hadir / belum absen / tidak masuk / izin / libur =====
+  const boardUsers = useMemo(() => {
+    let list = teamForFilter;
+    if (filterDiv !== 'all') list = list.filter(u => (u.division || 'internal') === filterDiv);
+    if (filterUser !== 'all') list = list.filter(u => u.id === filterUser);
+    return list;
+  }, [teamForFilter, filterDiv, filterUser]);
+
+  const dailyBoard = useMemo(() => {
+    const todayK = wibDayKey();
+    const dObj = new Date(boardDate + 'T00:00:00');
+    const rows = boardUsers.map(u => {
+      const leave = leaves.find(l => l.userId === u.id && l.status === 'approved' && l.date === boardDate);
+      const ins = records.filter(r => r.userId === u.id && r.type === 'in' && wibDayKey(r.timestamp) === boardDate)
+        .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+      const outs = records.filter(r => r.userId === u.id && r.type === 'out' && wibDayKey(r.timestamp) === boardDate);
+      if (ins.length) {
+        const late = ins[0].late;
+        return { u, key: 'hadir', label: late ? 'Hadir (telat)' : 'Hadir', sub: `Masuk ${fmtTime(ins[0].timestamp)}${outs.length ? ` · pulang ${fmtTime(outs[outs.length - 1].timestamp)}` : ''}`, color: late ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700', dot: late ? 'bg-amber-500' : 'bg-emerald-500' };
+      }
+      if (leave) return { u, key: 'izin', label: leave.type === 'sakit' ? 'Sakit' : 'Izin', sub: leave.reason || '', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500', leave };
+      const cfg = effectiveAttConfig(config, u.id, dObj);
+      if (cfg.libur) return { u, key: 'libur', label: 'Libur', sub: 'jadwal libur', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-300' };
+      if (boardDate > todayK) return { u, key: 'belum', label: '–', sub: 'belum waktunya', color: 'bg-slate-50 text-slate-400', dot: 'bg-slate-200' };
+      if (boardDate === todayK) return { u, key: 'belumabsen', label: 'Belum absen', sub: 'hari ini', color: 'bg-amber-50 text-amber-700', dot: 'bg-amber-400' };
+      return { u, key: 'alpa', label: 'Tidak masuk', sub: 'tanpa kabar', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' };
+    });
+    const count = { hadir: 0, izin: 0, belumabsen: 0, alpa: 0, libur: 0, belum: 0 };
+    rows.forEach(r => { count[r.key] = (count[r.key] || 0) + 1; });
+    const order = { hadir: 0, belumabsen: 1, alpa: 2, izin: 3, libur: 4, belum: 5 };
+    rows.sort((a, b) => (order[a.key] - order[b.key]) || a.u.name.localeCompare(b.u.name));
+    return { rows, count };
+  }, [boardUsers, leaves, records, config, boardDate]);
 
   // Lihat selfie sebuah record (dimuat saat diminta biar hemat data)
   const viewSelfie = async (r) => {
@@ -8809,11 +8845,13 @@ function AttendanceView({ user, allUsers }) {
             <div className="space-y-2">
               {myLeaves.map(l => (
                 <div key={l.id} className="flex items-center gap-2 border border-slate-100 rounded-xl px-3 py-2">
-                  <span className="text-lg">{l.type === 'sakit' ? '🤒' : '✋'}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-slate-800">{fmtDate(l.date)} <span className="text-xs font-normal text-slate-500">· {l.type === 'sakit' ? 'Sakit' : 'Izin'}</span></div>
-                    <div className="text-[11px] text-slate-500 truncate">{l.reason}{l.note ? ` · catatan: ${l.note}` : ''}</div>
-                  </div>
+                  <button onClick={() => setLeaveDetail(l)} className="flex items-center gap-2 flex-1 min-w-0 text-left group">
+                    <span className="text-lg">{l.type === 'sakit' ? '🤒' : '✋'}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-slate-800 group-hover:text-blue-700">{fmtDate(l.date)} <span className="text-xs font-normal text-slate-500">· {l.type === 'sakit' ? 'Sakit' : 'Izin'}</span></div>
+                      <div className="text-[11px] text-slate-500 truncate">{l.reason}{l.note ? ` · catatan: ${l.note}` : ''}</div>
+                    </div>
+                  </button>
                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${l.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : l.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
                     {l.status === 'approved' ? 'Disetujui' : l.status === 'rejected' ? 'Ditolak' : 'Menunggu'}
                   </span>
@@ -8836,11 +8874,13 @@ function AttendanceView({ user, allUsers }) {
                 {pendingForMe.map(l => (
                   <div key={l.id} className="border border-amber-100 bg-amber-50/50 rounded-xl px-3 py-2.5">
                     <div className="flex items-center gap-2">
-                      <Avatar person={allUsers.find(u => u.id === l.userId) || { name: l.userName }} size="sm" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold text-slate-800 truncate">{l.userName} · {fmtDate(l.date)}</div>
-                        <div className="text-[11px] text-slate-500 truncate">{l.type === 'sakit' ? '🤒 Sakit' : '✋ Izin'} — {l.reason}</div>
-                      </div>
+                      <button onClick={() => setLeaveDetail(l)} className="flex items-center gap-2 flex-1 min-w-0 text-left group">
+                        <Avatar person={allUsers.find(u => u.id === l.userId) || { name: l.userName }} size="sm" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold text-slate-800 truncate group-hover:text-blue-700">{l.userName} · {fmtDate(l.date)}</div>
+                          <div className="text-[11px] text-slate-500 truncate">{l.type === 'sakit' ? '🤒 Sakit' : '✋ Izin'} — {l.reason} · <span className="text-blue-600 font-semibold">lihat detail</span></div>
+                        </div>
+                      </button>
                       <button onClick={() => decideIzin(l, 'approved')}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg">Setujui</button>
                       <button onClick={() => decideIzin(l, 'rejected')}
@@ -8853,6 +8893,61 @@ function AttendanceView({ user, allUsers }) {
           </div>
         )}
       </div>
+
+      {/* STATUS HARIAN TIM — per tanggal: hadir / belum absen / tidak masuk / izin / libur */}
+      {canSeeOthers && (
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4 sm:p-5 mb-6">
+          <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+            <h3 className="font-display font-bold text-slate-900 flex items-center gap-2"><Users className="w-5 h-5 text-blue-600" /> Status Harian Tim</h3>
+            <div className="flex items-center gap-2">
+              <input type="date" value={boardDate} max={wibDayKey()} onChange={e => setBoardDate(e.target.value)}
+                className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <button onClick={() => setBoardDate(wibDayKey())}
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">Hari ini</button>
+            </div>
+          </div>
+          <div className="text-[11px] text-slate-500 mb-3">{new Date(boardDate + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {boardUsers.length} anggota{(filterDiv !== 'all' || filterUser !== 'all') ? ' (terfilter)' : ''}</div>
+          {/* Ringkasan jumlah */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {[
+              ['hadir', 'Hadir', 'bg-emerald-50 text-emerald-700 border-emerald-200'],
+              ['belumabsen', 'Belum absen', 'bg-amber-50 text-amber-700 border-amber-200'],
+              ['alpa', 'Tidak masuk', 'bg-red-50 text-red-700 border-red-200'],
+              ['izin', 'Izin/Sakit', 'bg-blue-50 text-blue-700 border-blue-200'],
+              ['libur', 'Libur', 'bg-slate-50 text-slate-500 border-slate-200'],
+            ].map(([k, label, cls]) => (
+              <div key={k} className={`px-3 py-1.5 rounded-xl border text-sm font-semibold ${cls}`}>
+                {label}: <b className="tabular-nums">{dailyBoard.count[k] || 0}</b>
+              </div>
+            ))}
+          </div>
+          {/* Daftar anggota */}
+          {dailyBoard.rows.length === 0 ? (
+            <div className="text-sm text-slate-400 text-center py-4">Tidak ada anggota pada filter ini.</div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {dailyBoard.rows.map(({ u, label, sub, color, dot, key, leave }) => (
+                <div key={u.id} className="flex items-center gap-2.5 border border-slate-100 rounded-xl px-3 py-2">
+                  <Avatar person={u} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-slate-800 truncate">{u.name}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{u.jobTitle || ROLES[u.role]?.label || ''}{sub ? ` · ${sub}` : ''}</div>
+                  </div>
+                  {leave ? (
+                    <button onClick={() => setLeaveDetail(leave)} className={`text-[11px] px-2.5 py-1 rounded-full font-bold inline-flex items-center gap-1 ${color} hover:opacity-80`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} /> {label} →
+                    </button>
+                  ) : (
+                    <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold inline-flex items-center gap-1 ${color}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} /> {label}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Filter + Download (untuk leader/manajer/owner) */}
       {canSeeOthers && (
@@ -9043,6 +9138,15 @@ function AttendanceView({ user, allUsers }) {
       {showIzin && (
         <LeaveRequestModal izinHmin={izinHmin} onSave={submitIzin} onClose={() => setShowIzin(false)} />
       )}
+      {leaveDetail && (
+        <LeaveDetailModal leave={leaveDetail} person={allUsers.find(u => u.id === leaveDetail.userId)}
+          canDecide={canDecideLeave(leaveDetail) && leaveDetail.status === 'pending'}
+          canCancel={leaveDetail.userId === user.id && leaveDetail.status === 'pending'}
+          onApprove={() => decideIzin(leaveDetail, 'approved')}
+          onReject={() => decideIzin(leaveDetail, 'rejected')}
+          onCancel={() => cancelIzin(leaveDetail)}
+          onClose={() => setLeaveDetail(null)} />
+      )}
       {selfieFor && (
         <SelfieCaptureModal type={selfieFor} userName={user.name}
           onCapture={(img) => proceedAbsen(selfieFor, img)}
@@ -9050,6 +9154,64 @@ function AttendanceView({ user, allUsers }) {
       )}
       {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.title} onClose={() => setLightbox(null)} />}
     </div>
+  );
+}
+
+// Modal detail izin — dibuka oleh penerima/pemberi keputusan (atau pengaju) untuk lihat detail + aksi
+function LeaveDetailModal({ leave, person, canDecide, canCancel, onApprove, onReject, onCancel, onClose }) {
+  const statusBadge = leave.status === 'approved'
+    ? { t: 'Disetujui', c: 'bg-emerald-100 text-emerald-700' }
+    : leave.status === 'rejected'
+      ? { t: 'Ditolak', c: 'bg-red-100 text-red-700' }
+      : { t: 'Menunggu keputusan', c: 'bg-amber-100 text-amber-700' };
+  return (
+    <Modal title="Detail Pengajuan Izin" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Avatar person={person || { name: leave.userName }} size="md" />
+          <div className="flex-1 min-w-0">
+            <div className="font-display font-bold text-slate-900">{leave.userName}</div>
+            <div className="text-xs text-slate-500">{person?.jobTitle || ROLES[person?.role]?.label || ''}{person?.division ? ` · ${DIVISIONS[person.division]?.label || person.division}` : ''}</div>
+          </div>
+          <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${statusBadge.c}`}>{statusBadge.t}</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="bg-slate-50 p-3 rounded-lg">
+            <div className="text-[10px] uppercase font-bold text-slate-500">Jenis</div>
+            <div className="font-semibold text-slate-800 mt-0.5">{leave.type === 'sakit' ? '🤒 Sakit' : '✋ Izin'}</div>
+          </div>
+          <div className="bg-slate-50 p-3 rounded-lg">
+            <div className="text-[10px] uppercase font-bold text-slate-500">Tanggal Izin</div>
+            <div className="font-semibold text-slate-800 mt-0.5">{fmtDate(leave.date)}</div>
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] uppercase font-bold text-slate-500 mb-1">Alasan / Keterangan</div>
+          <div className="text-sm text-slate-700 bg-slate-50 rounded-lg p-3 whitespace-pre-wrap">{leave.reason || <span className="text-slate-400 italic">Tanpa keterangan</span>}</div>
+        </div>
+
+        <div className="text-[11px] text-slate-500 space-y-0.5 border-t border-slate-100 pt-3">
+          <div>Diajukan: {fmtDateTime(leave.createdAt)}</div>
+          {leave.decidedAt && <div>Diputuskan: {fmtDateTime(leave.decidedAt)} oleh <b>{leave.decidedByName || '-'}</b></div>}
+          {leave.status === 'rejected' && leave.note && <div className="text-red-600">Alasan penolakan: {leave.note}</div>}
+        </div>
+
+        {canDecide && (
+          <div className="flex gap-2 pt-1">
+            <button onClick={onApprove} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg font-bold text-sm">✓ Setujui</button>
+            <button onClick={onReject} className="flex-1 bg-white border border-red-300 text-red-600 hover:bg-red-50 px-4 py-2.5 rounded-lg font-bold text-sm">✕ Tolak</button>
+          </div>
+        )}
+        {!canDecide && canCancel && (
+          <button onClick={onCancel} className="w-full bg-white border border-red-300 text-red-600 hover:bg-red-50 px-4 py-2.5 rounded-lg font-bold text-sm">Batalkan Pengajuan</button>
+        )}
+        {!canDecide && !canCancel && (
+          <button onClick={onClose} className="w-full px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg font-semibold">Tutup</button>
+        )}
+      </div>
+    </Modal>
   );
 }
 
