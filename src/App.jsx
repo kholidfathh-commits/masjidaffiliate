@@ -8486,40 +8486,6 @@ function AttendanceView({ user, allUsers }) {
   const pendingForMe = leaves.filter(l => l.status === 'pending' && canDecideLeave(l)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const approvedTodayLeave = leaves.find(l => l.userId === user.id && l.status === 'approved' && l.date === dayKey());
 
-  // ===== STATUS HARIAN TIM: per tanggal, siapa hadir / belum absen / tidak masuk / izin / libur =====
-  const boardUsers = useMemo(() => {
-    let list = teamForFilter;
-    if (filterDiv !== 'all') list = list.filter(u => (u.division || 'internal') === filterDiv);
-    if (filterUser !== 'all') list = list.filter(u => u.id === filterUser);
-    return list;
-  }, [teamForFilter, filterDiv, filterUser]);
-
-  const dailyBoard = useMemo(() => {
-    const todayK = wibDayKey();
-    const dObj = new Date(boardDate + 'T00:00:00');
-    const rows = boardUsers.map(u => {
-      const leave = leaves.find(l => l.userId === u.id && l.status === 'approved' && l.date === boardDate);
-      const ins = records.filter(r => r.userId === u.id && r.type === 'in' && wibDayKey(r.timestamp) === boardDate)
-        .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-      const outs = records.filter(r => r.userId === u.id && r.type === 'out' && wibDayKey(r.timestamp) === boardDate);
-      if (ins.length) {
-        const late = ins[0].late;
-        return { u, key: 'hadir', label: late ? 'Hadir (telat)' : 'Hadir', sub: `Masuk ${fmtTime(ins[0].timestamp)}${outs.length ? ` · pulang ${fmtTime(outs[outs.length - 1].timestamp)}` : ''}`, color: late ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700', dot: late ? 'bg-amber-500' : 'bg-emerald-500' };
-      }
-      if (leave) return { u, key: 'izin', label: leave.type === 'sakit' ? 'Sakit' : 'Izin', sub: leave.reason || '', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500', leave };
-      const cfg = effectiveAttConfig(config, u.id, dObj);
-      if (cfg.libur) return { u, key: 'libur', label: 'Libur', sub: 'jadwal libur', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-300' };
-      if (boardDate > todayK) return { u, key: 'belum', label: '–', sub: 'belum waktunya', color: 'bg-slate-50 text-slate-400', dot: 'bg-slate-200' };
-      if (boardDate === todayK) return { u, key: 'belumabsen', label: 'Belum absen', sub: 'hari ini', color: 'bg-amber-50 text-amber-700', dot: 'bg-amber-400' };
-      return { u, key: 'alpa', label: 'Tidak masuk', sub: 'tanpa kabar', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' };
-    });
-    const count = { hadir: 0, izin: 0, belumabsen: 0, alpa: 0, libur: 0, belum: 0 };
-    rows.forEach(r => { count[r.key] = (count[r.key] || 0) + 1; });
-    const order = { hadir: 0, belumabsen: 1, alpa: 2, izin: 3, libur: 4, belum: 5 };
-    rows.sort((a, b) => (order[a.key] - order[b.key]) || a.u.name.localeCompare(b.u.name));
-    return { rows, count };
-  }, [boardUsers, leaves, records, config, boardDate]);
-
   // Lihat selfie sebuah record (dimuat saat diminta biar hemat data)
   const viewSelfie = async (r) => {
     setSelfieLoading(r.id);
@@ -8651,6 +8617,40 @@ function AttendanceView({ user, allUsers }) {
   };
 
   const fmtTime = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
+  // ===== STATUS HARIAN TIM: per tanggal, siapa hadir / belum absen / tidak masuk / izin / libur =====
+  const boardUsers = useMemo(() => {
+    let list = teamForFilter;
+    if (filterDiv !== 'all') list = list.filter(u => (u.division || 'internal') === filterDiv);
+    if (filterUser !== 'all') list = list.filter(u => u.id === filterUser);
+    return list;
+  }, [teamForFilter, filterDiv, filterUser]);
+
+  const dailyBoard = useMemo(() => {
+    const todayK = wibDayKey();
+    const dObj = new Date(boardDate + 'T00:00:00');
+    const rows = boardUsers.map(u => {
+      const leave = leaves.find(l => l.userId === u.id && l.status === 'approved' && l.date === boardDate);
+      const ins = records.filter(r => r.userId === u.id && r.type === 'in' && wibDayKey(r.timestamp) === boardDate)
+        .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+      const outs = records.filter(r => r.userId === u.id && r.type === 'out' && wibDayKey(r.timestamp) === boardDate);
+      if (ins.length) {
+        const late = ins[0].late;
+        return { u, key: 'hadir', label: late ? 'Hadir (telat)' : 'Hadir', sub: `Masuk ${fmtTime(ins[0].timestamp)}${outs.length ? ` · pulang ${fmtTime(outs[outs.length - 1].timestamp)}` : ''}`, color: late ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700', dot: late ? 'bg-amber-500' : 'bg-emerald-500' };
+      }
+      if (leave) return { u, key: 'izin', label: leave.type === 'sakit' ? 'Sakit' : 'Izin', sub: leave.reason || '', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500', leave };
+      const cfg = effectiveAttConfig(config, u.id, dObj);
+      if (cfg.libur) return { u, key: 'libur', label: 'Libur', sub: 'jadwal libur', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-300' };
+      if (boardDate > todayK) return { u, key: 'belum', label: '–', sub: 'belum waktunya', color: 'bg-slate-50 text-slate-400', dot: 'bg-slate-200' };
+      if (boardDate === todayK) return { u, key: 'belumabsen', label: 'Belum absen', sub: 'hari ini', color: 'bg-amber-50 text-amber-700', dot: 'bg-amber-400' };
+      return { u, key: 'alpa', label: 'Tidak masuk', sub: 'tanpa kabar', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' };
+    });
+    const count = { hadir: 0, izin: 0, belumabsen: 0, alpa: 0, libur: 0, belum: 0 };
+    rows.forEach(r => { count[r.key] = (count[r.key] || 0) + 1; });
+    const order = { hadir: 0, belumabsen: 1, alpa: 2, izin: 3, libur: 4, belum: 5 };
+    rows.sort((a, b) => (order[a.key] - order[b.key]) || a.u.name.localeCompare(b.u.name));
+    return { rows, count };
+  }, [boardUsers, leaves, records, config, boardDate]);
 
   // Hapus absensi: owner/manajer hapus semua, lainnya hanya miliknya
   const canDeleteRec = (r) => user.role === 'owner' || user.role === 'manajer' || r.userId === user.id;
