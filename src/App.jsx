@@ -8674,39 +8674,51 @@ function AttendanceView({ user, allUsers }) {
     return [user];
   }, [allUsers, user]);
 
-  // Download rekap CSV
-  const downloadRecap = () => {
-    const rows = [['Nama', 'Divisi', 'Jabatan', 'Tipe', 'Tanggal', 'Jam', 'Status', 'Selfie', 'Lokasi (Alamat)', 'Koordinat', 'Akurasi (m)', 'Catatan']];
-    visibleRecords.forEach(r => {
-      const d = new Date(r.timestamp);
-      const status = [
-        r.late ? `Terlambat ${r.lateBy || ''}m` : '',
-        r.earlyLeave ? `Pulang cepat ${r.earlyBy || ''}m` : '',
-        r.locationMismatch ? 'Lokasi tidak sesuai' : ''
-      ].filter(Boolean).join(' + ') || 'Tepat waktu';
-      rows.push([
-        r.userName,
-        DIVISIONS[r.division]?.label || r.division || '-',
-        r.jobTitle || '-',
-        r.type === 'in' ? 'Masuk' : 'Pulang',
-        d.toLocaleDateString('id-ID'),
-        d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-        status,
-        r.hasSelfie ? 'Ya' : 'Tidak',
-        (r.address || '').replace(/"/g, "'"),
-        `${r.latitude},${r.longitude}`,
-        r.accuracy || '',
-        (r.note || '').replace(/"/g, "'")
-      ]);
-    });
-    const csv = rows.map(row => row.map(c => `"${c}"`).join(',')).join('\n');
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Rekap-Absensi-${dayKey()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  // Export rekap absensi ke Excel (.xlsx) \u2014 RAPI: 1 baris per orang per hari (bukan per record),
+  // jadi gampang dibaca di Excel (kolom otomatis, tidak nempel seperti CSV).
+  const downloadRecap = async () => {
+    if (visibleRecords.length === 0) { alert('Tidak ada data absensi pada filter ini untuk diexport.'); return; }
+    try {
+      const XLSX = await import('xlsx');
+      // Gabung per orang per hari
+      const map = {};
+      visibleRecords.forEach(r => {
+        const d = wibDayKey(r.timestamp);
+        const k = `${d}|${r.userId}`;
+        if (!map[k]) map[k] = { date: d, userName: r.userName, division: r.division, jobTitle: r.jobTitle, ins: [], outs: [] };
+        (r.type === 'in' ? map[k].ins : map[k].outs).push(r);
+      });
+      const groups = Object.values(map).sort((a, b) => b.date.localeCompare(a.date) || a.userName.localeCompare(b.userName));
+      const header = ['Tanggal', 'Nama', 'Divisi', 'Jabatan', 'Jam Masuk', 'Jam Pulang', 'Durasi', 'Status', 'Catatan'];
+      const aoa = [header];
+      groups.forEach(g => {
+        g.ins.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+        g.outs.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+        const inRec = g.ins[0] || null;
+        const outRec = g.outs.length ? g.outs[g.outs.length - 1] : null;
+        const durMin = inRec && outRec ? Math.max(0, Math.round((new Date(outRec.timestamp) - new Date(inRec.timestamp)) / 60000)) : null;
+        const status = inRec ? (inRec.late ? 'Hadir (telat)' : 'Hadir') : 'Hanya pulang';
+        const ket = [
+          inRec?.late ? `Telat ${inRec.lateBy || ''}m` : '',
+          outRec?.earlyLeave ? `Pulang cepat ${outRec.earlyBy || ''}m` : '',
+          (inRec?.locationMismatch || outRec?.locationMismatch) ? 'Lokasi tidak sesuai' : '',
+          (inRec?.note || outRec?.note || '')
+        ].filter(Boolean).join(' \u00b7 ');
+        aoa.push([
+          fmtDate(g.date), g.userName,
+          DIVISIONS[g.division]?.label || g.division || '-', g.jobTitle || '-',
+          inRec ? fmtTime(inRec.timestamp) : '\u2013',
+          outRec ? fmtTime(outRec.timestamp) : '\u2013',
+          durMin == null ? '\u2013' : `${Math.floor(durMin / 60)}j ${String(durMin % 60).padStart(2, '0')}m`,
+          status, ket
+        ]);
+      });
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 14 }, { wch: 30 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Rekap Absensi');
+      XLSX.writeFile(wb, `Rekap-Absensi-${dayKey()}.xlsx`);
+    } catch (e) { alert('Gagal membuat Excel: ' + (e?.message || e)); }
   };
 
   const fmtTime = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
@@ -8744,6 +8756,59 @@ function AttendanceView({ user, allUsers }) {
     rows.sort((a, b) => (order[a.key] - order[b.key]) || a.u.name.localeCompare(b.u.name));
     return { rows, count };
   }, [boardUsers, leaves, records, config, boardDate]);
+
+  // Export Status Harian Tim ke Excel (.xlsx) — LENGKAP untuk tanggal terpilih:
+  // semua anggota + status (Hadir / Hadir (telat) / Izin / Sakit / Tidak Masuk / Libur / Belum absen).
+  const exportBoardExcel = async () => {
+    if (!boardUsers.length) { alert('Tidak ada anggota pada filter ini untuk diexport.'); return; }
+    try {
+      const XLSX = await import('xlsx');
+      const todayK = wibDayKey();
+      const dObj = new Date(boardDate + 'T00:00:00');
+      const header = ['Tanggal', 'Nama', 'Divisi', 'Jabatan', 'Status', 'Jam Masuk', 'Jam Pulang', 'Durasi', 'Keterangan'];
+      const aoa = [header];
+      // Urut: hadir → belum absen → tidak masuk → izin → libur, lalu nama
+      const order = { 'Hadir': 0, 'Hadir (telat)': 0, 'Belum absen': 1, 'Tidak masuk': 2, 'Izin': 3, 'Sakit': 3, 'Libur': 4, 'Belum waktunya': 5 };
+      const built = boardUsers.map(u => {
+        const leave = leaves.find(l => l.userId === u.id && l.status === 'approved' && l.date === boardDate);
+        const ins = records.filter(r => r.userId === u.id && r.type === 'in' && wibDayKey(r.timestamp) === boardDate).sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+        const outs = records.filter(r => r.userId === u.id && r.type === 'out' && wibDayKey(r.timestamp) === boardDate).sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+        const inRec = ins[0] || null;
+        const outRec = outs.length ? outs[outs.length - 1] : null;
+        const durMin = inRec && outRec ? Math.max(0, Math.round((new Date(outRec.timestamp) - new Date(inRec.timestamp)) / 60000)) : null;
+        let status, ket = '';
+        if (inRec) {
+          status = inRec.late ? 'Hadir (telat)' : 'Hadir';
+          ket = [inRec.late ? `Telat ${inRec.lateBy || ''}m` : '', outRec?.earlyLeave ? `Pulang cepat ${outRec.earlyBy || ''}m` : '', (inRec.note || outRec?.note || '')].filter(Boolean).join(' · ');
+        } else if (leave) {
+          status = leave.type === 'sakit' ? 'Sakit' : 'Izin'; ket = leave.reason || '';
+        } else {
+          const cfg = effectiveAttConfig(config, u.id, dObj);
+          if (cfg.libur) status = 'Libur';
+          else if (boardDate > todayK) status = 'Belum waktunya';
+          else if (boardDate === todayK) status = 'Belum absen';
+          else { status = 'Tidak masuk'; ket = 'tanpa kabar'; }
+        }
+        return { u, status, ket, inRec, outRec, durMin };
+      }).sort((a, b) => (order[a.status] - order[b.status]) || a.u.name.localeCompare(b.u.name));
+      built.forEach(({ u, status, ket, inRec, outRec, durMin }) => {
+        aoa.push([
+          fmtDate(boardDate), u.name,
+          DIVISIONS[u.division]?.label || u.division || '-', u.jobTitle || '-',
+          status,
+          inRec ? fmtTime(inRec.timestamp) : '–',
+          outRec ? fmtTime(outRec.timestamp) : '–',
+          durMin == null ? '–' : `${Math.floor(durMin / 60)}j ${String(durMin % 60).padStart(2, '0')}m`,
+          ket
+        ]);
+      });
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 28 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Status Harian');
+      XLSX.writeFile(wb, `Status-Harian-${boardDate}.xlsx`);
+    } catch (e) { alert('Gagal membuat Excel: ' + (e?.message || e)); }
+  };
 
   // Hapus absensi: owner/manajer hapus semua, lainnya hanya miliknya
   const canDeleteRec = (r) => user.role === 'owner' || user.role === 'manajer' || r.userId === user.id;
@@ -8997,6 +9062,10 @@ function AttendanceView({ user, allUsers }) {
                 className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
               <button onClick={() => setBoardDate(wibDayKey())}
                 className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">Hari ini</button>
+              <button onClick={exportBoardExcel}
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 flex items-center gap-1.5">
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel
+              </button>
             </div>
           </div>
           <div className="text-[11px] text-slate-500 mb-3">{new Date(boardDate + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {boardUsers.length} anggota{(filterDiv !== 'all' || filterUser !== 'all') ? ' (terfilter)' : ''}</div>
@@ -9060,7 +9129,7 @@ function AttendanceView({ user, allUsers }) {
           </select>
           <button onClick={downloadRecap} disabled={visibleRecords.length === 0}
             className="ml-auto bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5">
-            <FileDown className="w-4 h-4" /> Download Rekap ({visibleRecords.length})
+            <FileSpreadsheet className="w-4 h-4" /> Export Excel ({visibleRecords.length})
           </button>
           {canManageAtt && (
             <button onClick={deleteAllRecords} disabled={records.length === 0}
