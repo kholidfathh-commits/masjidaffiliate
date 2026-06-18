@@ -72,7 +72,10 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || 'sb_publishable_Akph68
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const LOCAL_PREFIX = 'alkahfi:';
+const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const storage = {
+  // PENTING: kalau baca dari server GAGAL (bukan data kosong beneran), get() MELEMPAR error setelah 3x coba.
+  // Tujuannya supaya operasi "baca → ubah → tulis" TIDAK menimpa seluruh data dengan array kosong saat koneksi ngadat.
   async get(key, shared = true) {
     if (!shared) {
       try {
@@ -80,11 +83,16 @@ const storage = {
         return raw === null ? null : JSON.parse(raw);
       } catch { return null; }
     }
-    try {
-      const { data, error } = await supabase.from('kv_store').select('value').eq('key', key).maybeSingle();
-      if (error) { console.error('Supabase get error:', key, error.message); return null; }
-      return data ? data.value : null;
-    } catch (e) { console.error('Supabase get failed:', key, e); return null; }
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const { data, error } = await supabase.from('kv_store').select('value').eq('key', key).maybeSingle();
+        if (error) { lastErr = error; await _sleep(350 * (attempt + 1)); continue; }
+        return data ? data.value : null; // sukses (null = memang belum ada datanya)
+      } catch (e) { lastErr = e; await _sleep(350 * (attempt + 1)); }
+    }
+    console.error('Supabase get GAGAL (3x):', key, lastErr?.message || lastErr);
+    throw new Error(`Gagal membaca data "${key}" dari server. Cek koneksi internet lalu coba lagi.`);
   },
   async set(key, value, shared = true) {
     if (!shared) {
@@ -647,16 +655,21 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const { users } = await refreshAll();
-      const session = await storage.get('current-user', false);
-      if (session && users.some(u => u.id === session.id)) {
-        const fresh = users.find(u => u.id === session.id);
-        setCurrentUser(fresh);
-        setEntered(true);
+      try {
+        const { users } = await refreshAll();
+        const session = await storage.get('current-user', false);
+        if (session && users.some(u => u.id === session.id)) {
+          const fresh = users.find(u => u.id === session.id);
+          setCurrentUser(fresh);
+          setEntered(true);
+        }
+        const sidebarPref = await storage.get('ui:sidebar-open', false);
+        if (sidebarPref !== null && typeof sidebarPref === 'boolean') setSidebarOpen(sidebarPref);
+      } catch (e) {
+        console.error('Load awal gagal (akan dicoba ulang):', e?.message || e);
+      } finally {
+        setLoading(false); // jangan nyangkut di layar loading walau server sempat gagal
       }
-      const sidebarPref = await storage.get('ui:sidebar-open', false);
-      if (sidebarPref !== null && typeof sidebarPref === 'boolean') setSidebarOpen(sidebarPref);
-      setLoading(false);
     })();
   }, []);
 
@@ -6172,24 +6185,33 @@ function GmvView({ user, allUsers }) {
   };
 
   const saveEntry = async (data) => {
-    let list = await storage.getList('gmv:daily');
-    const existing = list.find(e => e.date === data.date && e.division === data.division && (!editing || e.id !== editing.id));
-    if (editing) {
-      list = list.map(e => e.id === editing.id ? { ...e, ...data, updatedAt: new Date().toISOString() } : e);
-    } else if (existing) {
-      // Upsert: kalau sudah ada entry tanggal+divisi itu, timpa
-      list = list.map(e => e.id === existing.id ? { ...e, ...data, inputById: user.id, inputByName: user.name, updatedAt: new Date().toISOString() } : e);
-    } else {
-      list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
+    try {
+      let list = await storage.getList('gmv:daily'); // melempar error kalau gagal baca → batal simpan (lindungi data)
+      const existing = list.find(e => e.date === data.date && e.division === data.division && (!editing || e.id !== editing.id));
+      if (editing) {
+        list = list.map(e => e.id === editing.id ? { ...e, ...data, updatedAt: new Date().toISOString() } : e);
+      } else if (existing) {
+        // Upsert: kalau sudah ada entry tanggal+divisi itu, timpa
+        list = list.map(e => e.id === existing.id ? { ...e, ...data, inputById: user.id, inputByName: user.name, updatedAt: new Date().toISOString() } : e);
+      } else {
+        list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
+      }
+      await storage.set('gmv:daily', list);
+      await logActivity(`update GMV ${GMV_DIVISIONS[data.division].label} ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
+      setShowInput(false); setEditing(null); load();
+    } catch (err) {
+      alert('⚠️ Gagal menyimpan GMV: ' + (err?.message || err) + '\n\nData lama tidak diubah. Coba lagi saat koneksi stabil.');
     }
-    await storage.set('gmv:daily', list);
-    await logActivity(`update GMV ${GMV_DIVISIONS[data.division].label} ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
-    setShowInput(false); setEditing(null); load();
   };
   const deleteEntry = async (e) => {
     if (!confirm(`Hapus data GMV ${GMV_DIVISIONS[e.division]?.label} tanggal ${e.date}?`)) return;
-    await storage.set('gmv:daily', (await storage.getList('gmv:daily')).filter(x => x.id !== e.id));
-    load();
+    try {
+      const fresh = await storage.getList('gmv:daily');
+      await storage.set('gmv:daily', fresh.filter(x => x.id !== e.id));
+      load();
+    } catch (err) {
+      alert('⚠️ Gagal menghapus: ' + (err?.message || err) + '\n\nCoba lagi saat koneksi stabil.');
+    }
   };
   const saveTargets = async (vals) => {
     const all = (await storage.get('gmv:targets')) || {};
@@ -6599,24 +6621,33 @@ function AffiliateAccountsView({ user, allUsers }) {
     setTargetAcct(null); load();
   };
   const saveEntry = async (data) => {
-    let list = await storage.getList('affiliate-gmv:daily');
-    const existing = list.find(e => e.accountId === data.accountId && e.date === data.date);
-    if (existing) {
-      list = list.map(e => e.id === existing.id ? { ...e, ...data, inputById: user.id, inputByName: user.name, updatedAt: new Date().toISOString() } : e);
-    } else {
-      list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
+    try {
+      let list = await storage.getList('affiliate-gmv:daily'); // melempar error kalau gagal baca → batal simpan (lindungi data)
+      const existing = list.find(e => e.accountId === data.accountId && e.date === data.date);
+      if (existing) {
+        list = list.map(e => e.id === existing.id ? { ...e, ...data, inputById: user.id, inputByName: user.name, updatedAt: new Date().toISOString() } : e);
+      } else {
+        list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
+      }
+      await storage.set('affiliate-gmv:daily', list);
+      await syncInternalFromAccounts(); // dashboard & Target GMV divisi internal ikut ter-update otomatis
+      await logActivity(`update GMV akun ${data.accountName} ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
+      setInputAcct(null); load();
+    } catch (err) {
+      alert('⚠️ Gagal menyimpan GMV: ' + (err?.message || err) + '\n\nData LAMA tidak diubah. Coba lagi saat koneksi stabil.');
     }
-    await storage.set('affiliate-gmv:daily', list);
-    await syncInternalFromAccounts(); // dashboard & Target GMV divisi internal ikut ter-update otomatis
-    await logActivity(`update GMV akun ${data.accountName} ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
-    setInputAcct(null); load();
   };
 
   const deleteEntry = async (e) => {
     if (!confirm(`Hapus GMV ${e.accountName || ''} tanggal ${fmtDate(e.date)} (${fmtRupiah(e.gmv)})?`)) return;
-    await storage.set('affiliate-gmv:daily', (await storage.getList('affiliate-gmv:daily')).filter(x => x.id !== e.id));
-    await syncInternalFromAccounts();
-    load();
+    try {
+      const fresh = await storage.getList('affiliate-gmv:daily');
+      await storage.set('affiliate-gmv:daily', fresh.filter(x => x.id !== e.id));
+      await syncInternalFromAccounts();
+      load();
+    } catch (err) {
+      alert('⚠️ Gagal menghapus: ' + (err?.message || err) + '\n\nCoba lagi saat koneksi stabil.');
+    }
   };
   const saveGoal = async (value) => {
     const g = (await storage.get('affiliate:goal')) || {};
@@ -11060,28 +11091,36 @@ function DailyReportsView({ user, allUsers }) {
   };
 
   const handleSaveReport = async (data) => {
-    let list = await storage.getList('daily-reports:all');
-    if (editing) {
-      list = list.map(r => r.id === editing.id ? { ...r, ...data, updatedAt: new Date().toISOString() } : r);
-      await logActivity(`mengupdate laporan harian ${fmtDate(data.date)}`, user.name);
-    } else {
-      list.unshift({
-        id: uid(), ...data,
-        authorId: user.id, authorName: user.name, authorRole: user.role,
-        authorJobTitle: user.jobTitle || '',
-        submittedAt: new Date().toISOString()
-      });
-      await logActivity(`mengirim laporan harian ${fmtDate(data.date)}`, user.name);
+    try {
+      let list = await storage.getList('daily-reports:all'); // melempar error kalau gagal baca → batal simpan (lindungi data)
+      if (editing) {
+        list = list.map(r => r.id === editing.id ? { ...r, ...data, updatedAt: new Date().toISOString() } : r);
+        await logActivity(`mengupdate laporan harian ${fmtDate(data.date)}`, user.name);
+      } else {
+        list.unshift({
+          id: uid(), ...data,
+          authorId: user.id, authorName: user.name, authorRole: user.role,
+          authorJobTitle: user.jobTitle || '',
+          submittedAt: new Date().toISOString()
+        });
+        await logActivity(`mengirim laporan harian ${fmtDate(data.date)}`, user.name);
+      }
+      await storage.set('daily-reports:all', list);
+      setShowForm(false); setEditing(null); load();
+    } catch (err) {
+      alert('⚠️ Gagal menyimpan laporan: ' + (err?.message || err) + '\n\nLaporan lama tidak diubah. Coba lagi saat koneksi stabil.');
     }
-    await storage.set('daily-reports:all', list);
-    setShowForm(false); setEditing(null); load();
   };
 
   const handleDelete = async (r) => {
     if (!confirm('Hapus laporan harian ini?')) return;
-    const list = (await storage.getList('daily-reports:all')).filter(x => x.id !== r.id);
-    await storage.set('daily-reports:all', list);
-    load();
+    try {
+      const list = (await storage.getList('daily-reports:all')).filter(x => x.id !== r.id);
+      await storage.set('daily-reports:all', list);
+      load();
+    } catch (err) {
+      alert('⚠️ Gagal menghapus: ' + (err?.message || err) + '\n\nCoba lagi saat koneksi stabil.');
+    }
   };
 
   const handleTogglePin = async (r) => {
