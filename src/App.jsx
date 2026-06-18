@@ -11,7 +11,7 @@ import {
   GripVertical, MapPin, ArrowRight, ArrowLeft, BarChart3, Pin, MessageSquare,
   Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle,
   Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2,
-  Database, Camera, Paperclip, Presentation, Calculator, Heart
+  Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -383,7 +383,8 @@ const BACKUP_KEYS = [
   'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all', 'content-ideas:all',
   'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all',
   'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history',
-  'partner-feedback:all', 'swot:external', 'backup:last', 'leave-requests:all'
+  'partner-feedback:all', 'swot:external', 'backup:last', 'leave-requests:all',
+  'drive:auto-backup', 'backup:drive-last'
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
@@ -728,7 +729,11 @@ export default function App() {
   }, []);
 
   // Auto-backup harian: jalan 1x saat ada user login (dijaga agar maksimal 1x/hari)
-  useEffect(() => { if (currentUser?.id) autoBackupIfDue(currentUser.name); }, [currentUser?.id]);
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    autoBackupIfDue(currentUser.name);          // snapshot ke server (Supabase)
+    driveAutoBackupIfDue(currentUser.name);     // snapshot ke Google Drive (kalau diaktifkan)
+  }, [currentUser?.id]);
 
   const toggleSidebar = async () => {
     const next = !sidebarOpen;
@@ -10520,6 +10525,36 @@ function SettingsView({ user, settings, onSave }) {
   const mergeRef = useRef();
   const [autoBackups, setAutoBackups] = useState([]);
   useEffect(() => { (async () => { try { const idx = await storage.get('backup:auto:index'); setAutoBackups((idx?.dates || []).slice().sort().reverse()); } catch {} })(); }, []);
+  // Backup ke Google Drive
+  const [driveBusy, setDriveBusy] = useState(false);
+  const [driveMsg, setDriveMsg] = useState(null); // { type:'ok'|'err', text, link }
+  const [driveLast, setDriveLast] = useState(null);
+  const [driveAuto, setDriveAuto] = useState(false);
+  const driveEnabled = !!GOOGLE_CLIENT_ID;
+  useEffect(() => { (async () => { try { setDriveLast(await storage.get('backup:drive-last')); setDriveAuto(!!(await storage.get('drive:auto-backup'))); } catch {} })(); }, []);
+
+  const doDriveBackup = async () => {
+    setDriveMsg(null); setDriveBusy(true);
+    try {
+      const res = await backupToGoogleDrive(user.name);
+      setDriveLast(await storage.get('backup:drive-last'));
+      setDriveMsg({ type: 'ok', text: 'Backup berhasil dikirim ke Google Drive (folder "Al-Kahfi Backup").', link: res.link });
+    } catch (e) { setDriveMsg({ type: 'err', text: e?.message || 'Gagal backup ke Drive.' }); }
+    setDriveBusy(false);
+  };
+  const toggleDriveAuto = async () => {
+    if (driveAuto) { await storage.set('drive:auto-backup', false); setDriveAuto(false); setDriveMsg(null); return; }
+    // Aktifkan: minta izin Google + backup pertama sekarang (sekalian uji koneksi)
+    setDriveMsg(null); setDriveBusy(true);
+    try {
+      const res = await backupToGoogleDrive(user.name);
+      await storage.set('drive:auto-backup', true);
+      setDriveAuto(true);
+      setDriveLast(await storage.get('backup:drive-last'));
+      setDriveMsg({ type: 'ok', text: 'Auto-backup harian ke Drive diaktifkan. Backup pertama sudah dibuat.', link: res.link });
+    } catch (e) { setDriveMsg({ type: 'err', text: e?.message || 'Gagal mengaktifkan auto-backup.' }); }
+    setDriveBusy(false);
+  };
 
   const doExport = async () => {
     setBackupBusy(true);
@@ -10843,6 +10878,48 @@ function SettingsView({ user, settings, onSave }) {
 
         <div className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg leading-relaxed">
           ✅ <b>Pulihkan (Gabung)</b> = cara aman untuk data hilang: entri lama yang hilang <b>dikembalikan</b>, sedangkan data baru yang sudah ada <b>tidak terhapus</b>. Ini yang dipakai untuk kasus GMV/laporan hilang.
+        </div>
+
+        {/* Backup ke Google Drive */}
+        <div className="border-t border-slate-100 pt-3">
+          <div className="text-sm font-semibold text-slate-800 flex items-center gap-2 mb-1">
+            <Cloud className="w-4 h-4 text-blue-600" /> Backup ke Google Drive
+          </div>
+          {!driveEnabled ? (
+            <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg p-2.5 leading-relaxed">
+              Integrasi Google belum aktif. Isi <b>VITE_GOOGLE_CLIENT_ID</b> di Vercel (sama seperti setup Google Calendar) lalu deploy ulang. Panduan lengkap ada di file <b>PANDUAN-BACKUP-GOOGLE-DRIVE.md</b>.
+            </div>
+          ) : (
+            <>
+              <p className="text-[11px] text-slate-500 mb-2 leading-relaxed">
+                Kirim cadangan ke folder <b>“Al-Kahfi Backup”</b> di Google Drive-mu. Beda tempat dari server, jadi data tetap aman walau Supabase bermasalah. App hanya bisa mengakses file yang dia buat sendiri (tidak mengintip file pribadimu).
+              </p>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <button onClick={doDriveBackup} disabled={driveBusy}
+                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-xl font-semibold text-sm transition shadow-sm">
+                  <CloudUpload className="w-4 h-4" /> {driveBusy ? 'Memproses…' : 'Backup ke Drive Sekarang'}
+                </button>
+                <button onClick={toggleDriveAuto} disabled={driveBusy}
+                  className={`flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm transition border ${driveAuto ? 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100' : 'bg-white border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-700'}`}>
+                  {driveAuto ? <><Check className="w-4 h-4" /> Auto-Backup Harian: AKTIF</> : <><Clock className="w-4 h-4" /> Aktifkan Auto-Backup Harian</>}
+                </button>
+              </div>
+              {driveAuto && (
+                <p className="text-[11px] text-emerald-700 mt-2">Otomatis backup ke Drive 1×/hari saat app dibuka. Klik tombol hijau lagi untuk mematikan.</p>
+              )}
+              {driveLast?.at && (
+                <p className="text-[11px] text-slate-500 mt-2">
+                  Backup Drive terakhir: <b>{new Date(driveLast.at).toLocaleString('id-ID')}</b>{driveLast.link ? <> · <a href={driveLast.link} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">buka di Drive</a></> : ''}
+                </p>
+              )}
+              {driveMsg && (
+                <div className={`text-[11px] mt-2 p-2 rounded-lg ${driveMsg.type === 'ok' ? 'text-emerald-800 bg-emerald-50 border border-emerald-200' : 'text-red-700 bg-red-50 border border-red-200'}`}>
+                  {driveMsg.type === 'ok' ? '✓ ' : '⚠️ '}{driveMsg.text}
+                  {driveMsg.link ? <> · <a href={driveMsg.link} target="_blank" rel="noreferrer" className="underline font-semibold">buka file</a></> : ''}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Auto-backup harian (server) */}
@@ -12408,6 +12485,105 @@ async function addEventToGoogleCalendar(event) {
     throw new Error(`Google Calendar (${res.status}): ${t.slice(0, 140)}`);
   }
   return res.json(); // { htmlLink, id, ... }
+}
+
+// ====== INTEGRASI GOOGLE DRIVE (Backup ke Drive, OAuth tanpa backend) ======
+// Pakai Client ID Google yang sama dgn Calendar. Scope `drive.file` = app HANYA bisa
+// melihat/mengelola file yang DIA buat sendiri (paling aman, tidak butuh verifikasi Google,
+// tidak bisa mengintip file pribadi user lain).
+const GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const GDRIVE_FOLDER_NAME = 'Al-Kahfi Backup';
+const GDRIVE_BACKUP_KEEP = 30; // simpan maks 30 file backup terakhir di Drive
+let _driveToken = null; // { token, exp } — cache terpisah dari token Calendar
+async function getDriveToken(forceConsent = false, silent = false) {
+  if (!GOOGLE_CLIENT_ID) throw new Error('Integrasi Google belum diaktifkan (VITE_GOOGLE_CLIENT_ID belum diisi di Vercel).');
+  await loadGis();
+  if (!forceConsent && _driveToken && _driveToken.exp > Date.now() + 60000) return _driveToken.token;
+  return new Promise((resolve, reject) => {
+    const tc = window.google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: GDRIVE_SCOPE,
+      callback: (resp) => {
+        if (resp.error) return reject(new Error(resp.error_description || resp.error));
+        _driveToken = { token: resp.access_token, exp: Date.now() + (resp.expires_in || 3600) * 1000 };
+        resolve(resp.access_token);
+      },
+      error_callback: (err) => reject(new Error(err?.message || 'Login Google dibatalkan.')),
+    });
+    // silent = jangan munculkan popup (untuk auto-backup); manual pertama kali minta consent.
+    tc.requestAccessToken({ prompt: silent ? '' : (_driveToken ? '' : 'consent') });
+  });
+}
+// Cari folder backup milik app; kalau belum ada, buat baru. Return folderId.
+async function driveFindOrCreateFolder(token) {
+  const q = `mimeType='application/vnd.google-apps.folder' and name='${GDRIVE_FOLDER_NAME}' and trashed=false`;
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (r.ok) {
+    const j = await r.json();
+    if (j.files && j.files.length) return j.files[0].id;
+  }
+  const cr = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: GDRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
+  });
+  if (!cr.ok) throw new Error(`Gagal membuat folder Drive (${cr.status}).`);
+  return (await cr.json()).id;
+}
+// Upload 1 file JSON (multipart) ke folder. Return { id, name, webViewLink }.
+async function driveUploadJson(token, folderId, filename, obj) {
+  const meta = { name: filename, parents: [folderId], mimeType: 'application/json' };
+  const boundary = 'alkahfi' + Math.random().toString(36).slice(2);
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(obj)}\r\n` +
+    `--${boundary}--`;
+  const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`Gagal upload ke Drive (${r.status}): ${t.slice(0, 140)}`); }
+  return r.json();
+}
+// Hapus backup lama, sisakan `keep` terbaru (urut createdTime desc).
+async function drivePruneOld(token, folderId, keep) {
+  const q = `'${folderId}' in parents and name contains 'alkahfi-backup-' and trashed=false`;
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,createdTime)&orderBy=createdTime desc&pageSize=100`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!r.ok) return;
+  const files = (await r.json()).files || [];
+  for (const f of files.slice(keep)) {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+  }
+}
+// Orkestrasi: ambil token → build dump → upload → buang yg lama. Return { name, link }.
+async function backupToGoogleDrive(byName, { silent = false } = {}) {
+  const token = await getDriveToken(false, silent);
+  const dump = await buildBackupDump(byName || 'manual');
+  if (!dump.data || Object.keys(dump.data).length === 0) throw new Error('Data kosong — backup dibatalkan agar tidak menimpa cadangan bagus.');
+  const folderId = await driveFindOrCreateFolder(token);
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+  const filename = `alkahfi-backup-${wibDayKey(now.getTime())}_${hhmm}.json`;
+  const res = await driveUploadJson(token, folderId, filename, dump);
+  await drivePruneOld(token, folderId, GDRIVE_BACKUP_KEEP).catch(() => {});
+  await storage.set('backup:drive-last', { at: new Date().toISOString(), by: byName || 'manual', name: res.name || filename, link: res.webViewLink || '' });
+  return { name: res.name || filename, link: res.webViewLink || '' };
+}
+// Auto-backup harian ke Drive (1x/hari, hanya kalau toggle ON & sudah pernah connect). Senyap.
+async function driveAutoBackupIfDue(byName) {
+  try {
+    if (!GOOGLE_CLIENT_ID) return;
+    if (!(await storage.get('drive:auto-backup'))) return; // belum diaktifkan owner
+    const last = await storage.get('backup:drive-last');
+    const lastDay = last?.at ? wibDayKey(new Date(last.at).getTime()) : null;
+    if (lastDay === wibDayKey()) return; // sudah backup hari ini
+    await backupToGoogleDrive(byName || 'auto', { silent: true });
+  } catch (e) { console.warn('Auto-backup Drive dilewati (akan dicoba lagi):', e?.message || e); }
 }
 
 function CalendarView({ user, allUsers }) {
