@@ -388,6 +388,60 @@ const BACKUP_KEYS = [
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
 
+// ====== BACKUP HELPERS (export manual + auto-backup harian + restore gabung) ======
+async function buildBackupDump(byName = 'auto') {
+  const dump = { _meta: { app: 'Al-Kahfi Corp Team App', exportedAt: new Date().toISOString(), by: byName, version: 1 }, data: {} };
+  for (const k of BACKUP_KEYS) {
+    const v = await storage.get(k); // bisa melempar error → ditangani pemanggil (jangan simpan backup setengah)
+    if (v !== null && v !== undefined) dump.data[k] = v;
+  }
+  return dump;
+}
+const AUTO_BACKUP_KEEP = 7; // simpan 7 snapshot harian terakhir
+// Snapshot otomatis 1x/hari ke key terpisah (backup:auto:<tgl>). Aman: write penuh, bukan baca-ubah-tulis.
+async function autoBackupIfDue(byName) {
+  try {
+    const todayK = wibDayKey();
+    const idx = (await storage.get('backup:auto:index')) || { dates: [] };
+    if (Array.isArray(idx.dates) && idx.dates.includes(todayK)) return; // sudah hari ini
+    const dump = await buildBackupDump(byName || 'auto');
+    if (!dump.data || Object.keys(dump.data).length === 0) return; // jangan simpan snapshot kosong
+    await storage.set(`backup:auto:${todayK}`, dump);
+    let dates = [...(idx.dates || []).filter(d => d !== todayK), todayK].sort();
+    while (dates.length > AUTO_BACKUP_KEEP) { const old = dates.shift(); await storage.delete(`backup:auto:${old}`); }
+    await storage.set('backup:auto:index', { dates });
+  } catch (e) { console.warn('Auto-backup dilewati (akan dicoba lagi):', e?.message || e); }
+}
+// Gabungkan array by id (item sekarang menang utk id sama; item lama yg hilang dimunculkan lagi).
+function mergeArraysById(current, backup) {
+  const map = new Map();
+  (backup || []).forEach(it => { if (it && it.id != null) map.set(it.id, it); });
+  (current || []).forEach(it => { if (it && it.id != null) map.set(it.id, it); });
+  const noId = [...(backup || []).filter(it => !it || it.id == null), ...(current || []).filter(it => !it || it.id == null)];
+  const seen = new Set(); const uniq = [];
+  noId.forEach(it => { const s = JSON.stringify(it); if (!seen.has(s)) { seen.add(s); uniq.push(it); } });
+  return [...map.values(), ...uniq];
+}
+// Restore GABUNG: data hilang kembali, data sekarang TIDAK terhapus.
+async function applyMergeRestore(data) {
+  const keys = Object.keys(data || {}).filter(k => BACKUP_KEYS.includes(k));
+  let n = 0;
+  for (const k of keys) {
+    const bval = data[k];
+    if (Array.isArray(bval)) {
+      const cur = await storage.getList(k);
+      await storage.set(k, mergeArraysById(cur, bval)); n++;
+    } else if (bval && typeof bval === 'object') {
+      const cur = (await storage.get(k)) || {};
+      await storage.set(k, { ...bval, ...cur }); n++; // nilai sekarang menang, tambah key yg hilang
+    } else {
+      const cur = await storage.get(k);
+      if (cur === null || cur === undefined) { await storage.set(k, bval); n++; }
+    }
+  }
+  return n;
+}
+
 // Divisi tim Masjid Affiliate (sesuai struktur Al-Kahfi Corp)
 const DIVISIONS = {
   manajemen: { label: 'Manajemen', color: 'bg-violet-100 text-violet-800' },
@@ -672,6 +726,9 @@ export default function App() {
       }
     })();
   }, []);
+
+  // Auto-backup harian: jalan 1x saat ada user login (dijaga agar maksimal 1x/hari)
+  useEffect(() => { if (currentUser?.id) autoBackupIfDue(currentUser.name); }, [currentUser?.id]);
 
   const toggleSidebar = async () => {
     const next = !sidebarOpen;
@@ -10460,6 +10517,9 @@ function SettingsView({ user, settings, onSave }) {
   const [backupBusy, setBackupBusy] = useState(false);
   const [restoreMsg, setRestoreMsg] = useState('');
   const restoreRef = useRef();
+  const mergeRef = useRef();
+  const [autoBackups, setAutoBackups] = useState([]);
+  useEffect(() => { (async () => { try { const idx = await storage.get('backup:auto:index'); setAutoBackups((idx?.dates || []).slice().sort().reverse()); } catch {} })(); }, []);
 
   const doExport = async () => {
     setBackupBusy(true);
@@ -10500,6 +10560,39 @@ function SettingsView({ user, settings, onSave }) {
       alert('✓ Data berhasil dipulihkan dari backup. Halaman akan dimuat ulang.');
       window.location.reload();
     } catch (e) { setBackupBusy(false); setRestoreMsg('Gagal memulihkan: ' + e.message); }
+  };
+
+  // Restore GABUNG (aman): data hilang kembali, data sekarang TIDAK terhapus
+  const doRestoreMerge = async (file) => {
+    setRestoreMsg('');
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const data = parsed.data || parsed;
+      const keys = Object.keys(data).filter(k => BACKUP_KEYS.includes(k));
+      if (keys.length === 0) { setRestoreMsg('File tidak dikenali / kosong. Pastikan ini file backup dari app ini.'); return; }
+      const when = parsed._meta?.exportedAt ? new Date(parsed._meta.exportedAt).toLocaleString('id-ID') : 'tidak diketahui';
+      if (!confirm(`Gabungkan data dari backup (dibuat ${when}) dengan data sekarang?\n\n• Data lama yang HILANG akan kembali.\n• Data baru yang sudah ada TIDAK terhapus.\n\nLanjutkan?`)) return;
+      setBackupBusy(true);
+      const n = await applyMergeRestore(data);
+      setBackupBusy(false);
+      alert(`✓ Pemulihan (gabung) selesai — ${n} bagian data. Halaman dimuat ulang.`);
+      window.location.reload();
+    } catch (e) { setBackupBusy(false); setRestoreMsg('Gagal memulihkan: ' + e.message); }
+  };
+
+  // Pulihkan (gabung) dari salah satu auto-backup harian yang tersimpan di server
+  const restoreAuto = async (date) => {
+    if (!confirm(`Pulihkan (gabung) dari auto-backup ${fmtDate(date)}?\n\nData lama yang hilang kembali, data baru tetap aman.`)) return;
+    try {
+      setBackupBusy(true);
+      const dump = await storage.get(`backup:auto:${date}`);
+      if (!dump?.data) { setBackupBusy(false); alert('Auto-backup tidak ditemukan / kosong.'); return; }
+      const n = await applyMergeRestore(dump.data);
+      setBackupBusy(false);
+      alert(`✓ Dipulihkan (gabung) dari ${fmtDate(date)} — ${n} bagian. Halaman dimuat ulang.`);
+      window.location.reload();
+    } catch (e) { setBackupBusy(false); alert('Gagal: ' + (e?.message || e)); }
   };
 
   const EMOJI_OPTIONS = ['🌙', '🕌', '⭐', '🌟', '💎', '🔥', '🚀', '⚡', '🎯', '👑', '🏆', '✨'];
@@ -10732,25 +10825,60 @@ function SettingsView({ user, settings, onSave }) {
             <Download className="w-4 h-4" /> {backupBusy ? 'Memproses…' : 'Export Semua Data (.json)'}
           </button>
 
-          {user.role === 'owner' ? (
+          {(user.role === 'owner' || user.role === 'manajer') ? (
             <>
-              <button onClick={() => restoreRef.current?.click()} disabled={backupBusy}
-                className="flex items-center justify-center gap-2 bg-white border border-slate-300 hover:border-red-300 hover:bg-red-50 text-slate-700 hover:text-red-700 py-3 rounded-xl font-semibold text-sm transition">
-                <Upload className="w-4 h-4" /> Pulihkan dari Backup
+              <button onClick={() => mergeRef.current?.click()} disabled={backupBusy}
+                className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white py-3 rounded-xl font-semibold text-sm transition shadow-sm">
+                <Upload className="w-4 h-4" /> Pulihkan (Gabung) — Aman
               </button>
-              <input ref={restoreRef} type="file" accept="application/json,.json" className="hidden"
-                onChange={e => { doRestore(e.target.files?.[0]); e.target.value = ''; }} />
+              <input ref={mergeRef} type="file" accept="application/json,.json" className="hidden"
+                onChange={e => { doRestoreMerge(e.target.files?.[0]); e.target.value = ''; }} />
             </>
           ) : (
             <div className="flex items-center justify-center gap-2 bg-slate-50 border border-slate-200 text-slate-400 py-3 rounded-xl text-xs text-center px-3">
-              Pemulihan data hanya bisa oleh Owner
+              Pemulihan data hanya bisa oleh Owner/Manajer
             </div>
           )}
         </div>
-        {restoreMsg && <div className="text-xs text-red-600">{restoreMsg}</div>}
-        <div className="text-[11px] text-slate-500 bg-slate-50 p-2 rounded leading-relaxed">
-          ⚠️ <b>Pulihkan dari Backup</b> akan <b>menimpa semua data sekarang</b> dengan isi file backup — pakai hanya saat darurat (mis. pindah ke project Supabase baru atau data hilang). Owner-only, dengan konfirmasi ganda.
+
+        <div className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg leading-relaxed">
+          ✅ <b>Pulihkan (Gabung)</b> = cara aman untuk data hilang: entri lama yang hilang <b>dikembalikan</b>, sedangkan data baru yang sudah ada <b>tidak terhapus</b>. Ini yang dipakai untuk kasus GMV/laporan hilang.
         </div>
+
+        {/* Auto-backup harian (server) */}
+        <div className="border-t border-slate-100 pt-3">
+          <div className="text-sm font-semibold text-slate-800 flex items-center gap-2 mb-1"><Database className="w-4 h-4 text-emerald-600" /> Auto-Backup Harian</div>
+          <p className="text-[11px] text-slate-500 mb-2">Sistem otomatis menyimpan cadangan tiap hari (maks {AUTO_BACKUP_KEEP} hari terakhir) di server. Klik tanggal untuk memulihkan (gabung).</p>
+          {autoBackups.length === 0 ? (
+            <div className="text-[11px] text-slate-400 bg-slate-50 rounded-lg p-2">Belum ada auto-backup. Cadangan pertama dibuat otomatis hari ini saat app dibuka.</div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {autoBackups.map(d => (
+                <button key={d} onClick={() => restoreAuto(d)} disabled={backupBusy}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
+                  ↺ {fmtDate(d)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {restoreMsg && <div className="text-xs text-red-600">{restoreMsg}</div>}
+
+        {user.role === 'owner' && (
+          <details className="text-[11px] text-slate-500">
+            <summary className="cursor-pointer hover:text-slate-700">Opsi lanjutan: Pulihkan dengan menimpa total (berisiko)</summary>
+            <div className="mt-2 space-y-2">
+              <p className="bg-slate-50 p-2 rounded leading-relaxed">⚠️ <b>Menimpa total</b> mengganti SEMUA data sekarang dengan isi file backup — data yang dibuat setelah backup akan HILANG. Pakai hanya untuk pindah project / reset penuh.</p>
+              <button onClick={() => restoreRef.current?.click()} disabled={backupBusy}
+                className="flex items-center gap-2 bg-white border border-red-300 hover:bg-red-50 text-red-700 px-3 py-2 rounded-lg font-semibold text-xs">
+                <Upload className="w-3.5 h-3.5" /> Pulihkan (Timpa Total)
+              </button>
+              <input ref={restoreRef} type="file" accept="application/json,.json" className="hidden"
+                onChange={e => { doRestore(e.target.files?.[0]); e.target.value = ''; }} />
+            </div>
+          </details>
+        )}
       </div>
 
       {/* Preview */}
