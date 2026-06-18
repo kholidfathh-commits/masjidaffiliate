@@ -12626,7 +12626,14 @@ function CalendarView({ user, allUsers }) {
   useEffect(() => { if (GOOGLE_CLIENT_ID) loadGis().catch(() => {}); }, []);
 
   const handleSave = async (data) => {
-    let list = await storage.getList('calendar:all');
+    const isNew = !editing;
+    let list;
+    try {
+      list = await storage.getList('calendar:all'); // melempar kalau gagal baca → jangan timpa data
+    } catch (e) {
+      alert('⚠️ Gagal memuat kalender dari server (cek koneksi internet). Agenda belum disimpan — coba lagi.');
+      return;
+    }
     if (editing) {
       list = list.map(e => e.id === editing.id ? { ...e, ...data, updatedAt: new Date().toISOString() } : e);
     } else {
@@ -12635,11 +12642,17 @@ function CalendarView({ user, allUsers }) {
         createdById: user.id, createdByName: user.name,
         createdAt: new Date().toISOString()
       });
-      await logActivity(`menambah agenda kalender: "${data.title}" (${fmtDate(data.date)})`, user.name);
     }
     setEvents(list);            // tampilkan langsung (optimistic) — agenda baru muncul seketika
+    const ok = await storage.set('calendar:all', list);
+    if (!ok) {
+      // Simpan ke server GAGAL → jangan tutup form & jangan tampilkan sukses palsu (agenda hilang saat re-sync)
+      alert('⚠️ Gagal menyimpan agenda ke server (koneksi internet bermasalah). Agenda BELUM tersimpan — coba klik Simpan lagi.');
+      setEvents0();             // balikkan ke kondisi server biar tampilan tidak menyesatkan
+      return;
+    }
     setShowForm(false); setEditing(null);
-    await storage.set('calendar:all', list);
+    if (isNew) logActivity(`menambah agenda kalender: "${data.title}" (${fmtDate(data.date)})`, user.name);
     setEvents0();               // sinkron ulang dari server
   };
 
@@ -12831,22 +12844,19 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
     const attendees = chosen.map(u => u.name);
     const attendeeEmails = chosen.map(u => (u.gmail || '').trim()).filter(Boolean);
     const payload = { ...form, attendeeNames: attendees, attendeeEmails };
-    // Auto-tambah ke Google Calendar (dipanggil langsung dari klik → popup tidak diblokir)
+    // Tambah ke Google Calendar dulu (dipanggil langsung dari klik → popup tidak diblokir).
+    // Apa pun hasil Google-nya, agenda TETAP disimpan di aplikasi — Google hanya bonus.
     if (gcalReady && addGcal) {
       setBusy(true);
       try {
         await addEventToGoogleCalendar(payload);
-        alert('✅ Agenda berhasil ditambahkan ke Google Calendar kamu.' + (attendeeEmails.length ? ` ${attendeeEmails.length} peserta diundang via email.` : ''));
+        alert('✅ Agenda juga ditambahkan ke Google Calendar kamu.' + (attendeeEmails.length ? ` ${attendeeEmails.length} peserta diundang via email.` : ''));
       } catch (e) {
-        const lanjut = confirm('Gagal menambah ke Google Calendar:\n' + (e?.message || e) + '\n\nTetap simpan agenda di aplikasi?');
-        setBusy(false);
-        if (!lanjut) return;
-        onSave(payload);
-        return;
+        alert('⚠️ Agenda tetap disimpan di aplikasi, tapi gagal menambah ke Google Calendar:\n' + (e?.message || e));
       }
       setBusy(false);
     }
-    onSave(payload);
+    onSave(payload);            // SELALU simpan ke aplikasi (kamu klik "Simpan Agenda")
   };
 
   return (
