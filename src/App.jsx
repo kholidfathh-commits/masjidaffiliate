@@ -13783,7 +13783,7 @@ function KeuanganView({ user, allUsers }) {
 
   if (loading) return <div className="text-slate-400 text-sm">Memuat data keuangan…</div>;
 
-  const TABS = [['dashboard', 'Dashboard', BarChart3], ['transaksi', 'Cash Flow', Receipt], ['labarugi', 'Laba Rugi', FileSpreadsheet], ['analisis', 'Analisis & SWOT', Activity]];
+  const TABS = [['dashboard', 'Dashboard', BarChart3], ['transaksi', 'Cash Flow', Receipt], ['labarugi', 'Laba Rugi', FileSpreadsheet]];
   const totalKas = Object.values(kasPerDiv).reduce((a, b) => a + b, 0);
 
   return (
@@ -13856,6 +13856,14 @@ function KeuanganView({ user, allUsers }) {
             <FinBreakdown title="Pengeluaran per Kategori" data={bdKeluar} total={totalBeban} color="#F43F5E" empty="Belum ada pengeluaran bulan ini." />
             <FinBreakdown title="Pemasukan per Kategori" data={bdMasuk} total={totalPendapatan} color="#10B981" empty="Belum ada pemasukan bulan ini." />
           </div>
+          <div className="pt-3 mt-1 border-t border-slate-200/70">
+            <div className="flex items-center gap-2 mb-4 mt-3">
+              <Activity className="w-5 h-5 text-blue-600" />
+              <h2 className="font-display font-extrabold text-lg text-slate-900">Analisis & SWOT Keuangan</h2>
+              <span className="text-xs text-slate-400 font-medium">· {filterDiv === 'all' ? 'Semua Divisi' : FIN_DIVISIONS[filterDiv]?.label}</span>
+            </div>
+            <FinanceAnalysis list={items.filter(inDiv)} scopeLabel={filterDiv === 'all' ? 'Semua Divisi' : FIN_DIVISIONS[filterDiv]?.label} />
+          </div>
         </div>
       )}
 
@@ -13920,8 +13928,6 @@ function KeuanganView({ user, allUsers }) {
           </div>
         </div>
       )}
-
-      {tab === 'analisis' && <FinanceAnalysis list={items.filter(inDiv)} scopeLabel={filterDiv === 'all' ? 'Semua Divisi' : FIN_DIVISIONS[filterDiv]?.label} />}
 
       {showInput && <FinanceInputModal user={user} editing={editing} onClose={() => { setShowInput(false); setEditing(null); }} onSave={saveItem} />}
     </div>
