@@ -11,7 +11,7 @@ import {
   GripVertical, MapPin, ArrowRight, ArrowLeft, BarChart3, Pin, MessageSquare,
   Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle,
   Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2,
-  Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload
+  Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload, Wallet, Receipt
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -384,7 +384,8 @@ const BACKUP_KEYS = [
   'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all',
   'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history',
   'partner-feedback:all', 'swot:external', 'backup:last', 'leave-requests:all',
-  'drive:auto-backup', 'backup:drive-last'
+  'drive:auto-backup', 'backup:drive-last',
+  'keuangan:cashflow'
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
@@ -458,14 +459,14 @@ const DIVISIONS = {
 // Fitur apa yang relevan untuk tiap divisi (selain menu umum yang dipakai semua).
 // Owner & Manajer selalu lihat semua. Divisi 'manajemen' juga lihat semua.
 const DIVISION_FEATURES = {
-  manajemen: ['creators', 'creator-management', 'sellers', 'gmv', 'affiliate-accounts', 'tap-commission'],
+  manajemen: ['creators', 'creator-management', 'sellers', 'gmv', 'affiliate-accounts', 'tap-commission', 'finance'],
   internal:  ['gmv', 'affiliate-accounts'],
   mcn:       ['creators', 'creator-management', 'gmv'],
   tap:       ['sellers', 'gmv', 'tap-commission'],
   media:     ['media-tasks'],
   event:     [],
   mabit:     [],
-  keuangan:  ['gmv']
+  keuangan:  ['gmv', 'finance']
 };
 // Label jabatan yang ditampilkan di kartu anggota:
 // Manajer/Owner = tidak perlu (perannya sudah jabatan) · Leader = otomatis "Leader <Divisi>" · Staff = jobTitle kalau diisi.
@@ -810,6 +811,7 @@ export default function App() {
             {view === 'tap-commission' && <TapCommissionView user={currentUser} />}
             {view === 'partner-feedback' && <PartnerFeedbackView user={currentUser} />}
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
+            {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} />}
             {view === 'affiliate-accounts' && <AffiliateAccountsView user={currentUser} allUsers={allUsers} />}
             {view === 'kpi' && <KpiView user={currentUser} allUsers={allUsers} />}
             {view === 'problems' && <ProblemsView user={currentUser} allUsers={allUsers} />}
@@ -1429,6 +1431,12 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'kpi', label: 'KPI Tim', icon: Award, show: true },
         { id: 'reports', label: 'Laporan Mingguan', icon: FileText, show: user.role !== 'operasional' },
         { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, show: true }
+      ]
+    },
+    {
+      label: 'Keuangan',
+      items: [
+        { id: 'keuangan', label: 'Keuangan', icon: Wallet, show: canAccessFeature(user, 'finance') }
       ]
     },
     {
@@ -13403,6 +13411,359 @@ function EmptyState({ icon: Icon, text }) {
     </div>
   );
 }
+// ============ KEUANGAN (FINANCE) ============
+const FIN_DIVISIONS = {
+  mcn:        { label: 'MCN', color: '#10B981' },
+  tap:        { label: 'TAP', color: '#F97316' },
+  affiliator: { label: 'Affiliator', color: '#2563EB' },
+  corp:       { label: 'Al-Kahfi Corp', color: '#7C3AED' }
+};
+const FIN_CAT_IN = ['Komisi Affiliate', 'Pendapatan MCN', 'Pendapatan TAP', 'Pengembalian Dana', 'Pemasukan Lain', 'Saldo Awal'];
+const FIN_CAT_OUT = ['Gaji & Bonus', 'Operasional', 'Internet & Komunikasi', 'Iklan & Promosi', 'Aset & Peralatan', 'Software & Langganan', 'Transportasi & Pengiriman', 'Konsumsi & Meeting', 'Kesejahteraan Karyawan', 'Deviden', 'Pajak', 'Donasi', 'Administrasi Bank', 'Beban Lain'];
+const finIsSaldoAwal = (e) => e.kategori === 'Saldo Awal';
+function canManageFinance(user) {
+  return user.role === 'owner' || user.role === 'manajer' || user.division === 'keuangan' || user.division === 'manajemen';
+}
+
+function FinStat({ label, value, icon: Icon, tone }) {
+  const tones = { emerald: ['#ECFDF5', '#10B981'], rose: ['#FFF1F2', '#F43F5E'], blue: ['#EFF6FF', '#2563EB'], violet: ['#F5F3FF', '#7C3AED'] };
+  const [bg, fg] = tones[tone] || tones.blue;
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/70 p-4">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: bg }}><Icon className="w-4 h-4" style={{ color: fg }} /></span>
+        <span className="text-xs font-semibold text-slate-500">{label}</span>
+      </div>
+      <div className="text-lg font-extrabold" style={{ color: value < 0 ? '#E11D48' : '#0F172A' }}>{fmtRupiah(value)}</div>
+    </div>
+  );
+}
+
+function FinBreakdown({ title, data, total, color, empty }) {
+  const max = Math.max(...data.map(d => d[1]), 1);
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/70 p-5">
+      <h3 className="font-display font-bold text-slate-800 mb-3">{title}</h3>
+      {data.length === 0 ? <div className="text-slate-400 text-sm py-6 text-center">{empty}</div> : (
+        <div className="space-y-2.5">
+          {data.map(([k, v]) => (
+            <div key={k}>
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-slate-600">{k}</span>
+                <span className="font-semibold text-slate-800">{fmtRupiah(v)} <span className="text-slate-400 text-xs">({total > 0 ? Math.round(v / total * 100) : 0}%)</span></span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(v / max) * 100}%`, backgroundColor: color }}></div></div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FinanceInputModal({ user, editing, onClose, onSave }) {
+  const [form, setForm] = useState(editing ? { ...editing } : { tanggal: dayKey(), divisi: 'affiliator', tipe: 'keluar', kategori: '', keterangan: '', jumlah: '', buktiUrl: '' });
+  const [busy, setBusy] = useState(false);
+  const cats = form.tipe === 'masuk' ? FIN_CAT_IN : FIN_CAT_OUT;
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const valid = form.tanggal && form.divisi && form.tipe && form.kategori && Number(form.jumlah) > 0;
+
+  const handleImg = async (file) => {
+    if (!file) return;
+    try { setBusy(true); const b64 = await compressImageFile(file); set('buktiImg', b64); }
+    catch (e) { alert(e.message || 'Gagal memproses gambar.'); }
+    finally { setBusy(false); }
+  };
+  const submit = () => {
+    if (!valid) return;
+    onSave({ tanggal: form.tanggal, divisi: form.divisi, tipe: form.tipe, kategori: form.kategori, keterangan: (form.keterangan || '').trim(), jumlah: Number(form.jumlah), buktiUrl: (form.buktiUrl || '').trim(), buktiImg: form.buktiImg || null });
+  };
+
+  return (
+    <Modal title={editing ? 'Edit Transaksi' : 'Input Transaksi Keuangan'} onClose={onClose} wide>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => { set('tipe', 'masuk'); set('kategori', ''); }} className={`py-2.5 rounded-xl font-semibold text-sm border-2 flex items-center justify-center gap-2 ${form.tipe === 'masuk' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'}`}><TrendingUp className="w-4 h-4" /> Uang Masuk</button>
+          <button onClick={() => { set('tipe', 'keluar'); set('kategori', ''); }} className={`py-2.5 rounded-xl font-semibold text-sm border-2 flex items-center justify-center gap-2 ${form.tipe === 'keluar' ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-slate-200 text-slate-500'}`}><TrendingDown className="w-4 h-4" /> Uang Keluar</button>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Tanggal"><input type="date" value={form.tanggal} onChange={e => set('tanggal', e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" /></Field>
+          <Field label="Divisi">
+            <select value={form.divisi} onChange={e => set('divisi', e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+              {Object.entries(FIN_DIVISIONS).map(([d, info]) => <option key={d} value={d}>{info.label}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Kategori">
+          <select value={form.kategori} onChange={e => set('kategori', e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">— Pilih kategori —</option>
+            {cats.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+        <Field label="Jumlah (Rp)">
+          <input type="number" inputMode="numeric" value={form.jumlah} onChange={e => set('jumlah', e.target.value)} placeholder="0" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          {Number(form.jumlah) > 0 && <div className="text-xs text-slate-500 mt-1">{fmtRupiah(Number(form.jumlah))}</div>}
+        </Field>
+        <Field label="Keterangan (opsional)"><input value={form.keterangan} onChange={e => set('keterangan', e.target.value)} placeholder="mis. Bayar listrik/WiFi, Gaji Siti, Komisi alkahfihome" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" /></Field>
+        <Field label="Link Bukti Google Drive (opsional)"><input value={form.buktiUrl} onChange={e => set('buktiUrl', e.target.value)} placeholder="https://drive.google.com/..." className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" /></Field>
+        <div>
+          <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide block mb-1.5">Atau upload foto bukti (opsional)</label>
+          <div className="flex items-center gap-2">
+            <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50">
+              <ImagePlus className="w-4 h-4" /> {form.buktiImg ? 'Ganti Foto' : 'Pilih Foto'}
+              <input type="file" accept="image/*" className="hidden" onChange={e => handleImg(e.target.files?.[0])} />
+            </label>
+            {form.buktiImg && <img src={form.buktiImg} alt="bukti" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />}
+            {form.buktiImg && <button onClick={() => set('buktiImg', null)} className="text-xs text-rose-600 font-semibold">Hapus</button>}
+          </div>
+        </div>
+        <FormActions onCancel={onClose} onSave={submit} disabled={!valid || busy} saveLabel={busy ? 'Memproses…' : 'Simpan Transaksi'} />
+      </div>
+    </Modal>
+  );
+}
+
+function KeuanganView({ user, allUsers }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('dashboard');
+  const [mKey, setMKey] = useState(monthKey());
+  const [filterDiv, setFilterDiv] = useState('all');
+  const [showInput, setShowInput] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [q, setQ] = useState('');
+
+  const canManage = canManageFinance(user);
+
+  const load = async () => {
+    try { setItems(await storage.getList('keuangan:cashflow')); }
+    catch (e) { console.warn('Load keuangan gagal (pertahankan data lama):', e?.message || e); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
+
+  const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
+  const shiftMonth = (delta) => { const [y, m] = mKey.split('-').map(Number); setMKey(monthKey(new Date(y, m - 1 + delta, 1))); };
+
+  const inDiv = (e) => filterDiv === 'all' || e.divisi === filterDiv;
+  const inMonth = (e) => e.tanggal && e.tanggal.slice(0, 7) === mKey;
+
+  // Running saldo per divisi (kronologis)
+  const saldoMap = useMemo(() => {
+    const sorted = [...items].sort((a, b) => (a.tanggal || '').localeCompare(b.tanggal || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
+    const acc = {}; const map = {};
+    sorted.forEach(e => { acc[e.divisi] = (acc[e.divisi] || 0) + (e.tipe === 'keluar' ? -1 : 1) * (Number(e.jumlah) || 0); map[e.id] = acc[e.divisi]; });
+    return map;
+  }, [items]);
+
+  const saveItem = async (data) => {
+    try {
+      let list = await storage.getList('keuangan:cashflow');
+      if (editing) list = list.map(e => e.id === editing.id ? { ...e, ...data, updatedAt: new Date().toISOString() } : e);
+      else list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
+      await storage.set('keuangan:cashflow', list);
+      await logActivity(`keuangan ${FIN_DIVISIONS[data.divisi]?.label || ''} ${data.tanggal}: ${data.tipe === 'keluar' ? '-' : '+'}${fmtRupiah(data.jumlah)} (${data.kategori})`, user.name);
+      setShowInput(false); setEditing(null); load();
+    } catch (err) { alert('⚠️ Gagal menyimpan: ' + (err?.message || err) + '\n\nData lama tidak diubah. Coba lagi saat koneksi stabil.'); }
+  };
+  const deleteItem = async (e) => {
+    if (!confirm(`Hapus transaksi "${e.keterangan || e.kategori}" (${fmtRupiah(e.jumlah)})?`)) return;
+    try { const fresh = await storage.getList('keuangan:cashflow'); await storage.set('keuangan:cashflow', fresh.filter(x => x.id !== e.id)); load(); }
+    catch (err) { alert('⚠️ Gagal menghapus: ' + (err?.message || err)); }
+  };
+
+  // Metrik bulan terpilih (ikut filter divisi)
+  const monthList = items.filter(e => inMonth(e) && inDiv(e));
+  const totalPendapatan = monthList.filter(e => e.tipe === 'masuk' && !finIsSaldoAwal(e)).reduce((s, e) => s + (Number(e.jumlah) || 0), 0);
+  const totalBeban = monthList.filter(e => e.tipe === 'keluar').reduce((s, e) => s + (Number(e.jumlah) || 0), 0);
+  const labaBersih = totalPendapatan - totalBeban;
+  const saldoKas = items.filter(e => inDiv(e) && (e.tanggal || '').slice(0, 7) <= mKey).reduce((s, e) => s + (e.tipe === 'keluar' ? -1 : 1) * (Number(e.jumlah) || 0), 0);
+
+  const breakdown = (tipe) => {
+    const m = {};
+    monthList.filter(e => e.tipe === tipe && !(tipe === 'masuk' && finIsSaldoAwal(e))).forEach(e => { const k = e.kategori || 'Lainnya'; m[k] = (m[k] || 0) + (Number(e.jumlah) || 0); });
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  };
+  const bdKeluar = useMemo(() => breakdown('keluar'), [items, mKey, filterDiv]);
+  const bdMasuk = useMemo(() => breakdown('masuk'), [items, mKey, filterDiv]);
+
+  const kasPerDiv = useMemo(() => {
+    const r = {};
+    Object.keys(FIN_DIVISIONS).forEach(d => { r[d] = items.filter(e => e.divisi === d && (e.tanggal || '').slice(0, 7) <= mKey).reduce((s, e) => s + (e.tipe === 'keluar' ? -1 : 1) * (Number(e.jumlah) || 0), 0); });
+    return r;
+  }, [items, mKey]);
+
+  // Tren 6 bulan (Pendapatan vs Beban) utk filter divisi
+  const trend = useMemo(() => {
+    const months = [];
+    const [y, m] = mKey.split('-').map(Number);
+    for (let i = 5; i >= 0; i--) months.push(monthKey(new Date(y, m - 1 - i, 1)));
+    const mk2series = (tipe) => months.map(mk => {
+      const v = items.filter(e => inDiv(e) && (e.tanggal || '').slice(0, 7) === mk && e.tipe === tipe && !(tipe === 'masuk' && finIsSaldoAwal(e))).reduce((s, e) => s + (Number(e.jumlah) || 0), 0);
+      return { date: mk + '-01', value: v, day: new Date(mk + '-01T00:00:00').toLocaleDateString('id-ID', { month: 'short' }) };
+    });
+    const pend = mk2series('masuk'), beb = mk2series('keluar');
+    return { pend, beb, hasData: pend.some(p => p.value) || beb.some(b => b.value) };
+  }, [items, mKey, filterDiv]);
+
+  const tableList = items.filter(e => inMonth(e) && inDiv(e) && (!q || (e.keterangan || '').toLowerCase().includes(q.toLowerCase()) || (e.kategori || '').toLowerCase().includes(q.toLowerCase())))
+    .sort((a, b) => (b.tanggal || '').localeCompare(a.tanggal || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx');
+    const rows = [...items].filter(e => inMonth(e) && inDiv(e)).sort((a, b) => (a.tanggal || '').localeCompare(b.tanggal || ''))
+      .map(e => ({ Tanggal: e.tanggal, Divisi: FIN_DIVISIONS[e.divisi]?.label || e.divisi, Tipe: e.tipe === 'keluar' ? 'Keluar' : 'Masuk', Kategori: e.kategori, Keterangan: e.keterangan || '', Masuk: e.tipe === 'masuk' ? Number(e.jumlah) || 0 : '', Keluar: e.tipe === 'keluar' ? Number(e.jumlah) || 0 : '', Saldo: saldoMap[e.id] ?? '', Bukti: e.buktiUrl || '' }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 12 }, { wch: 13 }, { wch: 8 }, { wch: 20 }, { wch: 32 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 30 }];
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Cash Flow');
+    XLSX.writeFile(wb, `Keuangan-${filterDiv === 'all' ? 'Semua' : FIN_DIVISIONS[filterDiv]?.label}-${mKey}.xlsx`);
+  };
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat data keuangan…</div>;
+
+  const TABS = [['dashboard', 'Dashboard', BarChart3], ['transaksi', 'Cash Flow', Receipt], ['labarugi', 'Laba Rugi', FileSpreadsheet]];
+  const totalKas = Object.values(kasPerDiv).reduce((a, b) => a + b, 0);
+
+  return (
+    <div className="max-w-6xl">
+      <PageHeader title="Keuangan" subtitle="Cash flow, laba rugi & posisi kas — MCN · TAP · Affiliator · Corp"
+        action={canManage && (
+          <button onClick={() => { setEditing(null); setShowInput(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2"><Plus className="w-4 h-4" /> Input Transaksi</button>
+        )} />
+
+      <div className="flex items-center gap-1.5 mb-5 bg-slate-100 p-1 rounded-xl w-fit">
+        {TABS.map(([id, label, Icon]) => (
+          <button key={id} onClick={() => setTab(id)} className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition ${tab === id ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            <Icon className="w-4 h-4" /> {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button onClick={() => setFilterDiv('all')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${filterDiv === 'all' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>Semua</button>
+          {Object.entries(FIN_DIVISIONS).map(([d, info]) => (
+            <button key={d} onClick={() => setFilterDiv(d)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${filterDiv === d ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`} style={filterDiv === d ? { backgroundColor: info.color } : {}}>{info.label}</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => shiftMonth(-1)} className="p-1.5 rounded-lg border border-slate-300 hover:bg-slate-50"><ArrowLeft className="w-4 h-4" /></button>
+          <span className="text-sm font-semibold text-slate-700 min-w-[130px] text-center">{monthLabel}</span>
+          <button onClick={() => shiftMonth(1)} className="p-1.5 rounded-lg border border-slate-300 hover:bg-slate-50"><ArrowRight className="w-4 h-4" /></button>
+        </div>
+      </div>
+
+      {tab === 'dashboard' && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <FinStat label="Total Pendapatan" value={totalPendapatan} icon={TrendingUp} tone="emerald" />
+            <FinStat label="Total Beban" value={totalBeban} icon={TrendingDown} tone="rose" />
+            <FinStat label={labaBersih < 0 ? 'Rugi Bersih' : 'Laba Bersih'} value={labaBersih} icon={BarChart3} tone={labaBersih < 0 ? 'rose' : 'blue'} />
+            <FinStat label="Saldo Kas" value={saldoKas} icon={Wallet} tone="violet" />
+          </div>
+          <div className="grid lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/70 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-display font-bold text-slate-800">Tren 6 Bulan</h3>
+                <div className="flex items-center gap-3 text-xs font-semibold text-slate-600">
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: '#10B981' }}></span>Pendapatan</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: '#F43F5E' }}></span>Beban</span>
+                </div>
+              </div>
+              {trend.hasData ? (
+                <InteractiveLineChart lines={[{ label: 'Pendapatan', color: '#10B981', series: trend.pend }, { label: 'Beban', color: '#F43F5E', series: trend.beb }]} height={170} />
+              ) : <div className="text-slate-400 text-sm py-12 text-center">Belum ada data untuk ditampilkan.</div>}
+            </div>
+            <div className="bg-white rounded-2xl border border-slate-200/70 p-5">
+              <h3 className="font-display font-bold text-slate-800 mb-3">Posisi Kas per Divisi</h3>
+              <div className="space-y-2.5">
+                {Object.entries(FIN_DIVISIONS).map(([d, info]) => (
+                  <div key={d} className="flex items-center justify-between">
+                    <span className="flex items-center gap-2 text-sm text-slate-600"><span className="w-2.5 h-2.5 rounded-full" style={{ background: info.color }}></span>{info.label}</span>
+                    <span className="text-sm font-bold" style={{ color: kasPerDiv[d] < 0 ? '#E11D48' : '#0F172A' }}>{fmtRupiah(kasPerDiv[d])}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
+                  <span className="text-sm font-semibold text-slate-700">Total Kas</span>
+                  <span className="text-sm font-extrabold text-blue-700">{fmtRupiah(totalKas)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="grid lg:grid-cols-2 gap-4">
+            <FinBreakdown title="Pengeluaran per Kategori" data={bdKeluar} total={totalBeban} color="#F43F5E" empty="Belum ada pengeluaran bulan ini." />
+            <FinBreakdown title="Pemasukan per Kategori" data={bdMasuk} total={totalPendapatan} color="#10B981" empty="Belum ada pemasukan bulan ini." />
+          </div>
+        </div>
+      )}
+
+      {tab === 'transaksi' && (
+        <div className="bg-white rounded-2xl border border-slate-200/70 overflow-hidden">
+          <div className="flex items-center justify-between gap-3 p-4 border-b border-slate-100 flex-wrap">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cari keterangan/kategori…" className="pl-9 pr-3 py-2 rounded-lg border border-slate-300 text-sm w-64 max-w-full" />
+            </div>
+            <button onClick={exportExcel} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-lg font-semibold text-sm flex items-center gap-2"><FileSpreadsheet className="w-4 h-4" /> Export Excel</button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase text-slate-500 bg-slate-50">
+                  <th className="px-4 py-2.5">Tanggal</th><th className="px-4 py-2.5">Divisi</th><th className="px-4 py-2.5">Kategori</th><th className="px-4 py-2.5">Keterangan</th><th className="px-4 py-2.5 text-right">Masuk</th><th className="px-4 py-2.5 text-right">Keluar</th><th className="px-4 py-2.5 text-right">Saldo</th><th className="px-4 py-2.5 text-center">Bukti</th>{canManage && <th className="px-4 py-2.5"></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {tableList.length === 0 ? (
+                  <tr><td colSpan={canManage ? 9 : 8} className="px-4 py-12 text-center text-slate-400">Belum ada transaksi di {monthLabel}{filterDiv !== 'all' ? ` · ${FIN_DIVISIONS[filterDiv]?.label}` : ''}.</td></tr>
+                ) : tableList.map(e => (
+                  <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                    <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{fmtDate(e.tanggal)}</td>
+                    <td className="px-4 py-2.5"><span className="px-2 py-0.5 rounded-md text-xs font-semibold text-white" style={{ backgroundColor: FIN_DIVISIONS[e.divisi]?.color || '#64748B' }}>{FIN_DIVISIONS[e.divisi]?.label || e.divisi}</span></td>
+                    <td className="px-4 py-2.5 text-slate-700">{e.kategori}</td>
+                    <td className="px-4 py-2.5 text-slate-500 max-w-[220px] truncate" title={e.keterangan}>{e.keterangan || '-'}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold text-emerald-600">{e.tipe === 'masuk' ? fmtRupiah(e.jumlah) : ''}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold text-rose-600">{e.tipe === 'keluar' ? fmtRupiah(e.jumlah) : ''}</td>
+                    <td className="px-4 py-2.5 text-right text-slate-500">{fmtRupiah(saldoMap[e.id] || 0)}</td>
+                    <td className="px-4 py-2.5 text-center">{e.buktiUrl ? <a href={e.buktiUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-800 inline-flex"><ExternalLink className="w-4 h-4" /></a> : e.buktiImg ? <Camera className="w-4 h-4 inline text-slate-400" /> : <span className="text-slate-300">-</span>}</td>
+                    {canManage && <td className="px-4 py-2.5"><div className="flex items-center gap-1 justify-end"><button onClick={() => { setEditing(e); setShowInput(true); }} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Edit2 className="w-3.5 h-3.5" /></button><button onClick={() => deleteItem(e)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded"><Trash2 className="w-3.5 h-3.5" /></button></div></td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'labarugi' && (
+        <div className="bg-white rounded-2xl border border-slate-200/70 p-5 sm:p-7 max-w-2xl">
+          <div className="text-center mb-5">
+            <h3 className="font-display font-extrabold text-lg text-slate-900">LAPORAN LABA RUGI</h3>
+            <p className="text-sm text-slate-500">{filterDiv === 'all' ? 'Semua Divisi' : FIN_DIVISIONS[filterDiv]?.label} · {monthLabel}</p>
+          </div>
+          <div>
+            <div className="font-bold text-slate-700 uppercase text-xs tracking-wide pb-1 border-b border-slate-200">Pendapatan</div>
+            {bdMasuk.length === 0 ? <div className="text-slate-400 text-sm py-1.5">Tidak ada pendapatan.</div> : bdMasuk.map(([k, v]) => (
+              <div key={k} className="flex justify-between text-sm py-0.5"><span className="text-slate-600 pl-3">{k}</span><span className="text-slate-800 font-medium">{fmtRupiah(v)}</span></div>
+            ))}
+            <div className="flex justify-between text-sm font-bold pt-1.5 mt-1 border-t border-slate-100"><span>Total Pendapatan</span><span className="text-emerald-600">{fmtRupiah(totalPendapatan)}</span></div>
+            <div className="font-bold text-slate-700 uppercase text-xs tracking-wide pb-1 border-b border-slate-200 pt-5">Beban</div>
+            {bdKeluar.length === 0 ? <div className="text-slate-400 text-sm py-1.5">Tidak ada beban.</div> : bdKeluar.map(([k, v]) => (
+              <div key={k} className="flex justify-between text-sm py-0.5"><span className="text-slate-600 pl-3">{k}</span><span className="text-slate-800 font-medium">{fmtRupiah(v)}</span></div>
+            ))}
+            <div className="flex justify-between text-sm font-bold pt-1.5 mt-1 border-t border-slate-100"><span>Total Beban</span><span className="text-rose-600">{fmtRupiah(totalBeban)}</span></div>
+            <div className={`flex justify-between text-base font-extrabold mt-5 p-3.5 rounded-xl ${labaBersih < 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>
+              <span>{labaBersih < 0 ? 'RUGI BERSIH' : 'LABA BERSIH'}</span><span>{fmtRupiah(labaBersih)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showInput && <FinanceInputModal user={user} editing={editing} onClose={() => { setShowInput(false); setEditing(null); }} onSave={saveItem} />}
+    </div>
+  );
+}
+
 function PageHeader({ title, subtitle, action }) {
   return (
     <div className="flex items-end justify-between mb-6 gap-3 flex-wrap pb-4 border-b border-slate-200/60">
