@@ -13523,6 +13523,168 @@ function FinanceInputModal({ user, editing, onClose, onSave }) {
   );
 }
 
+// Analisis kesehatan keuangan + SWOT otomatis (rule-based dari data cashflow)
+function analyzeFinance(list) {
+  const monthLabelOf = (mk) => { const [y, m] = mk.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); };
+  const monthShortOf = (mk) => { const [y, m] = mk.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'short' }); };
+  const monthsSet = new Set(list.filter(e => e.tanggal).map(e => e.tanggal.slice(0, 7)));
+  const perMonth = [...monthsSet].sort().map(mk => {
+    const l = list.filter(e => (e.tanggal || '').slice(0, 7) === mk);
+    const pend = l.filter(e => e.tipe === 'masuk' && !finIsSaldoAwal(e)).reduce((s, e) => s + (+e.jumlah || 0), 0);
+    const beb = l.filter(e => e.tipe === 'keluar').reduce((s, e) => s + (+e.jumlah || 0), 0);
+    return { mk, label: monthLabelOf(mk), short: monthShortOf(mk), pend, beb, laba: pend - beb, margin: pend > 0 ? (pend - beb) / pend : 0 };
+  }).filter(m => m.pend > 0 || m.beb > 0);
+
+  // Bulan berjalan (kalender saat ini) tidak dihitung penuh agar tren/skor adil
+  const nowMk = monthKey();
+  const evalMonths = (() => { const c = perMonth.filter(m => m.mk < nowMk); return c.length ? c : perMonth; })();
+  const partial = perMonth.find(m => m.mk === nowMk && !evalMonths.includes(m)) || null;
+  const nM = evalMonths.length;
+  const totalPend = evalMonths.reduce((s, m) => s + m.pend, 0);
+  const totalBeb = evalMonths.reduce((s, m) => s + m.beb, 0);
+  const totalLaba = totalPend - totalBeb;
+  const avgMargin = totalPend > 0 ? totalLaba / totalPend : 0;
+  const rugiMonths = evalMonths.filter(m => m.laba < 0);
+  const profitMonths = evalMonths.filter(m => m.laba > 0);
+
+  const divKas = {}, divPend = {};
+  Object.keys(FIN_DIVISIONS).forEach(d => {
+    divKas[d] = list.filter(e => e.divisi === d).reduce((s, e) => s + (e.tipe === 'keluar' ? -1 : 1) * (+e.jumlah || 0), 0);
+    divPend[d] = list.filter(e => e.divisi === d && e.tipe === 'masuk' && !finIsSaldoAwal(e)).reduce((s, e) => s + (+e.jumlah || 0), 0);
+  });
+  const totalKas = Object.values(divKas).reduce((a, b) => a + b, 0);
+  const avgBeban = totalBeb / Math.max(nM, 1);
+  const runway = avgBeban > 0 ? totalKas / avgBeban : 99;
+
+  const bebCat = {};
+  list.filter(e => e.tipe === 'keluar').forEach(e => { const k = e.kategori || 'Lainnya'; bebCat[k] = (bebCat[k] || 0) + (+e.jumlah || 0); });
+  const bebSorted = Object.entries(bebCat).sort((a, b) => b[1] - a[1]);
+  const topBeban = bebSorted[0] || ['—', 0];
+  const gaji = bebCat['Gaji & Bonus'] || 0;
+  const gajiShare = totalPend > 0 ? gaji / totalPend : 0;
+  const pajakTotal = bebCat['Pajak'] || 0;
+
+  const totalDivPend = Object.values(divPend).reduce((a, b) => a + b, 0) || 1;
+  const divShares = Object.entries(divPend).map(([d, v]) => [d, v / totalDivPend]).sort((a, b) => b[1] - a[1]);
+  const topDiv = divShares[0] || ['—', 0];
+  const maxShare = topDiv[1];
+  const smallDivs = divShares.filter(([d, sh]) => sh < 0.2 && divPend[d] > 0).map(([d]) => FIN_DIVISIONS[d]?.label || d);
+
+  const last = evalMonths[evalMonths.length - 1], prev = evalMonths[evalMonths.length - 2];
+  const labaTrend = (last && prev) ? last.laba - prev.laba : 0;
+  const pendGrowth = (last && prev && prev.pend > 0) ? (last.pend - prev.pend) / prev.pend : 0;
+  const best = [...evalMonths].sort((a, b) => b.laba - a.laba)[0];
+
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const sMargin = clamp(avgMargin / 0.30, 0, 1) * 30;
+  const sConsist = (profitMonths.length / Math.max(nM, 1)) * 20;
+  const sRunway = clamp(runway / 3, 0, 1) * 20;
+  const sTrend = !prev ? 9 : (labaTrend > 0 ? 15 : labaTrend === 0 ? 9 : 4);
+  const sDiv = maxShare <= 0.5 ? 15 : maxShare <= 0.7 ? 9 : 4;
+  const score = Math.round(sMargin + sConsist + sRunway + sTrend + sDiv);
+  const label = score >= 80 ? 'Sehat' : score >= 60 ? 'Cukup Sehat' : score >= 40 ? 'Perlu Perhatian' : 'Kritis';
+  const color = score >= 80 ? '#10B981' : score >= 60 ? '#2563EB' : score >= 40 ? '#F59E0B' : '#EF4444';
+  const runwayTxt = runway >= 99 ? '>12' : runway.toFixed(1);
+
+  const S = [], W = [], O = [], T = [];
+  if (profitMonths.length >= Math.ceil(nM * 0.6) && nM > 0) S.push(`Laba positif di ${profitMonths.length} dari ${nM} bulan.`);
+  if (avgMargin >= 0.2) S.push(`Margin laba rata-rata sehat (${Math.round(avgMargin * 100)}%).`);
+  if (totalKas > 0) S.push(`Saldo kas kuat: ${fmtRupiah(totalKas)} (≈ ${runwayTxt} bulan operasional).`);
+  if (best && best.laba > 0) S.push(`Bulan terbaik ${best.label}: laba ${fmtRupiah(best.laba)} — model bisa sangat profitable.`);
+  if (pendGrowth > 0.1) S.push(`Pendapatan bulan terakhir tumbuh ${Math.round(pendGrowth * 100)}% dari bulan sebelumnya.`);
+
+  if (rugiMonths.length > 0) W.push(`Ada ${rugiMonths.length} bulan rugi: ${rugiMonths.map(m => `${m.short} (${fmtRupiah(m.laba)})`).join(', ')}.`);
+  if (avgMargin < 0.15) W.push(`Margin tipis (${Math.round(avgMargin * 100)}%) — sedikit kenaikan beban bisa bikin rugi.`);
+  if (totalBeb > 0 && topBeban[1] / totalBeb >= 0.35) W.push(`Beban "${topBeban[0]}" mendominasi ${Math.round(topBeban[1] / totalBeb * 100)}% total pengeluaran (${fmtRupiah(topBeban[1])}).`);
+  if (gajiShare > 0.4) W.push(`Gaji & bonus makan ${Math.round(gajiShare * 100)}% dari pendapatan — overhead SDM tinggi.`);
+  const negDiv = Object.entries(divKas).filter(([d, v]) => v < 0);
+  if (negDiv.length) W.push(`Saldo kas negatif di divisi: ${negDiv.map(([d]) => FIN_DIVISIONS[d]?.label || d).join(', ')}.`);
+
+  if (best && best.laba > 0 && nM > 0) O.push(`Kalau tiap bulan mendekati ${best.label}, potensi laba ${fmtRupiah(best.laba * nM)}+/periode.`);
+  if (smallDivs.length) O.push(`Divisi ${smallDivs.join(' & ')} masih kecil — ruang tumbuh besar untuk diversifikasi pendapatan.`);
+  if (topBeban[1] > 0) O.push(`Efisiensi: menekan beban "${topBeban[0]}" 15% saja menghemat ≈ ${fmtRupiah(Math.round(topBeban[1] * 0.15))}.`);
+
+  if (maxShare > 0.7) T.push(`Ketergantungan tinggi pada ${FIN_DIVISIONS[topDiv[0]]?.label || topDiv[0]} (${Math.round(maxShare * 100)}% pendapatan) — berisiko bila divisi itu turun.`);
+  if (labaTrend < 0) T.push(`Tren laba menurun: bulan terakhir turun ${fmtRupiah(Math.abs(labaTrend))} dari bulan sebelumnya.`);
+  if (runway < 3 && runway < 99) T.push(`Runway kas hanya ≈ ${runwayTxt} bulan — rawan bila ada rugi beruntun.`);
+  if (totalPend > 0 && pajakTotal / totalPend < 0.005) T.push(`Pencadangan pajak sangat kecil (${fmtRupiah(pajakTotal)}) — risiko kewajiban pajak menumpuk.`);
+
+  const evaluasi = `Selama ${nM} bulan tercatat, total pendapatan ${fmtRupiah(totalPend)} dan beban ${fmtRupiah(totalBeb)}, menghasilkan ${totalLaba >= 0 ? 'laba' : 'rugi'} bersih ${fmtRupiah(totalLaba)} (margin ${Math.round(avgMargin * 100)}%). ${profitMonths.length} dari ${nM} bulan untung${rugiMonths.length ? `, namun ${rugiMonths.map(m => m.short).join(' & ')} merugi` : ''}. Saldo kas saat ini ${fmtRupiah(totalKas)} setara ±${runwayTxt} bulan biaya operasional. Pendapatan paling bergantung pada ${FIN_DIVISIONS[topDiv[0]]?.label || topDiv[0]} (${Math.round(maxShare * 100)}%), dan pengeluaran terbesar di "${topBeban[0]}".${partial ? ` (Bulan ${partial.short} masih berjalan — belum dihitung penuh.)` : ''}`;
+
+  const R = [];
+  if (rugiMonths.length) R.push(`Audit bulan rugi (${rugiMonths.map(m => m.short).join(', ')}): pastikan komisi/beban yang dibayar tidak melebihi pendapatan yang masuk di bulan yang sama.`);
+  if (totalBeb > 0) R.push(`Tetapkan plafon untuk "${topBeban[0]}" (kini ${Math.round(topBeban[1] / totalBeb * 100)}% beban). Target hemat 10–15% = ${fmtRupiah(Math.round(topBeban[1] * 0.12))}.`);
+  if (maxShare > 0.6) R.push(`Kurangi ketergantungan pada ${FIN_DIVISIONS[topDiv[0]]?.label || topDiv[0]}: dorong ${smallDivs.length ? smallDivs.join(' & ') : 'divisi lain'} naik agar pendapatan lebih merata.`);
+  R.push(`Sisihkan 0,5–1% pendapatan tiap bulan untuk pajak & dana darurat (jaga runway minimal 3 bulan beban = ${fmtRupiah(Math.round(avgBeban * 3))}).`);
+  if (gajiShare > 0.4) R.push(`Tinjau struktur gaji/bonus (${Math.round(gajiShare * 100)}% dari pendapatan): kaitkan bonus ke target penjualan agar beban ikut turun saat omzet turun.`);
+  if (best && best.laba > 0) R.push(`Jadikan ${best.label} (laba ${fmtRupiah(best.laba)}) sebagai benchmark target bulanan — pelajari apa yang bikin bulan itu bagus lalu ulangi.`);
+
+  return { perMonth, nM, totalPend, totalBeb, totalLaba, avgMargin, rugiMonths, profitMonths, totalKas, runway, runwayTxt, divKas, divShares, topDiv, maxShare, topBeban, bebSorted, score, label, color, S, W, O, T, evaluasi, R, best, scoreParts: { sMargin, sConsist, sRunway, sTrend, sDiv } };
+}
+
+function FinanceAnalysis({ list, scopeLabel }) {
+  const a = useMemo(() => analyzeFinance(list), [list]);
+  if (a.nM === 0) return <div className="text-slate-400 text-sm py-12 text-center bg-white rounded-2xl border border-slate-200/70">Belum ada cukup data untuk analisis. Input transaksi atau impor data dulu.</div>;
+  const quad = (title, arr, bg, fg, Icon) => (
+    <div className="rounded-2xl border p-4" style={{ borderColor: fg + '33', backgroundColor: bg }}>
+      <div className="flex items-center gap-2 mb-2 font-bold text-sm" style={{ color: fg }}><Icon className="w-4 h-4" /> {title}</div>
+      {arr.length === 0 ? <div className="text-xs text-slate-400">Tidak ada poin menonjol.</div> : <ul className="space-y-1.5">{arr.map((t, i) => <li key={i} className="text-xs text-slate-600 leading-relaxed flex gap-1.5"><span style={{ color: fg }}>•</span><span>{t}</span></li>)}</ul>}
+    </div>
+  );
+  return (
+    <div className="space-y-5">
+      <div className="bg-white rounded-2xl border border-slate-200/70 p-5">
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Skor Kesehatan Keuangan · {scopeLabel}</div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-4xl font-extrabold" style={{ color: a.color }}>{a.score}</span>
+              <span className="text-slate-400 font-semibold">/100</span>
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold text-white ml-1" style={{ backgroundColor: a.color }}>{a.label}</span>
+            </div>
+          </div>
+          <div className="flex-1 min-w-[220px] max-w-md">
+            {[['Margin laba', a.scoreParts.sMargin, 30], ['Konsistensi untung', a.scoreParts.sConsist, 20], ['Ketahanan kas', a.scoreParts.sRunway, 20], ['Tren laba', a.scoreParts.sTrend, 15], ['Diversifikasi', a.scoreParts.sDiv, 15]].map(([lab, val, mx]) => (
+              <div key={lab} className="flex items-center gap-2 mb-1">
+                <span className="text-xs text-slate-500 w-32">{lab}</span>
+                <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(val / mx) * 100}%`, backgroundColor: a.color }}></div></div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="mt-3 h-2.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full transition-all" style={{ width: `${a.score}%`, backgroundColor: a.color }}></div></div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200/70 p-5">
+        <h3 className="font-display font-bold text-slate-800 mb-2 flex items-center gap-2"><Activity className="w-4 h-4 text-blue-600" /> Evaluasi</h3>
+        <p className="text-sm text-slate-600 leading-relaxed">{a.evaluasi}</p>
+      </div>
+
+      <div>
+        <h3 className="font-display font-bold text-slate-800 mb-3">Analisis SWOT Keuangan</h3>
+        <div className="grid sm:grid-cols-2 gap-3">
+          {quad('Kekuatan (Strengths)', a.S, '#ECFDF5', '#059669', TrendingUp)}
+          {quad('Kelemahan (Weaknesses)', a.W, '#FEF2F2', '#DC2626', TrendingDown)}
+          {quad('Peluang (Opportunities)', a.O, '#EFF6FF', '#2563EB', Sparkles)}
+          {quad('Ancaman (Threats)', a.T, '#FFF7ED', '#EA580C', AlertCircle)}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200/70 p-5">
+        <h3 className="font-display font-bold text-slate-800 mb-3 flex items-center gap-2"><Lightbulb className="w-4 h-4 text-amber-500" /> Rekomendasi & Langkah</h3>
+        <ol className="space-y-2.5">
+          {a.R.map((r, i) => (
+            <li key={i} className="flex gap-3 text-sm text-slate-600">
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-50 text-blue-700 font-bold text-xs flex items-center justify-center">{i + 1}</span>
+              <span className="leading-relaxed">{r}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
 function KeuanganView({ user, allUsers }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -13621,7 +13783,7 @@ function KeuanganView({ user, allUsers }) {
 
   if (loading) return <div className="text-slate-400 text-sm">Memuat data keuangan…</div>;
 
-  const TABS = [['dashboard', 'Dashboard', BarChart3], ['transaksi', 'Cash Flow', Receipt], ['labarugi', 'Laba Rugi', FileSpreadsheet]];
+  const TABS = [['dashboard', 'Dashboard', BarChart3], ['transaksi', 'Cash Flow', Receipt], ['labarugi', 'Laba Rugi', FileSpreadsheet], ['analisis', 'Analisis & SWOT', Activity]];
   const totalKas = Object.values(kasPerDiv).reduce((a, b) => a + b, 0);
 
   return (
@@ -13758,6 +13920,8 @@ function KeuanganView({ user, allUsers }) {
           </div>
         </div>
       )}
+
+      {tab === 'analisis' && <FinanceAnalysis list={items.filter(inDiv)} scopeLabel={filterDiv === 'all' ? 'Semua Divisi' : FIN_DIVISIONS[filterDiv]?.label} />}
 
       {showInput && <FinanceInputModal user={user} editing={editing} onClose={() => { setShowInput(false); setEditing(null); }} onSave={saveItem} />}
     </div>
