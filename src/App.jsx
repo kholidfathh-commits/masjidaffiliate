@@ -212,9 +212,49 @@ async function loadDailyReports() {
   return recs;
 }
 
+// GMV divisi (gmv:daily) — per-record.
+const GMV_REC_PREFIX = 'gmv:rec:';
+async function loadGmvEntries() {
+  const recs = await storage.listByPrefix(GMV_REC_PREFIX);
+  let legacy = null;
+  try { legacy = await storage.get('gmv:daily'); } catch { legacy = null; }
+  if (Array.isArray(legacy) && legacy.length) {
+    const have = new Set(recs.map(r => r && r.id));
+    for (const item of legacy) {
+      if (item && item.id != null && !have.has(item.id)) {
+        const ok = await storage.set(GMV_REC_PREFIX + item.id, item);
+        if (ok) { recs.push(item); have.add(item.id); }
+      }
+    }
+    const allMigrated = legacy.every(item => !item || item.id == null || have.has(item.id));
+    if (allMigrated) { await storage.set('gmv:daily:archived-v2', legacy); await storage.delete('gmv:daily'); }
+  }
+  return recs;
+}
+
+// GMV akun affiliator (affiliate-gmv:daily) — per-record.
+const AFF_REC_PREFIX = 'affiliate-gmv:rec:';
+async function loadAffEntries() {
+  const recs = await storage.listByPrefix(AFF_REC_PREFIX);
+  let legacy = null;
+  try { legacy = await storage.get('affiliate-gmv:daily'); } catch { legacy = null; }
+  if (Array.isArray(legacy) && legacy.length) {
+    const have = new Set(recs.map(r => r && r.id));
+    for (const item of legacy) {
+      if (item && item.id != null && !have.has(item.id)) {
+        const ok = await storage.set(AFF_REC_PREFIX + item.id, item);
+        if (ok) { recs.push(item); have.add(item.id); }
+      }
+    }
+    const allMigrated = legacy.every(item => !item || item.id == null || have.has(item.id));
+    if (allMigrated) { await storage.set('affiliate-gmv:daily:archived-v2', legacy); await storage.delete('affiliate-gmv:daily'); }
+  }
+  return recs;
+}
+
 // Daftar modul per-record (key backup logis → loader & prefix baris). Tambah modul baru di sini.
-const PER_RECORD_LOADERS = { 'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports };
-const PER_RECORD_PREFIX = { 'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX };
+const PER_RECORD_LOADERS = { 'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries };
+const PER_RECORD_PREFIX = { 'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX };
 
 // ============ CRYPTO (PBKDF2 password hashing) ============
 async function hashPassword(password, salt) {
@@ -2231,13 +2271,13 @@ function Dashboard({ user, allUsers, setView, settings }) {
       setDailyReports(await loadDailyReports());
       setCalendarEvents(await storage.getList('calendar:all'));
       await syncInternalFromAccounts(); // GMV akun affiliator otomatis masuk divisi internal
-      setGmvEntries(await storage.getList('gmv:daily'));
+      setGmvEntries(await loadGmvEntries());
       setGmvTargets((await storage.get('gmv:targets')) || {});
       setAttendanceRecs(await loadAttendanceRecs());
       setProblems(await storage.getList('problems:all'));
       setKpiConfig((await storage.get('kpi:config')) || DEFAULT_KPI_CONFIG);
       setAffAccounts(await storage.getList('affiliate-accounts:all'));
-      setAffEntries(await storage.getList('affiliate-gmv:daily'));
+      setAffEntries(await loadAffEntries());
       setPartnerFeedback(await storage.getList('partner-feedback:all'));
       setExternalSwot(await storage.get('swot:external'));
       setLastBackup(await storage.get('backup:last'));
@@ -6191,25 +6231,24 @@ function MiniBarChart({ series, color }) {
 // Sinkron SEMUA tanggal: total GMV akun affiliator → GMV divisi "internal" (anti input dobel).
 // Dipanggil saat Dashboard/GMV/Akun Affiliator dimuat & setiap ada perubahan input akun.
 async function syncInternalFromAccounts() {
-  const accEntries = await storage.getList('affiliate-gmv:daily');
+  const accEntries = await loadAffEntries();
   const byDate = {};
   accEntries.forEach(e => { if (e.date) byDate[e.date] = (byDate[e.date] || 0) + (Number(e.gmv) || 0); });
   if (Object.keys(byDate).length === 0) return false;
-  const divList = await storage.getList('gmv:daily');
+  const divList = await loadGmvEntries();
   let changed = false;
-  Object.entries(byDate).forEach(([date, total]) => {
+  for (const [date, total] of Object.entries(byDate)) {
     const ex = divList.find(x => x.division === 'internal' && x.date === date);
     if (ex) {
       if ((Number(ex.gmv) || 0) !== total) {
-        ex.gmv = total; ex.autoSynced = true; ex.inputByName = 'auto (akun affiliator)'; ex.updatedAt = new Date().toISOString();
-        changed = true;
+        const upd = { ...ex, gmv: total, autoSynced: true, inputByName: 'auto (akun affiliator)', updatedAt: new Date().toISOString() };
+        await storage.set(GMV_REC_PREFIX + upd.id, upd); changed = true;
       }
     } else {
-      divList.unshift({ id: uid(), division: 'internal', date, gmv: total, autoSynced: true, inputByName: 'auto (akun affiliator)', createdAt: new Date().toISOString() });
-      changed = true;
+      const rec = { id: uid(), division: 'internal', date, gmv: total, autoSynced: true, inputByName: 'auto (akun affiliator)', createdAt: new Date().toISOString() };
+      await storage.set(GMV_REC_PREFIX + rec.id, rec); changed = true;
     }
-  });
-  if (changed) await storage.set('gmv:daily', divList);
+  }
   return changed;
 }
 
@@ -6313,7 +6352,7 @@ function GmvView({ user, allUsers }) {
 
   const load = async () => {
     await syncInternalFromAccounts();
-    setEntries(await storage.getList('gmv:daily'));
+    setEntries(await loadGmvEntries());
     setTargets((await storage.get('gmv:targets')) || {});
     setLoading(false);
   };
@@ -6360,17 +6399,18 @@ function GmvView({ user, allUsers }) {
 
   const saveEntry = async (data) => {
     try {
-      let list = await storage.getList('gmv:daily'); // melempar error kalau gagal baca → batal simpan (lindungi data)
-      const existing = list.find(e => e.date === data.date && e.division === data.division && (!editing || e.id !== editing.id));
+      const list = await loadGmvEntries(); // baca utk cek duplikat tanggal+divisi (throw → batal simpan, lindungi data)
+      let rec;
       if (editing) {
-        list = list.map(e => e.id === editing.id ? { ...e, ...data, updatedAt: new Date().toISOString() } : e);
-      } else if (existing) {
-        // Upsert: kalau sudah ada entry tanggal+divisi itu, timpa
-        list = list.map(e => e.id === existing.id ? { ...e, ...data, inputById: user.id, inputByName: user.name, updatedAt: new Date().toISOString() } : e);
+        rec = { ...editing, ...data, updatedAt: new Date().toISOString() };
       } else {
-        list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
+        const existing = list.find(e => e.date === data.date && e.division === data.division);
+        rec = existing
+          ? { ...existing, ...data, inputById: user.id, inputByName: user.name, updatedAt: new Date().toISOString() }
+          : { id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() };
       }
-      await storage.set('gmv:daily', list);
+      const ok = await storage.set(GMV_REC_PREFIX + rec.id, rec);
+      if (!ok) throw new Error('Gagal menyimpan ke server.');
       await logActivity(`update GMV ${GMV_DIVISIONS[data.division].label} ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
       setShowInput(false); setEditing(null); load();
     } catch (err) {
@@ -6380,8 +6420,8 @@ function GmvView({ user, allUsers }) {
   const deleteEntry = async (e) => {
     if (!confirm(`Hapus data GMV ${GMV_DIVISIONS[e.division]?.label} tanggal ${e.date}?`)) return;
     try {
-      const fresh = await storage.getList('gmv:daily');
-      await storage.set('gmv:daily', fresh.filter(x => x.id !== e.id));
+      const ok = await storage.delete(GMV_REC_PREFIX + e.id);
+      if (!ok) throw new Error('Gagal menghapus di server.');
       load();
     } catch (err) {
       alert('⚠️ Gagal menghapus: ' + (err?.message || err) + '\n\nCoba lagi saat koneksi stabil.');
@@ -6745,7 +6785,7 @@ function AffiliateAccountsView({ user, allUsers }) {
   const load = async () => {
     await syncInternalFromAccounts(); // pastikan dashboard & divisi internal selalu sama dengan total akun
     setAccounts(await storage.getList('affiliate-accounts:all'));
-    setEntries(await storage.getList('affiliate-gmv:daily'));
+    setEntries(await loadAffEntries());
     const g = await storage.get('affiliate:goal');
     setGoal(g && g[mKey] ? g[mKey] : DEFAULT_AFFILIATE_GOAL);
     setLoading(false);
@@ -6784,7 +6824,8 @@ function AffiliateAccountsView({ user, allUsers }) {
   const deleteAcct = async (a) => {
     if (!confirm(`Hapus akun "${a.name}"? Data GMV-nya juga akan hilang.`)) return;
     await storage.set('affiliate-accounts:all', (await storage.getList('affiliate-accounts:all')).filter(x => x.id !== a.id));
-    await storage.set('affiliate-gmv:daily', (await storage.getList('affiliate-gmv:daily')).filter(x => x.accountId !== a.id));
+    const affEntries = await loadAffEntries();
+    for (const en of affEntries.filter(x => x.accountId === a.id)) await storage.delete(AFF_REC_PREFIX + en.id);
     load();
   };
   const saveTarget = async (accId, value) => {
@@ -6796,14 +6837,13 @@ function AffiliateAccountsView({ user, allUsers }) {
   };
   const saveEntry = async (data) => {
     try {
-      let list = await storage.getList('affiliate-gmv:daily'); // melempar error kalau gagal baca → batal simpan (lindungi data)
+      const list = await loadAffEntries(); // baca utk cek duplikat akun+tanggal (throw → batal simpan, lindungi data)
       const existing = list.find(e => e.accountId === data.accountId && e.date === data.date);
-      if (existing) {
-        list = list.map(e => e.id === existing.id ? { ...e, ...data, inputById: user.id, inputByName: user.name, updatedAt: new Date().toISOString() } : e);
-      } else {
-        list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
-      }
-      await storage.set('affiliate-gmv:daily', list);
+      const rec = existing
+        ? { ...existing, ...data, inputById: user.id, inputByName: user.name, updatedAt: new Date().toISOString() }
+        : { id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() };
+      const ok = await storage.set(AFF_REC_PREFIX + rec.id, rec);
+      if (!ok) throw new Error('Gagal menyimpan ke server.');
       await syncInternalFromAccounts(); // dashboard & Target GMV divisi internal ikut ter-update otomatis
       await logActivity(`update GMV akun ${data.accountName} ${data.date}: ${fmtRupiah(data.gmv)}`, user.name);
       setInputAcct(null); load();
@@ -6815,8 +6855,8 @@ function AffiliateAccountsView({ user, allUsers }) {
   const deleteEntry = async (e) => {
     if (!confirm(`Hapus GMV ${e.accountName || ''} tanggal ${fmtDate(e.date)} (${fmtRupiah(e.gmv)})?`)) return;
     try {
-      const fresh = await storage.getList('affiliate-gmv:daily');
-      await storage.set('affiliate-gmv:daily', fresh.filter(x => x.id !== e.id));
+      const ok = await storage.delete(AFF_REC_PREFIX + e.id);
+      if (!ok) throw new Error('Gagal menghapus di server.');
       await syncInternalFromAccounts();
       load();
     } catch (err) {
@@ -7195,10 +7235,10 @@ function KpiView({ user, allUsers }) {
     setTasks(await storage.getList('tasks:all'));
     setAttendance(await loadAttendanceRecs());
     setReports(await loadDailyReports());
-    setGmvEntries(await storage.getList('gmv:daily'));
+    setGmvEntries(await loadGmvEntries());
     setGmvTargets((await storage.get('gmv:targets')) || {});
     setAffAccounts(await storage.getList('affiliate-accounts:all'));
-    setAffEntries(await storage.getList('affiliate-gmv:daily'));
+    setAffEntries(await loadAffEntries());
     setKpiTemplates(await storage.getList('daily-report-templates:all'));
     setKpiLeaves(await storage.getList('leave-requests:all'));
     setCfg(normalizeKpiConfig(await storage.get('kpi:config')));
@@ -9885,8 +9925,8 @@ function LeaderboardView({ allUsers }) {
     (async () => {
       const [tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, templates, leaves, savedCfg] = await Promise.all([
         storage.getList('tasks:all'), loadAttendanceRecs(), loadDailyReports(),
-        storage.getList('gmv:daily'), storage.get('gmv:targets'), storage.getList('affiliate-accounts:all'),
-        storage.getList('affiliate-gmv:daily'), storage.getList('daily-report-templates:all'), storage.getList('leave-requests:all'), storage.get('kpi:config')
+        loadGmvEntries(), storage.get('gmv:targets'), storage.getList('affiliate-accounts:all'),
+        loadAffEntries(), storage.getList('daily-report-templates:all'), storage.getList('leave-requests:all'), storage.get('kpi:config')
       ]);
       setData({ tasks, attendance, reports, gmvEntries, gmvTargets: gmvTargets || {}, affAccounts, affEntries, allUsers, templates, leaves });
       setCfg(normalizeKpiConfig(savedCfg));
