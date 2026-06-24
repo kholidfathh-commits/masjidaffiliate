@@ -73,8 +73,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const LOCAL_PREFIX = 'alkahfi:';
 const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
-// Batas atas range untuk query prefix (pakai index primary key 'key', bukan LIKE → cepat & tahan locale).
-const _pfxEnd = (p) => p.slice(0, -1) + String.fromCharCode(p.charCodeAt(p.length - 1) + 1);
 const storage = {
   // PENTING: kalau baca dari server GAGAL (bukan data kosong beneran), get() MELEMPAR error setelah 3x coba.
   // Tujuannya supaya operasi "baca → ubah → tulis" TIDAK menimpa seluruh data dengan array kosong saat koneksi ngadat.
@@ -134,9 +132,11 @@ const storage = {
       let batch = null, lastErr = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
+          // LIKE 'prefix%' = pencocokan pola (TAHAN collation/locale). JANGAN ganti ke range gte/lt:
+          // di collation locale-aware Supabase, ':' vs ';' bisa tidak urut ASCII → baris tidak ketemu.
           const { data, error } = await supabase.from('kv_store')
             .select('value')
-            .gte('key', prefix).lt('key', _pfxEnd(prefix))
+            .like('key', prefix + '%')
             .order('key', { ascending: true })
             .range(from, from + PAGE - 1);
           if (error) { lastErr = error; await _sleep(350 * (attempt + 1)); continue; }
@@ -156,7 +156,7 @@ const storage = {
   // Hapus semua baris dgn prefix (sekali query).
   async deleteByPrefix(prefix) {
     try {
-      const { error } = await supabase.from('kv_store').delete().gte('key', prefix).lt('key', _pfxEnd(prefix));
+      const { error } = await supabase.from('kv_store').delete().like('key', prefix + '%');
       if (error) { console.error('Supabase deleteByPrefix error:', prefix, error.message); return false; }
       return true;
     } catch (e) { console.error('Supabase deleteByPrefix failed:', prefix, e); return false; }
