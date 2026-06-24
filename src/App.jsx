@@ -252,9 +252,69 @@ async function loadAffEntries() {
   return recs;
 }
 
+// Tiket (tasks:all) — per-record.
+const TASK_REC_PREFIX = 'tasks:rec:';
+async function loadTasks() {
+  const recs = await storage.listByPrefix(TASK_REC_PREFIX);
+  let legacy = null;
+  try { legacy = await storage.get('tasks:all'); } catch { legacy = null; }
+  if (Array.isArray(legacy) && legacy.length) {
+    const have = new Set(recs.map(r => r && r.id));
+    for (const item of legacy) {
+      if (item && item.id != null && !have.has(item.id)) {
+        const ok = await storage.set(TASK_REC_PREFIX + item.id, item);
+        if (ok) { recs.push(item); have.add(item.id); }
+      }
+    }
+    const allMigrated = legacy.every(item => !item || item.id == null || have.has(item.id));
+    if (allMigrated) { await storage.set('tasks:all:archived-v2', legacy); await storage.delete('tasks:all'); }
+  }
+  return recs;
+}
+
+// Izin (leave-requests:all) — per-record.
+const LEAVE_REC_PREFIX = 'leave-requests:rec:';
+async function loadLeaves() {
+  const recs = await storage.listByPrefix(LEAVE_REC_PREFIX);
+  let legacy = null;
+  try { legacy = await storage.get('leave-requests:all'); } catch { legacy = null; }
+  if (Array.isArray(legacy) && legacy.length) {
+    const have = new Set(recs.map(r => r && r.id));
+    for (const item of legacy) {
+      if (item && item.id != null && !have.has(item.id)) {
+        const ok = await storage.set(LEAVE_REC_PREFIX + item.id, item);
+        if (ok) { recs.push(item); have.add(item.id); }
+      }
+    }
+    const allMigrated = legacy.every(item => !item || item.id == null || have.has(item.id));
+    if (allMigrated) { await storage.set('leave-requests:all:archived-v2', legacy); await storage.delete('leave-requests:all'); }
+  }
+  return recs;
+}
+
+// Kalender (calendar:all) — per-record.
+const CAL_REC_PREFIX = 'calendar:rec:';
+async function loadCalendar() {
+  const recs = await storage.listByPrefix(CAL_REC_PREFIX);
+  let legacy = null;
+  try { legacy = await storage.get('calendar:all'); } catch { legacy = null; }
+  if (Array.isArray(legacy) && legacy.length) {
+    const have = new Set(recs.map(r => r && r.id));
+    for (const item of legacy) {
+      if (item && item.id != null && !have.has(item.id)) {
+        const ok = await storage.set(CAL_REC_PREFIX + item.id, item);
+        if (ok) { recs.push(item); have.add(item.id); }
+      }
+    }
+    const allMigrated = legacy.every(item => !item || item.id == null || have.has(item.id));
+    if (allMigrated) { await storage.set('calendar:all:archived-v2', legacy); await storage.delete('calendar:all'); }
+  }
+  return recs;
+}
+
 // Daftar modul per-record (key backup logis → loader & prefix baris). Tambah modul baru di sini.
-const PER_RECORD_LOADERS = { 'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries };
-const PER_RECORD_PREFIX = { 'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX };
+const PER_RECORD_LOADERS = { 'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar };
+const PER_RECORD_PREFIX = { 'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX };
 
 // ============ CRYPTO (PBKDF2 password hashing) ============
 async function hashPassword(password, salt) {
@@ -1776,10 +1836,10 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
   useEffect(() => {
     let stopped = false;
     const loadNotifs = async () => {
-      const tasks = await storage.getList('tasks:all');
+      const tasks = await loadTasks();
       const announcements = await storage.getList('announcements:all');
-      const calEvents = await storage.getList('calendar:all');
-      const leaveReqs = await storage.getList('leave-requests:all');
+      const calEvents = await loadCalendar();
+      const leaveReqs = await loadLeaves();
       const lastView = await storage.get('ui:last-notif-view', false);
       if (stopped) return;
       setLastNotifView(lastView?.value || new Date(Date.now() - 7 * 86400000).toISOString());
@@ -1934,7 +1994,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
     }
     const q = searchQuery.toLowerCase();
     (async () => {
-      const tasks = await storage.getList('tasks:all');
+      const tasks = await loadTasks();
       const creators = await storage.getList('creators:all');
       setSearchResults({
         tasks: tasks.filter(t => can.canSeeTask(user, t, allUsers) &&
@@ -2264,12 +2324,12 @@ function Dashboard({ user, allUsers, setView, settings }) {
 
   useEffect(() => {
     (async () => {
-      setTasks(await storage.getList('tasks:all'));
+      setTasks(await loadTasks());
       setCreators(await storage.getList('creators:all'));
       setActivities(await storage.getList('activities:all'));
       setAnnouncements(await storage.getList('announcements:all'));
       setDailyReports(await loadDailyReports());
-      setCalendarEvents(await storage.getList('calendar:all'));
+      setCalendarEvents(await loadCalendar());
       await syncInternalFromAccounts(); // GMV akun affiliator otomatis masuk divisi internal
       setGmvEntries(await loadGmvEntries());
       setGmvTargets((await storage.get('gmv:targets')) || {});
@@ -2282,7 +2342,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
       setExternalSwot(await storage.get('swot:external'));
       setLastBackup(await storage.get('backup:last'));
       setReportTemplates(await storage.getList('daily-report-templates:all'));
-      setLeaves(await storage.getList('leave-requests:all'));
+      setLeaves(await loadLeaves());
       await loadTargets();
     })();
   }, []);
@@ -4696,7 +4756,7 @@ function TasksView({ user, allUsers }) {
   const [viewing, setViewing] = useState(null);
   const [filter, setFilter] = useState({ status: 'all', assignee: 'all', search: '' });
 
-  const load = async () => setTasks(await storage.getList('tasks:all'));
+  const load = async () => setTasks(await loadTasks());
   useEffect(() => {
     load();
     const iv = setInterval(load, 10000); // auto-refresh tiap 10 detik
@@ -4712,33 +4772,44 @@ function TasksView({ user, allUsers }) {
   }, [tasks]);
 
   const handleSave = async (data) => {
-    let list = await storage.getList('tasks:all');
-    if (editing) {
-      list = list.map(t => t.id === editing.id ? { ...t, ...data, updatedAt: new Date().toISOString() } : t);
-    } else {
-      const assignee = allUsers.find(u => u.id === data.assigneeId);
-      list.unshift({
-        id: uid(), ...data, assigneeName: assignee?.name || '-',
-        createdById: user.id, createdByName: user.name, createdAt: new Date().toISOString(),
-        comments: []
-      });
-      await logActivity(`memberi tugas "${data.title}" ke ${assignee?.name}`, user.name);
+    try {
+      let rec;
+      if (editing) {
+        rec = { ...editing, ...data, updatedAt: new Date().toISOString() };
+      } else {
+        const assignee = allUsers.find(u => u.id === data.assigneeId);
+        rec = {
+          id: uid(), ...data, assigneeName: assignee?.name || '-',
+          createdById: user.id, createdByName: user.name, createdAt: new Date().toISOString(),
+          comments: []
+        };
+      }
+      const ok = await storage.set(TASK_REC_PREFIX + rec.id, rec);
+      if (!ok) throw new Error('Gagal menyimpan ke server.');
+      if (!editing) await logActivity(`memberi tugas "${data.title}" ke ${rec.assigneeName}`, user.name);
+      setShowForm(false); setEditing(null); load();
+    } catch (err) {
+      alert('⚠️ Gagal menyimpan tugas: ' + (err?.message || err) + '\n\nCoba lagi saat koneksi stabil.');
     }
-    await storage.set('tasks:all', list);
-    setShowForm(false); setEditing(null); load();
   };
   const handleDelete = async (t) => {
     if (!confirm(`Hapus tugas "${t.title}"?`)) return;
-    const list = (await storage.getList('tasks:all')).filter(x => x.id !== t.id);
-    await storage.set('tasks:all', list);
+    const ok = await storage.delete(TASK_REC_PREFIX + t.id);
+    if (!ok) { alert('Gagal menghapus tugas. Coba lagi.'); return; }
     if (viewing?.id === t.id) setViewing(null);
     load();
   };
   const patchTask = async (id, patch, activity) => {
-    const list = (await storage.getList('tasks:all')).map(x => x.id === id ? { ...x, ...patch } : x);
-    await storage.set('tasks:all', list);
-    if (activity) await logActivity(activity, user.name);
-    load();
+    try {
+      const cur = await storage.get(TASK_REC_PREFIX + id);
+      if (!cur) return;
+      const ok = await storage.set(TASK_REC_PREFIX + id, { ...cur, ...patch });
+      if (!ok) throw new Error('gagal simpan');
+      if (activity) await logActivity(activity, user.name);
+      load();
+    } catch (e) {
+      alert('⚠️ Gagal menyimpan perubahan tugas (koneksi). Coba lagi.');
+    }
   };
   const updateStatus = async (t, status) => {
     const now = new Date().toISOString();
@@ -4783,20 +4854,20 @@ function TasksView({ user, allUsers }) {
       text: text.trim(),
       createdAt: new Date().toISOString()
     };
-    const list = (await storage.getList('tasks:all')).map(t =>
-      t.id === task.id ? { ...t, comments: [...(t.comments || []), newComment] } : t
-    );
-    await storage.set('tasks:all', list);
+    const cur = await storage.get(TASK_REC_PREFIX + task.id);
+    if (!cur) return;
+    const ok = await storage.set(TASK_REC_PREFIX + task.id, { ...cur, comments: [...(cur.comments || []), newComment] });
+    if (!ok) { alert('Gagal menyimpan komentar. Coba lagi.'); return; }
     await logActivity(`komen di tugas "${task.title}"`, user.name);
     load();
   };
 
   const handleDeleteComment = async (task, commentId) => {
     if (!confirm('Hapus komentar ini?')) return;
-    const list = (await storage.getList('tasks:all')).map(t =>
-      t.id === task.id ? { ...t, comments: (t.comments || []).filter(c => c.id !== commentId) } : t
-    );
-    await storage.set('tasks:all', list);
+    const cur = await storage.get(TASK_REC_PREFIX + task.id);
+    if (!cur) return;
+    const ok = await storage.set(TASK_REC_PREFIX + task.id, { ...cur, comments: (cur.comments || []).filter(c => c.id !== commentId) });
+    if (!ok) { alert('Gagal menghapus komentar. Coba lagi.'); return; }
     load();
   };
 
@@ -7232,7 +7303,7 @@ function KpiView({ user, allUsers }) {
   const [expanded, setExpanded] = useState(null);
 
   const load = async () => {
-    setTasks(await storage.getList('tasks:all'));
+    setTasks(await loadTasks());
     setAttendance(await loadAttendanceRecs());
     setReports(await loadDailyReports());
     setGmvEntries(await loadGmvEntries());
@@ -7240,7 +7311,7 @@ function KpiView({ user, allUsers }) {
     setAffAccounts(await storage.getList('affiliate-accounts:all'));
     setAffEntries(await loadAffEntries());
     setKpiTemplates(await storage.getList('daily-report-templates:all'));
-    setKpiLeaves(await storage.getList('leave-requests:all'));
+    setKpiLeaves(await loadLeaves());
     setCfg(normalizeKpiConfig(await storage.get('kpi:config')));
     setLoading(false);
   };
@@ -8564,7 +8635,7 @@ function AttendanceView({ user, allUsers }) {
     try {
       const list = await loadAttendanceRecs();
       setRecords(list);
-      setLeaves(await storage.getList('leave-requests:all'));
+      setLeaves(await loadLeaves());
       const cfg = await storage.get('attendance:config');
       if (cfg) setConfig({ ...DEFAULT_ATTENDANCE_CONFIG, ...cfg });
     } catch (e) {
@@ -8708,26 +8779,28 @@ function AttendanceView({ user, allUsers }) {
     return false;
   };
   const submitIzin = async (data) => {
-    const list = await storage.getList('leave-requests:all');
-    list.unshift({
+    const rec = {
       id: uid(), userId: user.id, userName: user.name, division: user.division || '',
       type: data.type, date: data.date, reason: data.reason,
       status: 'pending', createdAt: new Date().toISOString()
-    });
-    await storage.set('leave-requests:all', list.slice(0, 1000));
+    };
+    const ok = await storage.set(LEAVE_REC_PREFIX + rec.id, rec);
+    if (!ok) { alert('Gagal mengajukan izin. Coba lagi saat koneksi stabil.'); return; }
     await logActivity(`mengajukan ${data.type === 'sakit' ? 'izin sakit' : 'izin'} untuk ${fmtDate(data.date)}`, user.name);
     setShowIzin(false); await load();
   };
   const cancelIzin = async (l) => {
     if (!confirm(`Batalkan pengajuan izin ${fmtDate(l.date)}?`)) return;
-    await storage.set('leave-requests:all', (await storage.getList('leave-requests:all')).filter(x => x.id !== l.id));
+    const ok = await storage.delete(LEAVE_REC_PREFIX + l.id);
+    if (!ok) { alert('Gagal membatalkan izin. Coba lagi.'); return; }
     setLeaveDetail(null); await load();
   };
   const decideIzin = async (l, status) => {
     const note = status === 'rejected' ? (prompt('Alasan penolakan (opsional):') || '') : '';
-    const list = (await storage.getList('leave-requests:all')).map(x => x.id === l.id
-      ? { ...x, status, note, decidedById: user.id, decidedByName: user.name, decidedAt: new Date().toISOString() } : x);
-    await storage.set('leave-requests:all', list);
+    const cur = await storage.get(LEAVE_REC_PREFIX + l.id);
+    if (!cur) return;
+    const ok = await storage.set(LEAVE_REC_PREFIX + l.id, { ...cur, status, note, decidedById: user.id, decidedByName: user.name, decidedAt: new Date().toISOString() });
+    if (!ok) { alert('Gagal menyimpan keputusan izin. Coba lagi.'); return; }
     await logActivity(`${status === 'approved' ? 'menyetujui' : 'menolak'} izin ${l.userName} (${fmtDate(l.date)})`, user.name);
     setLeaveDetail(null); await load();
   };
@@ -9924,9 +9997,9 @@ function LeaderboardView({ allUsers }) {
   useEffect(() => {
     (async () => {
       const [tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, templates, leaves, savedCfg] = await Promise.all([
-        storage.getList('tasks:all'), loadAttendanceRecs(), loadDailyReports(),
+        loadTasks(), loadAttendanceRecs(), loadDailyReports(),
         loadGmvEntries(), storage.get('gmv:targets'), storage.getList('affiliate-accounts:all'),
-        loadAffEntries(), storage.getList('daily-report-templates:all'), storage.getList('leave-requests:all'), storage.get('kpi:config')
+        loadAffEntries(), storage.getList('daily-report-templates:all'), loadLeaves(), storage.get('kpi:config')
       ]);
       setData({ tasks, attendance, reports, gmvEntries, gmvTargets: gmvTargets || {}, affAccounts, affEntries, allUsers, templates, leaves });
       setCfg(normalizeKpiConfig(savedCfg));
@@ -12826,12 +12899,14 @@ function CalendarView({ user, allUsers }) {
     if (await storage.get('calendar:schedule-migrated')) return;
     const oldSchedules = await storage.getList('schedule:all');
     if (oldSchedules.length > 0) {
-      const list = await storage.getList('calendar:all');
-      oldSchedules.filter(s => s.status !== 'cancelled').forEach(s => {
-        if (list.some(e => e.id === `sch-${s.id}`)) return;
+      const existing = await loadCalendar();
+      const haveIds = new Set(existing.map(e => e && e.id));
+      for (const s of oldSchedules.filter(s => s.status !== 'cancelled')) {
+        const id = `sch-${s.id}`;
+        if (haveIds.has(id)) continue;
         const tipe = SCHEDULE_TYPE[s.type] ? s.type : 'lain';
-        list.push({
-          id: `sch-${s.id}`,
+        await storage.set(CAL_REC_PREFIX + id, {
+          id,
           title: s.type === 'live' ? `Live: ${s.product || s.creatorName || 'Live Shopping'}` : `${SCHEDULE_TYPE[s.type]?.label || 'Piket'} — ${s.adminName || ''}`.trim(),
           description: [s.creatorName ? `Creator: ${s.creatorName}` : '', s.product ? `Produk: ${s.product}` : '', s.note || ''].filter(Boolean).join('\n'),
           type: tipe, date: s.date, time: s.time || '09:00', endTime: '',
@@ -12839,14 +12914,13 @@ function CalendarView({ user, allUsers }) {
           createdById: s.adminId || null, createdByName: s.adminName || 'Migrasi Jadwal',
           createdAt: s.createdAt || new Date().toISOString(), migratedFromSchedule: true
         });
-      });
-      await storage.set('calendar:all', list);
+      }
     }
     await storage.set('calendar:schedule-migrated', true);
   };
 
-  const setEvents0 = async () => setEvents(await storage.getList('calendar:all'));
-  const load = async () => { await migrateOldSchedule(); setEvents(await storage.getList('calendar:all')); };
+  const setEvents0 = async () => { try { setEvents(await loadCalendar()); } catch {} };
+  const load = async () => { try { await migrateOldSchedule(); setEvents(await loadCalendar()); } catch (e) { console.warn('Gagal memuat kalender:', e?.message || e); } };
   // Muat saat buka + auto-refresh tiap 10 detik (biar agenda baru dari device lain ikut muncul)
   useEffect(() => { load(); const iv = setInterval(() => setEvents0(), 10000); return () => clearInterval(iv); }, []);
   // Preload Google Identity Services agar popup saat simpan tidak diblokir
@@ -12854,24 +12928,11 @@ function CalendarView({ user, allUsers }) {
 
   const handleSave = async (data) => {
     const isNew = !editing;
-    let list;
-    try {
-      list = await storage.getList('calendar:all'); // melempar kalau gagal baca → jangan timpa data
-    } catch (e) {
-      alert('⚠️ Gagal memuat kalender dari server (cek koneksi internet). Agenda belum disimpan — coba lagi.');
-      return;
-    }
-    if (editing) {
-      list = list.map(e => e.id === editing.id ? { ...e, ...data, updatedAt: new Date().toISOString() } : e);
-    } else {
-      list.unshift({
-        id: uid(), ...data,
-        createdById: user.id, createdByName: user.name,
-        createdAt: new Date().toISOString()
-      });
-    }
-    setEvents(list);            // tampilkan langsung (optimistic) — agenda baru muncul seketika
-    const ok = await storage.set('calendar:all', list);
+    const rec = editing
+      ? { ...editing, ...data, updatedAt: new Date().toISOString() }
+      : { id: uid(), ...data, createdById: user.id, createdByName: user.name, createdAt: new Date().toISOString() };
+    setEvents(prev => editing ? prev.map(e => e.id === rec.id ? rec : e) : [rec, ...prev]); // optimistic
+    const ok = await storage.set(CAL_REC_PREFIX + rec.id, rec);
     if (!ok) {
       // Simpan ke server GAGAL → jangan tutup form & jangan tampilkan sukses palsu (agenda hilang saat re-sync)
       alert('⚠️ Gagal menyimpan agenda ke server (koneksi internet bermasalah). Agenda BELUM tersimpan — coba klik Simpan lagi.');
@@ -12885,10 +12946,9 @@ function CalendarView({ user, allUsers }) {
 
   const handleDelete = async (ev) => {
     if (!confirm(`Hapus agenda "${ev.title}"?`)) return;
-    const list = events.filter(x => x.id !== ev.id);
-    setEvents(list); setViewing(null);   // hilangkan langsung
-    const fresh = (await storage.getList('calendar:all')).filter(x => x.id !== ev.id);
-    await storage.set('calendar:all', fresh);
+    setEvents(prev => prev.filter(x => x.id !== ev.id)); setViewing(null);   // hilangkan langsung
+    const ok = await storage.delete(CAL_REC_PREFIX + ev.id);
+    if (!ok) { alert('Gagal menghapus agenda. Coba lagi.'); setEvents0(); return; }
     setEvents0();
   };
 
