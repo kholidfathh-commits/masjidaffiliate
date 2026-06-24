@@ -12811,11 +12811,9 @@ async function addEventToGoogleCalendar(event) {
 const GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const GDRIVE_FOLDER_NAME = 'Al-Kahfi Backup';
 const GDRIVE_BACKUP_KEEP = 30; // simpan maks 30 file backup terakhir di Drive
-let _driveToken = null; // { token, exp } — cache terpisah dari token Calendar
-async function getDriveToken(forceConsent = false, silent = false) {
-  if (!GOOGLE_CLIENT_ID) throw new Error('Integrasi Google belum diaktifkan (VITE_GOOGLE_CLIENT_ID belum diisi di Vercel).');
-  await loadGis();
-  if (!forceConsent && _driveToken && _driveToken.exp > Date.now() + 60000) return _driveToken.token;
+let _driveToken = null; // { token, exp } — cache token Drive di memori (hilang saat reload; diisi ulang SENYAP)
+// Minta 1 token Google dgn mode prompt tertentu. prompt '' = senyap (tanpa popup) kalau sudah pernah izinkan.
+function _requestDriveToken(promptVal) {
   return new Promise((resolve, reject) => {
     const tc = window.google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
@@ -12827,9 +12825,23 @@ async function getDriveToken(forceConsent = false, silent = false) {
       },
       error_callback: (err) => reject(new Error(err?.message || 'Login Google dibatalkan.')),
     });
-    // silent = jangan munculkan popup (untuk auto-backup); manual pertama kali minta consent.
-    tc.requestAccessToken({ prompt: silent ? '' : (_driveToken ? '' : 'consent') });
+    tc.requestAccessToken({ prompt: promptVal });
   });
+}
+async function getDriveToken(forceConsent = false, silent = false) {
+  if (!GOOGLE_CLIENT_ID) throw new Error('Integrasi Google belum diaktifkan (VITE_GOOGLE_CLIENT_ID belum diisi di Vercel).');
+  await loadGis();
+  if (!forceConsent && _driveToken && _driveToken.exp > Date.now() + 60000) return _driveToken.token;
+  if (forceConsent) return _requestDriveToken('consent'); // sengaja ganti akun / izin ulang
+  // CABUT "login terus": coba SENYAP dulu (prompt:''). Kalau sudah pernah mengizinkan & masih
+  // login Google di browser ini → token didapat TANPA popup. Layar izin hanya muncul SEKALI
+  // (pertama kali / izin dicabut) lewat fallback di bawah.
+  try {
+    return await _requestDriveToken('');
+  } catch (e) {
+    if (silent) throw e;                 // auto-backup: jangan pernah munculkan popup
+    return await _requestDriveToken('consent'); // manual & belum pernah izinkan → minta izin 1x
+  }
 }
 // Cari folder backup milik app; kalau belum ada, buat baru. Return folderId.
 async function driveFindOrCreateFolder(token) {
