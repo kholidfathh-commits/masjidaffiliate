@@ -12720,8 +12720,12 @@ function canManageCalendar(u) {
 }
 
 // ====== INTEGRASI GOOGLE CALENDAR (OAuth, tanpa backend — pakai Google Identity Services) ======
-// Agenda otomatis masuk ke Google Calendar akun Google si pembuat. Butuh VITE_GOOGLE_CLIENT_ID.
+// Google Client ID — dipakai untuk Backup ke Google Drive (OAuth per-user, hanya owner/manajer di Pengaturan).
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+// Jembatan Google Calendar TERPUSAT (Apps Script Web App) — agenda dari semua pengelola masuk ke
+// SATU Google Calendar (akun pusat Al-Kahfi/Kholidfath), tanpa tiap orang login. Diisi di Vercel.
+const GCAL_ENDPOINT = import.meta.env.VITE_GCAL_ENDPOINT || '';
+const GCAL_SECRET = import.meta.env.VITE_GCAL_SECRET || '';
 const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 let _gisPromise = null;
 function loadGis() {
@@ -12761,30 +12765,32 @@ const _addOneHour = (hm) => {
   const d = new Date(2000, 0, 1, h, m); d.setHours(d.getHours() + 1);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
-// Buat 1 event di Google Calendar primary akun pembuat. Tamu yang punya email otomatis diundang.
+// Kirim 1 agenda ke Google Calendar PUSAT lewat jembatan Apps Script (jalan sebagai akun pusat Al-Kahfi).
+// TANPA login per-user. Best-effort: agenda sudah tersimpan di app; Google hanya bonus.
 async function addEventToGoogleCalendar(event) {
-  const token = await getGcalToken();
+  if (!GCAL_ENDPOINT) throw new Error('Jembatan Google Calendar belum aktif (VITE_GCAL_ENDPOINT belum diisi di Vercel).');
   const startT = event.time || '09:00';
   const endT = event.endTime || _addOneHour(startT);
-  const body = {
-    summary: event.title,
+  const payload = {
+    secret: GCAL_SECRET,
+    title: event.title || '(Tanpa judul)',
     description: event.description || '',
     location: event.location || '',
-    start: { dateTime: `${event.date}T${startT}:00`, timeZone: 'Asia/Jakarta' },
-    end: { dateTime: `${event.date}T${endT}:00`, timeZone: 'Asia/Jakarta' },
-    attendees: (event.attendeeEmails || []).map(email => ({ email })),
-    reminders: { useDefault: true },
+    date: event.date,
+    start: startT,
+    end: endT,
+    timeZone: 'Asia/Jakarta',
+    attendees: event.attendeeEmails || [],
   };
-  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
+  // no-cors + text/plain = request "sederhana" (tanpa preflight) → tetap sampai ke Apps Script.
+  // Konsekuensi: respons tidak terbaca, jadi kita anggap terkirim (agenda app tetap sumber utama).
+  await fetch(GCAL_ENDPOINT, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload),
   });
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    throw new Error(`Google Calendar (${res.status}): ${t.slice(0, 140)}`);
-  }
-  return res.json(); // { htmlLink, id, ... }
+  return true;
 }
 
 // ====== INTEGRASI GOOGLE DRIVE (Backup ke Drive, OAuth tanpa backend) ======
@@ -13010,8 +13016,8 @@ function CalendarView({ user, allUsers }) {
         <div className="flex-1 text-sm">
           <div className="font-semibold text-blue-900">Integrasi Google Calendar</div>
           <div className="text-blue-800 mt-0.5">
-            {GOOGLE_CLIENT_ID ? (
-              <>Saat membuat agenda baru, centang <b>"Tambahkan otomatis ke Google Calendar saya"</b> → agenda langsung masuk Google Calendar akun Google pembuat (pertama kali diminta login & izin). Peserta yang sudah isi <b>Gmail</b> (di Profil) otomatis <b>diundang via email</b>. 🔔 Peserta juga dapat <b>notifikasi di lonceng</b> aplikasi (H-1 sore & pagi hari-H).</>
+            {GCAL_ENDPOINT ? (
+              <>Agenda baru otomatis masuk ke <b>Google Calendar pusat Al-Kahfi</b> (akun Kholidfath) — <b>tidak perlu login Google</b>. Peserta yang sudah isi <b>Gmail</b> (di Profil) otomatis <b>diundang via email</b>. 🔔 Peserta juga dapat <b>notifikasi di lonceng</b> aplikasi (H-1 sore & pagi hari-H).</>
             ) : (
               <>Pilih peserta saat membuat agenda → peserta yang sudah isi <b>Gmail</b> (di Profil) akan diundang ke Google Calendar saat agenda dibuka & disimpan lewat tombol <b>"Google Calendar"</b>. Bisa juga download <b>.ics</b>. 🔔 Peserta dapat <b>notifikasi di lonceng</b> (H-1 sore & pagi hari-H). <span className="block mt-1 text-amber-700">⚙️ Mode otomatis (tanpa klik) belum aktif — perlu setup Google Client ID (lihat panduan dari admin).</span></>
             )}
@@ -13115,7 +13121,7 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
   // Scope peserta: owner/manajer/sekretariat → semua tim; leader → hanya timnya + dirinya
   const canAll = user.role === 'owner' || user.role === 'manajer' || !!user.isSecretariat;
   const selectableUsers = canAll ? allUsers : allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
-  const gcalReady = !!GOOGLE_CLIENT_ID && !event?.id; // hanya untuk agenda baru
+  const gcalReady = !!GCAL_ENDPOINT && !event?.id; // jembatan terpusat, hanya untuk agenda baru
   const [addGcal, setAddGcal] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -13134,14 +13140,8 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
     // Tambah ke Google Calendar dulu (dipanggil langsung dari klik → popup tidak diblokir).
     // Apa pun hasil Google-nya, agenda TETAP disimpan di aplikasi — Google hanya bonus.
     if (gcalReady && addGcal) {
-      setBusy(true);
-      try {
-        await addEventToGoogleCalendar(payload);
-        alert('✅ Agenda juga ditambahkan ke Google Calendar kamu.' + (attendeeEmails.length ? ` ${attendeeEmails.length} peserta diundang via email.` : ''));
-      } catch (e) {
-        alert('⚠️ Agenda tetap disimpan di aplikasi, tapi gagal menambah ke Google Calendar:\n' + (e?.message || e));
-      }
-      setBusy(false);
+      // Kirim ke Google Calendar pusat (silent, tanpa login). Gagal pun agenda tetap tersimpan di app.
+      try { await addEventToGoogleCalendar(payload); } catch (e) { console.warn('Google Calendar (jembatan) gagal:', e?.message || e); }
     }
     onSave(payload);            // SELALU simpan ke aplikasi (kamu klik "Simpan Agenda")
   };
@@ -13220,8 +13220,8 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
           <label className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3 cursor-pointer">
             <input type="checkbox" checked={addGcal} onChange={e => setAddGcal(e.target.checked)} className="mt-0.5" />
             <span className="text-sm text-emerald-800">
-              <b>Tambahkan otomatis ke Google Calendar saya</b>
-              <span className="block text-[11px] text-emerald-700 mt-0.5">Saat disimpan, agenda langsung masuk Google Calendar akun Google yang kamu pilih (pertama kali akan diminta login & izin). Peserta yang punya Gmail otomatis diundang via email.</span>
+              <b>Tambahkan ke Google Calendar tim</b>
+              <span className="block text-[11px] text-emerald-700 mt-0.5">Agenda otomatis masuk ke Google Calendar pusat Al-Kahfi — kamu <b>tidak perlu login</b>. Peserta yang sudah isi Gmail diundang otomatis.</span>
             </span>
           </label>
         )}
@@ -13239,7 +13239,7 @@ function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
     setGcalBusy(true);
     try {
       await addEventToGoogleCalendar(event);
-      alert('✅ Agenda ditambahkan ke Google Calendar kamu.' + (event.attendeeEmails?.length ? ` ${event.attendeeEmails.length} peserta diundang.` : ''));
+      alert('✅ Agenda dikirim ke Google Calendar tim (akun pusat Al-Kahfi).' + (event.attendeeEmails?.length ? ` ${event.attendeeEmails.length} peserta diundang.` : ''));
     } catch (e) { alert('Gagal: ' + (e?.message || e)); }
     setGcalBusy(false);
   };
@@ -13357,10 +13357,10 @@ function EventDetailModal({ event, user, onEdit, onDelete, onClose }) {
               📨 {event.attendeeEmails.length} peserta akan <b>diundang otomatis</b> (Google kirim undangan ke Gmail mereka) saat kamu klik tombol Google Calendar lalu <b>Simpan</b>.
             </div>
           )}
-          {GOOGLE_CLIENT_ID && (
+          {GCAL_ENDPOINT && canManageCalendar(user) && (
             <button onClick={addToGcalAuto} disabled={gcalBusy}
               className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 mb-1">
-              <CalendarDays className="w-4 h-4" /> {gcalBusy ? 'Menambahkan…' : 'Tambah Otomatis ke Google Calendar'}
+              <CalendarDays className="w-4 h-4" /> {gcalBusy ? 'Mengirim…' : 'Kirim ke Google Calendar tim'}
             </button>
           )}
           <div className="flex gap-2 flex-wrap">
