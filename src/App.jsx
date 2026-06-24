@@ -189,6 +189,33 @@ async function loadAttendanceRecs() {
   return recs;
 }
 
+// Laporan Harian: pola per-record yang sama dgn absensi.
+const RPT_REC_PREFIX = 'daily-reports:rec:';
+async function loadDailyReports() {
+  const recs = await storage.listByPrefix(RPT_REC_PREFIX);
+  let legacy = null;
+  try { legacy = await storage.get('daily-reports:all'); } catch { legacy = null; }
+  if (Array.isArray(legacy) && legacy.length) {
+    const have = new Set(recs.map(r => r && r.id));
+    for (const item of legacy) {
+      if (item && item.id != null && !have.has(item.id)) {
+        const ok = await storage.set(RPT_REC_PREFIX + item.id, item);
+        if (ok) { recs.push(item); have.add(item.id); }
+      }
+    }
+    const allMigrated = legacy.every(item => !item || item.id == null || have.has(item.id));
+    if (allMigrated) {
+      await storage.set('daily-reports:all:archived-v2', legacy);
+      await storage.delete('daily-reports:all');
+    }
+  }
+  return recs;
+}
+
+// Daftar modul per-record (key backup logis → loader & prefix baris). Tambah modul baru di sini.
+const PER_RECORD_LOADERS = { 'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports };
+const PER_RECORD_PREFIX = { 'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX };
+
 // ============ CRYPTO (PBKDF2 password hashing) ============
 async function hashPassword(password, salt) {
   const enc = new TextEncoder();
@@ -459,8 +486,8 @@ async function buildBackupDump(byName = 'auto') {
   const dump = { _meta: { app: 'Al-Kahfi Corp Team App', exportedAt: new Date().toISOString(), by: byName, version: 1 }, data: {} };
   for (const k of BACKUP_KEYS) {
     let v;
-    if (k === 'attendance:all') {
-      const recs = await loadAttendanceRecs(); // absensi kini per-record → kumpulkan jadi array (format backup tetap sama)
+    if (PER_RECORD_LOADERS[k]) {
+      const recs = await PER_RECORD_LOADERS[k](); // modul per-record → kumpulkan jadi array (format backup tetap sama)
       v = recs.length ? recs : null;
     } else {
       v = await storage.get(k); // bisa melempar error → ditangani pemanggil (jangan simpan backup setengah)
@@ -500,11 +527,12 @@ async function applyMergeRestore(data) {
   let n = 0;
   for (const k of keys) {
     const bval = data[k];
-    if (k === 'attendance:all' && Array.isArray(bval)) {
-      // absensi disimpan per-record → gabung by id lalu tulis tiap baris (kompatibel file backup lama)
-      const cur = await loadAttendanceRecs();
+    if (PER_RECORD_LOADERS[k] && Array.isArray(bval)) {
+      // modul per-record → gabung by id lalu tulis tiap baris (kompatibel file backup lama format array)
+      const cur = await PER_RECORD_LOADERS[k]();
       const merged = mergeArraysById(cur, bval);
-      for (const it of merged) { if (it && it.id != null) await storage.set(ATT_REC_PREFIX + it.id, it); }
+      const pfx = PER_RECORD_PREFIX[k];
+      for (const it of merged) { if (it && it.id != null) await storage.set(pfx + it.id, it); }
       n++;
     } else if (Array.isArray(bval)) {
       const cur = await storage.getList(k);
@@ -2200,7 +2228,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
       setCreators(await storage.getList('creators:all'));
       setActivities(await storage.getList('activities:all'));
       setAnnouncements(await storage.getList('announcements:all'));
-      setDailyReports(await storage.getList('daily-reports:all'));
+      setDailyReports(await loadDailyReports());
       setCalendarEvents(await storage.getList('calendar:all'));
       await syncInternalFromAccounts(); // GMV akun affiliator otomatis masuk divisi internal
       setGmvEntries(await storage.getList('gmv:daily'));
@@ -5870,7 +5898,7 @@ function ReportsView({ user, allUsers }) {
   const generateFromDaily = async () => {
     setGenBusy(true);
     const week = getWeekRange();
-    const daily = (await storage.getList('daily-reports:all'))
+    const daily = (await loadDailyReports())
       .filter(r => r.authorId === user.id && r.date >= week.start && r.date <= week.end)
       .sort((a, b) => a.date.localeCompare(b.date));
     setGenBusy(false);
@@ -7166,7 +7194,7 @@ function KpiView({ user, allUsers }) {
   const load = async () => {
     setTasks(await storage.getList('tasks:all'));
     setAttendance(await loadAttendanceRecs());
-    setReports(await storage.getList('daily-reports:all'));
+    setReports(await loadDailyReports());
     setGmvEntries(await storage.getList('gmv:daily'));
     setGmvTargets((await storage.get('gmv:targets')) || {});
     setAffAccounts(await storage.getList('affiliate-accounts:all'));
@@ -9856,7 +9884,7 @@ function LeaderboardView({ allUsers }) {
   useEffect(() => {
     (async () => {
       const [tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, templates, leaves, savedCfg] = await Promise.all([
-        storage.getList('tasks:all'), loadAttendanceRecs(), storage.getList('daily-reports:all'),
+        storage.getList('tasks:all'), loadAttendanceRecs(), loadDailyReports(),
         storage.getList('gmv:daily'), storage.get('gmv:targets'), storage.getList('affiliate-accounts:all'),
         storage.getList('affiliate-gmv:daily'), storage.getList('daily-report-templates:all'), storage.getList('leave-requests:all'), storage.get('kpi:config')
       ]);
@@ -11434,7 +11462,7 @@ function DailyReportsView({ user, allUsers }) {
   const [exporting, setExporting] = useState(false);
 
   const load = async () => {
-    setReports(await storage.getList('daily-reports:all'));
+    setReports(await loadDailyReports());
     setTemplates(await storage.getList('daily-report-templates:all'));
   };
   useEffect(() => { load(); }, []);
@@ -11455,20 +11483,22 @@ function DailyReportsView({ user, allUsers }) {
 
   const handleSaveReport = async (data) => {
     try {
-      let list = await storage.getList('daily-reports:all'); // melempar error kalau gagal baca → batal simpan (lindungi data)
       if (editing) {
-        list = list.map(r => r.id === editing.id ? { ...r, ...data, updatedAt: new Date().toISOString() } : r);
+        const updated = { ...editing, ...data, updatedAt: new Date().toISOString() };
+        const ok = await storage.set(RPT_REC_PREFIX + updated.id, updated);
+        if (!ok) throw new Error('Gagal menyimpan ke server.');
         await logActivity(`mengupdate laporan harian ${fmtDate(data.date)}`, user.name);
       } else {
-        list.unshift({
+        const rec = {
           id: uid(), ...data,
           authorId: user.id, authorName: user.name, authorRole: user.role,
           authorJobTitle: user.jobTitle || '',
           submittedAt: new Date().toISOString()
-        });
+        };
+        const ok = await storage.set(RPT_REC_PREFIX + rec.id, rec);
+        if (!ok) throw new Error('Gagal menyimpan ke server.');
         await logActivity(`mengirim laporan harian ${fmtDate(data.date)}`, user.name);
       }
-      await storage.set('daily-reports:all', list);
       setShowForm(false); setEditing(null); load();
     } catch (err) {
       alert('⚠️ Gagal menyimpan laporan: ' + (err?.message || err) + '\n\nLaporan lama tidak diubah. Coba lagi saat koneksi stabil.');
@@ -11478,8 +11508,8 @@ function DailyReportsView({ user, allUsers }) {
   const handleDelete = async (r) => {
     if (!confirm('Hapus laporan harian ini?')) return;
     try {
-      const list = (await storage.getList('daily-reports:all')).filter(x => x.id !== r.id);
-      await storage.set('daily-reports:all', list);
+      const ok = await storage.delete(RPT_REC_PREFIX + r.id);
+      if (!ok) throw new Error('Gagal menghapus di server.');
       load();
     } catch (err) {
       alert('⚠️ Gagal menghapus: ' + (err?.message || err) + '\n\nCoba lagi saat koneksi stabil.');
@@ -11487,10 +11517,9 @@ function DailyReportsView({ user, allUsers }) {
   };
 
   const handleTogglePin = async (r) => {
-    const list = (await storage.getList('daily-reports:all')).map(x =>
-      x.id === r.id ? { ...x, pinToDashboard: !x.pinToDashboard } : x
-    );
-    await storage.set('daily-reports:all', list);
+    const updated = { ...r, pinToDashboard: !r.pinToDashboard };
+    const ok = await storage.set(RPT_REC_PREFIX + r.id, updated);
+    if (!ok) { alert('Gagal menyimpan. Coba lagi.'); return; }
     load();
   };
 
