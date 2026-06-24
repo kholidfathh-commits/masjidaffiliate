@@ -73,6 +73,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const LOCAL_PREFIX = 'alkahfi:';
 const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// Batas atas range untuk query prefix (pakai index primary key 'key', bukan LIKE → cepat & tahan locale).
+const _pfxEnd = (p) => p.slice(0, -1) + String.fromCharCode(p.charCodeAt(p.length - 1) + 1);
 const storage = {
   // PENTING: kalau baca dari server GAGAL (bukan data kosong beneran), get() MELEMPAR error setelah 3x coba.
   // Tujuannya supaya operasi "baca → ubah → tulis" TIDAK menimpa seluruh data dengan array kosong saat koneksi ngadat.
@@ -122,8 +124,70 @@ const storage = {
       if (error) { console.error('Supabase delete error:', key, error.message); return false; }
       return true;
     } catch (e) { console.error('Supabase delete failed:', key, e); return false; }
+  },
+  // ===== PER-RECORD (anti tabrakan/overwrite massal): tiap data = 1 baris ('prefix<id>'). =====
+  // Baca semua baris dgn prefix (paginasi 1000, retry 3x, MELEMPAR error kalau gagal → state lama dipertahankan).
+  async listByPrefix(prefix) {
+    const PAGE = 1000;
+    let from = 0; const all = [];
+    for (;;) {
+      let batch = null, lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const { data, error } = await supabase.from('kv_store')
+            .select('value')
+            .gte('key', prefix).lt('key', _pfxEnd(prefix))
+            .order('key', { ascending: true })
+            .range(from, from + PAGE - 1);
+          if (error) { lastErr = error; await _sleep(350 * (attempt + 1)); continue; }
+          batch = data || []; break;
+        } catch (e) { lastErr = e; await _sleep(350 * (attempt + 1)); }
+      }
+      if (batch === null) {
+        console.error('Supabase listByPrefix GAGAL (3x):', prefix, lastErr?.message || lastErr);
+        throw new Error(`Gagal membaca data "${prefix}" dari server. Cek koneksi internet lalu coba lagi.`);
+      }
+      for (const row of batch) all.push(row.value);
+      if (batch.length < PAGE) break;
+      from += PAGE;
+    }
+    return all;
+  },
+  // Hapus semua baris dgn prefix (sekali query).
+  async deleteByPrefix(prefix) {
+    try {
+      const { error } = await supabase.from('kv_store').delete().gte('key', prefix).lt('key', _pfxEnd(prefix));
+      if (error) { console.error('Supabase deleteByPrefix error:', prefix, error.message); return false; }
+      return true;
+    } catch (e) { console.error('Supabase deleteByPrefix failed:', prefix, e); return false; }
   }
 };
+
+// ====== ABSENSI: baca per-record + migrasi/serap array lama 'attendance:all' otomatis ======
+// Tiap absen disimpan di 'attendance:rec:<id>' (1 baris) → tidak ada lagi timpa-massal saat banyak orang absen barengan.
+// Fungsi ini juga MENYERAP array lama: aman dijalankan berkali-kali, dan menangkap data dari klien lama yg belum refresh.
+const ATT_REC_PREFIX = 'attendance:rec:';
+async function loadAttendanceRecs() {
+  const recs = await storage.listByPrefix(ATT_REC_PREFIX); // throw saat koneksi gagal → pemanggil pertahankan state lama
+  let legacy = null;
+  try { legacy = await storage.get('attendance:all'); } catch { legacy = null; } // best-effort, jangan gagalkan load
+  if (Array.isArray(legacy) && legacy.length) {
+    const have = new Set(recs.map(r => r && r.id));
+    for (const item of legacy) {
+      if (item && item.id != null && !have.has(item.id)) {
+        const ok = await storage.set(ATT_REC_PREFIX + item.id, item);
+        if (ok) { recs.push(item); have.add(item.id); }
+      }
+    }
+    // Hanya bersihkan array lama kalau SEMUA itemnya sudah jadi record (aman, tidak menghilangkan data).
+    const allMigrated = legacy.every(item => !item || item.id == null || have.has(item.id));
+    if (allMigrated) {
+      await storage.set('attendance:all:archived-v2', legacy); // arsip cadangan (bukan bagian backup)
+      await storage.delete('attendance:all');
+    }
+  }
+  return recs;
+}
 
 // ============ CRYPTO (PBKDF2 password hashing) ============
 async function hashPassword(password, salt) {
@@ -394,7 +458,13 @@ const BACKUP_KEYS = [
 async function buildBackupDump(byName = 'auto') {
   const dump = { _meta: { app: 'Al-Kahfi Corp Team App', exportedAt: new Date().toISOString(), by: byName, version: 1 }, data: {} };
   for (const k of BACKUP_KEYS) {
-    const v = await storage.get(k); // bisa melempar error → ditangani pemanggil (jangan simpan backup setengah)
+    let v;
+    if (k === 'attendance:all') {
+      const recs = await loadAttendanceRecs(); // absensi kini per-record → kumpulkan jadi array (format backup tetap sama)
+      v = recs.length ? recs : null;
+    } else {
+      v = await storage.get(k); // bisa melempar error → ditangani pemanggil (jangan simpan backup setengah)
+    }
     if (v !== null && v !== undefined) dump.data[k] = v;
   }
   return dump;
@@ -430,7 +500,13 @@ async function applyMergeRestore(data) {
   let n = 0;
   for (const k of keys) {
     const bval = data[k];
-    if (Array.isArray(bval)) {
+    if (k === 'attendance:all' && Array.isArray(bval)) {
+      // absensi disimpan per-record → gabung by id lalu tulis tiap baris (kompatibel file backup lama)
+      const cur = await loadAttendanceRecs();
+      const merged = mergeArraysById(cur, bval);
+      for (const it of merged) { if (it && it.id != null) await storage.set(ATT_REC_PREFIX + it.id, it); }
+      n++;
+    } else if (Array.isArray(bval)) {
       const cur = await storage.getList(k);
       await storage.set(k, mergeArraysById(cur, bval)); n++;
     } else if (bval && typeof bval === 'object') {
@@ -2129,7 +2205,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
       await syncInternalFromAccounts(); // GMV akun affiliator otomatis masuk divisi internal
       setGmvEntries(await storage.getList('gmv:daily'));
       setGmvTargets((await storage.get('gmv:targets')) || {});
-      setAttendanceRecs(await storage.getList('attendance:all'));
+      setAttendanceRecs(await loadAttendanceRecs());
       setProblems(await storage.getList('problems:all'));
       setKpiConfig((await storage.get('kpi:config')) || DEFAULT_KPI_CONFIG);
       setAffAccounts(await storage.getList('affiliate-accounts:all'));
@@ -7089,7 +7165,7 @@ function KpiView({ user, allUsers }) {
 
   const load = async () => {
     setTasks(await storage.getList('tasks:all'));
-    setAttendance(await storage.getList('attendance:all'));
+    setAttendance(await loadAttendanceRecs());
     setReports(await storage.getList('daily-reports:all'));
     setGmvEntries(await storage.getList('gmv:daily'));
     setGmvTargets((await storage.get('gmv:targets')) || {});
@@ -8417,12 +8493,17 @@ function AttendanceView({ user, allUsers }) {
   const canManageAtt = user.role === 'owner' || user.role === 'manajer';
 
   const load = async () => {
-    const list = await storage.getList('attendance:all');
-    setRecords(list);
-    setLeaves(await storage.getList('leave-requests:all'));
-    const cfg = await storage.get('attendance:config');
-    if (cfg) setConfig({ ...DEFAULT_ATTENDANCE_CONFIG, ...cfg });
-    setLoading(false);
+    try {
+      const list = await loadAttendanceRecs();
+      setRecords(list);
+      setLeaves(await storage.getList('leave-requests:all'));
+      const cfg = await storage.get('attendance:config');
+      if (cfg) setConfig({ ...DEFAULT_ATTENDANCE_CONFIG, ...cfg });
+    } catch (e) {
+      console.warn('Gagal memuat absensi (akan dicoba lagi):', e?.message || e);
+    } finally {
+      setLoading(false);
+    }
   };
   useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
 
@@ -8530,9 +8611,8 @@ function AttendanceView({ user, allUsers }) {
         for (const it of drop) await storage.delete(it.key);
         await storage.set('attendance:selfie-index', keep);
       }
-      const list = await storage.getList('attendance:all');
-      list.unshift(rec);
-      await storage.set('attendance:all', list.slice(0, 2000));
+      const okSave = await storage.set(ATT_REC_PREFIX + rec.id, rec);
+      if (!okSave) throw new Error('Gagal menyimpan absen ke server. Cek koneksi internet lalu coba lagi.');
       await logActivity(`absen ${type === 'in' ? 'masuk' : 'pulang'}${flags.late ? ' (terlambat)' : ''}`, user.name);
       setNote('');
       // banner hasil
@@ -8610,8 +8690,8 @@ function AttendanceView({ user, allUsers }) {
     const flags = computeFlags(rec.type, d, { lat: rec.latitude, lng: rec.longitude }, effectiveAttConfig(config, rec.userId, d));
     if (clearLocationWarn) { flags.locationMismatch = false; }
     const updated = { ...rec, timestamp: d.toISOString(), note: (note || '').trim(), ...flags, editedBy: user.name, editedAt: new Date().toISOString() };
-    const list = await storage.getList('attendance:all');
-    await storage.set('attendance:all', list.map(x => x.id === rec.id ? updated : x));
+    const okSave = await storage.set(ATT_REC_PREFIX + updated.id, updated);
+    if (!okSave) { alert('Gagal menyimpan perubahan absensi. Data lama tidak diubah.'); return; }
     await logActivity(`mengedit absensi ${rec.userName}`, user.name);
     setEditing(null);
     await load();
@@ -8624,7 +8704,8 @@ function AttendanceView({ user, allUsers }) {
     const idx = (await storage.get('attendance:selfie-index')) || [];
     for (const it of idx) await storage.delete(it.key);
     await storage.set('attendance:selfie-index', []);
-    await storage.set('attendance:all', []);
+    await storage.deleteByPrefix(ATT_REC_PREFIX);
+    await storage.delete('attendance:all'); // bersihkan sisa array lama bila masih ada
     await logActivity(`menghapus SEMUA data absensi (${records.length} rekaman)`, user.name);
     await load();
   };
@@ -8823,7 +8904,7 @@ function AttendanceView({ user, allUsers }) {
   const canEditRec = (r) => user.role === 'owner' || user.role === 'manajer' || r.userId === user.id;
   const deleteRecord = async (r) => {
     if (!confirm(`Hapus absensi ${r.userName} (${r.type === 'in' ? 'masuk' : 'pulang'}) ${new Date(r.timestamp).toLocaleString('id-ID')}?`)) return;
-    await storage.set('attendance:all', (await storage.getList('attendance:all')).filter(x => x.id !== r.id));
+    await storage.delete(ATT_REC_PREFIX + r.id);
     if (r.hasSelfie) {
       await storage.delete(`selfie:${r.id}`);
       const idx = (await storage.get('attendance:selfie-index')) || [];
@@ -9775,7 +9856,7 @@ function LeaderboardView({ allUsers }) {
   useEffect(() => {
     (async () => {
       const [tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, templates, leaves, savedCfg] = await Promise.all([
-        storage.getList('tasks:all'), storage.getList('attendance:all'), storage.getList('daily-reports:all'),
+        storage.getList('tasks:all'), loadAttendanceRecs(), storage.getList('daily-reports:all'),
         storage.getList('gmv:daily'), storage.get('gmv:targets'), storage.getList('affiliate-accounts:all'),
         storage.getList('affiliate-gmv:daily'), storage.getList('daily-report-templates:all'), storage.getList('leave-requests:all'), storage.get('kpi:config')
       ]);
