@@ -296,6 +296,17 @@ async function loadLeaves() {
 const CAL_REC_PREFIX = 'calendar:rec:';
 async function loadCalendar() {
   const recs = await storage.listByPrefix(CAL_REC_PREFIX);
+  // Self-heal: agenda yg terlanjur tersimpan TANPA id (akibat bug lama → key 'calendar:rec:undefined')
+  // diberi id baru, dipindah ke key yg benar, lalu key rusak dihapus. Aman & idempoten.
+  for (const r of recs) {
+    if (r && r.id == null) {
+      try {
+        r.id = uid();
+        const ok = await storage.set(CAL_REC_PREFIX + r.id, r);
+        if (ok) await storage.delete(CAL_REC_PREFIX + 'undefined');
+      } catch { /* abaikan; dicoba lagi di load berikutnya */ }
+    }
+  }
   let legacy = null;
   try { legacy = await storage.get('calendar:all'); } catch { legacy = null; }
   if (Array.isArray(legacy) && legacy.length) {
@@ -12933,11 +12944,16 @@ function CalendarView({ user, allUsers }) {
   useEffect(() => { if (GOOGLE_CLIENT_ID) loadGis().catch(() => {}); }, []);
 
   const handleSave = async (data) => {
-    const isNew = !editing;
-    const rec = editing
-      ? { ...editing, ...data, updatedAt: new Date().toISOString() }
-      : { id: uid(), ...data, createdById: user.id, createdByName: user.name, createdAt: new Date().toISOString() };
-    setEvents(prev => editing ? prev.map(e => e.id === rec.id ? rec : e) : [rec, ...prev]); // optimistic
+    // PENTING: `editing` punya 2 makna — (a) agenda yg sedang DIEDIT (punya id), atau
+    // (b) sekadar prefill tanggal saat klik sel kalender ({date} TANPA id). Penentu BARU vs EDIT
+    // WAJIB dari ada-tidaknya id, BUKAN dari truthy `editing`. Kalau pakai truthy, agenda hasil
+    // klik sel ikut jalur "edit" → rec tanpa id → tersimpan ke key 'calendar:rec:undefined' →
+    // agenda berikutnya menimpa yg sebelumnya (BUG "agenda lama hilang saat tambah agenda baru").
+    const isNew = !(editing && editing.id);
+    const rec = isNew
+      ? { id: uid(), ...data, createdById: user.id, createdByName: user.name, createdAt: new Date().toISOString() }
+      : { ...editing, ...data, updatedAt: new Date().toISOString() };
+    setEvents(prev => isNew ? [rec, ...prev] : prev.map(e => e.id === rec.id ? rec : e)); // optimistic
     const ok = await storage.set(CAL_REC_PREFIX + rec.id, rec);
     if (!ok) {
       // Simpan ke server GAGAL → jangan tutup form & jangan tampilkan sukses palsu (agenda hilang saat re-sync)
