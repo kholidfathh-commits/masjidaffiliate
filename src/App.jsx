@@ -776,7 +776,7 @@ const DEFAULT_KPI_CONFIG = {
   targetScore: 85,      // target bulanan, >= ini = Mumtaz
   workdays: 26,         // target hari kerja per bulan
   taskVolumeTarget: 20, // target jumlah tugas selesai per bulan
-  weights: { attendance: 25, punctuality: 10, tasks: 25, reports: 20, target: 20 }
+  weights: { attendance: 15, punctuality: 10, tasks: 20, reports: 15, target: 40 } // v3: digeser ke HASIL (Target 40%, dulu 20%); kehadiran 15% (dulu 25%). Disiplin tetap syarat dasar. CATATAN: nilai LIVE diambil dari "Atur KPI" (kpi:config) bila sudah pernah disimpan — set manual sekali agar berlaku.
 };
 // Migrasi config lama (attendance/tasks/reports/bonus) → skema v2
 function normalizeKpiConfig(cfg) {
