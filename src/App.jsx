@@ -163,6 +163,49 @@ const storage = {
   }
 };
 
+// ====== BRANKAS GAMBAR (hemat egress): foto disimpan terpisah di key 'img:<id>', record cukup simpan ref. ======
+// Tujuan: foto base64 TIDAK lagi ikut ke-download tiap polling list (laporan harian, GMV, feedback, dll).
+// Foto dimuat ON-DEMAND saat ditampilkan saja + cache per sesi → polling jadi ringan, egress turun drastis.
+const IMG_PREFIX = 'img:';
+const _imgCache = new Map();    // ref -> base64 (cache per sesi: 1x ambil per foto)
+const _imgPending = new Map();  // ref -> Promise (gabungkan permintaan barengan)
+const isImgRef = (v) => typeof v === 'string' && v.startsWith(IMG_PREFIX);
+const isInlineImg = (v) => typeof v === 'string' && v.startsWith('data:');
+function _newImgId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+// Simpan 1 gambar base64 → kembalikan ref 'img:<id>'. Kalau sudah ref / bukan base64 (url/null) → kembalikan apa adanya.
+async function putImage(b64) {
+  if (!b64 || isImgRef(b64) || !isInlineImg(b64)) return b64 ?? null;
+  const id = _newImgId();
+  const ref = IMG_PREFIX + id;
+  const ok = await storage.set(ref, { id, d: b64 });
+  if (!ok) throw new Error('Gagal menyimpan gambar ke server.');
+  _imgCache.set(ref, b64);
+  return ref;
+}
+// Konversi field gambar (satuan / array) → ref saat MENYIMPAN record.
+async function materializeImage(v) { return await putImage(v); }
+async function materializeImages(arr) {
+  if (!Array.isArray(arr)) return arr;
+  const out = []; for (const v of arr) out.push(await putImage(v)); return out;
+}
+// Ambil base64 dari ref (cache per sesi). data:/url/kosong dikembalikan apa adanya. Gagal baca → '' (placeholder, render tetap aman).
+function fetchImage(ref) {
+  if (!ref) return Promise.resolve('');
+  if (isInlineImg(ref) || !isImgRef(ref)) return Promise.resolve(ref);
+  if (_imgCache.has(ref)) return Promise.resolve(_imgCache.get(ref));
+  if (_imgPending.has(ref)) return _imgPending.get(ref);
+  const p = storage.get(ref)
+    .then(v => { const s = (v && typeof v === 'object') ? (v.d || '') : (typeof v === 'string' ? v : ''); if (s) _imgCache.set(ref, s); _imgPending.delete(ref); return s; })
+    .catch(() => { _imgPending.delete(ref); return ''; });
+  _imgPending.set(ref, p);
+  return p;
+}
+// Loader utk BACKUP: semua blob gambar sebagai array {id,d} → dipakai mesin PER_RECORD (ikut backup/restore biar foto tak hilang).
+async function loadImageStore() {
+  const rows = await storage.listByPrefix(IMG_PREFIX); // value tiap baris = {id,d}
+  return rows.filter(r => r && r.id);
+}
+
 // ====== ABSENSI: baca per-record + migrasi/serap array lama 'attendance:all' otomatis ======
 // Tiap absen disimpan di 'attendance:rec:<id>' (1 baris) → tidak ada lagi timpa-massal saat banyak orang absen barengan.
 // Fungsi ini juga MENYERAP array lama: aman dijalankan berkali-kali, dan menangkap data dari klien lama yg belum refresh.
@@ -324,8 +367,8 @@ async function loadCalendar() {
 }
 
 // Daftar modul per-record (key backup logis → loader & prefix baris). Tambah modul baru di sini.
-const PER_RECORD_LOADERS = { 'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar };
-const PER_RECORD_PREFIX = { 'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX };
+const PER_RECORD_LOADERS = { 'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar, 'img:store': loadImageStore };
+const PER_RECORD_PREFIX = { 'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX, 'img:store': IMG_PREFIX };
 
 // ============ CRYPTO (PBKDF2 password hashing) ============
 async function hashPassword(password, salt) {
@@ -428,14 +471,38 @@ function Avatar({ person, size = 'md', className = '' }) {
   return (
     <div className={`${sizes[size] || sizes.md} rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white font-bold flex-shrink-0 overflow-hidden ${className}`}>
       {person?.avatarImage
-        ? <img src={person.avatarImage} alt={name} className="w-full h-full object-cover" />
+        ? <AsyncImg refId={person.avatarImage} alt={name} className="w-full h-full object-cover" fallback={name.charAt(0).toUpperCase()} />
         : name.charAt(0).toUpperCase()}
     </div>
   );
 }
 
-// Lightbox sederhana untuk lihat foto besar (selfie absen, lampiran, dll)
+// Gambar yang dimuat ON-DEMAND dari brankas ('img:<id>'); base64/url ditampilkan langsung. `fallback` tampil selama memuat.
+function AsyncImg({ refId, alt = '', className = '', onClick, fallback = null, title }) {
+  const [src, setSrc] = useState(() => (refId && (isInlineImg(refId) || !isImgRef(refId))) ? refId : '');
+  useEffect(() => {
+    let alive = true;
+    if (!refId) { setSrc(''); return; }
+    if (isInlineImg(refId) || !isImgRef(refId)) { setSrc(refId); return; }
+    setSrc('');
+    fetchImage(refId).then(s => { if (alive) setSrc(s); });
+    return () => { alive = false; };
+  }, [refId]);
+  if (!src) return fallback;
+  return <img src={src} alt={alt} title={title} className={className} onClick={onClick} />;
+}
+
+// Lightbox sederhana untuk lihat foto besar (selfie absen, lampiran, dll) — resolve ref brankas otomatis
 function ImageLightbox({ src, title, onClose }) {
+  const [resolved, setResolved] = useState(() => (src && (isInlineImg(src) || !isImgRef(src))) ? src : '');
+  useEffect(() => {
+    let alive = true;
+    if (!src) { setResolved(''); return; }
+    if (isInlineImg(src) || !isImgRef(src)) { setResolved(src); return; }
+    setResolved('');
+    fetchImage(src).then(s => { if (alive) setResolved(s); });
+    return () => { alive = false; };
+  }, [src]);
   return createPortal(
     <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-sm z-[120] flex items-center justify-center p-4" onClick={onClose}>
       <div className="max-w-3xl w-full" onClick={e => e.stopPropagation()}>
@@ -443,7 +510,9 @@ function ImageLightbox({ src, title, onClose }) {
           <div className="text-white text-sm font-semibold truncate">{title || 'Foto'}</div>
           <button onClick={onClose} className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg p-2"><X className="w-5 h-5" /></button>
         </div>
-        <img src={src} alt={title || 'Foto'} className="w-full max-h-[80vh] object-contain rounded-2xl bg-black/30" />
+        {resolved
+          ? <img src={resolved} alt={title || 'Foto'} className="w-full max-h-[80vh] object-contain rounded-2xl bg-black/30" />
+          : <div className="w-full h-64 flex items-center justify-center text-white/70 text-sm">Memuat foto…</div>}
       </div>
     </div>,
     document.body
@@ -587,7 +656,8 @@ const BACKUP_KEYS = [
   'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history',
   'partner-feedback:all', 'swot:external', 'backup:last', 'leave-requests:all',
   'drive:auto-backup', 'backup:drive-last',
-  'keuangan:cashflow'
+  'keuangan:cashflow',
+  'img:store' // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
@@ -657,6 +727,47 @@ async function applyMergeRestore(data) {
     }
   }
   return n;
+}
+
+// ====== MIGRASI sekali: pindahkan foto base64 LAMA (masih nempel di record) ke brankas img: ======
+// Idempoten & aman: hanya yang masih 'data:...' dipindah; yang sudah ref dilewati. Boleh dijalankan berkali-kali.
+// Per-record pakai set per-baris (anti tabrakan); array (users/reports/feedback/keuangan) baca-segar lalu tulis sekali (get throw → batal, lindungi data).
+async function _migrateImgFields(rec, fields) {
+  let changed = false;
+  for (const f of fields) {
+    if (f.multi) {
+      if (Array.isArray(rec[f.name]) && rec[f.name].some(isInlineImg)) { rec[f.name] = await materializeImages(rec[f.name]); changed = true; }
+    } else if (isInlineImg(rec[f.name])) { rec[f.name] = await putImage(rec[f.name]); changed = true; }
+  }
+  return changed;
+}
+async function _migratePerRecord(loader, prefix, fields) {
+  const recs = await loader(); // throw saat koneksi gagal → batalkan (jangan rusak data)
+  let n = 0;
+  for (const rec of recs) {
+    if (!rec || rec.id == null) continue;
+    if (await _migrateImgFields(rec, fields)) { const ok = await storage.set(prefix + rec.id, rec); if (!ok) throw new Error('Gagal migrasi ' + prefix + rec.id); n++; }
+  }
+  return n;
+}
+async function _migrateArray(key, fields) {
+  const list = await storage.getList(key); // throw → batal
+  let any = false;
+  for (const item of list) { if (item && await _migrateImgFields(item, fields)) any = true; }
+  if (any) { const ok = await storage.set(key, list); if (!ok) throw new Error('Gagal migrasi ' + key); }
+  return any ? 1 : 0;
+}
+async function migrateImagesToVault({ force = false } = {}) {
+  if (!force) { try { if (await storage.get('imgvault:migrated-v1')) return { skipped: true, moved: 0 }; } catch { /* koneksi gagal → coba lagi nanti */ } }
+  let moved = 0;
+  moved += await _migratePerRecord(loadDailyReports, RPT_REC_PREFIX, [{ name: 'attachments', multi: true }]);
+  moved += await _migratePerRecord(loadAffEntries, AFF_REC_PREFIX, [{ name: 'proofs', multi: true }]);
+  moved += await _migrateArray('users:list', [{ name: 'avatarImage' }]);
+  moved += await _migrateArray('reports:all', [{ name: 'attachments', multi: true }]);
+  moved += await _migrateArray('feedback:all', [{ name: 'images', multi: true }]);
+  moved += await _migrateArray('keuangan:cashflow', [{ name: 'buktiImg' }]);
+  await storage.set('imgvault:migrated-v1', true);
+  return { done: true, moved };
 }
 
 // Divisi tim Masjid Affiliate (sesuai struktur Al-Kahfi Corp)
@@ -949,6 +1060,7 @@ export default function App() {
     if (!currentUser?.id) return;
     autoBackupIfDue(currentUser.name);          // snapshot ke server (Supabase)
     driveAutoBackupIfDue(currentUser.name);     // snapshot ke Google Drive (kalau diaktifkan)
+    if (currentUser.role === 'owner') migrateImagesToVault().catch(e => console.warn('Migrasi foto ditunda:', e?.message || e)); // 1x: foto base64 lama → brankas (hemat egress)
   }, [currentUser?.id]);
 
   const toggleSidebar = async () => {
@@ -958,6 +1070,7 @@ export default function App() {
   };
 
   const handleProfileSave = async (updates) => {
+    if ('avatarImage' in updates) updates = { ...updates, avatarImage: await putImage(updates.avatarImage) }; // foto ke brankas, simpan ref
     const list = await storage.getList('users:list');
     const updated = list.map(u => u.id === currentUser.id ? { ...u, ...updates } : u);
     await storage.set('users:list', updated);
@@ -1770,7 +1883,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
             <button onClick={onOpenProfile} title="Profil Saya"
               className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center font-bold text-sm flex-shrink-0 overflow-hidden ring-2 ring-blue-400/40 hover:ring-blue-400/80 transition text-white">
               {user.avatarImage
-                ? <img src={user.avatarImage} alt="" className="w-full h-full object-cover" />
+                ? <AsyncImg refId={user.avatarImage} alt="" className="w-full h-full object-cover" fallback={user.name.charAt(0).toUpperCase()} />
                 : user.name.charAt(0).toUpperCase()}
             </button>
             <button onClick={onOpenProfile} className="flex-1 min-w-0 text-left hover:opacity-90 transition">
@@ -1791,7 +1904,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
           <button onClick={onOpenProfile} title={`${user.name} — ${ROLES[user.role].label} (klik untuk profil)`}
             className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center font-bold text-sm overflow-hidden ring-2 ring-blue-400/40 hover:ring-blue-400/80 transition text-white">
             {user.avatarImage
-                ? <img src={user.avatarImage} alt="" className="w-full h-full object-cover" />
+                ? <AsyncImg refId={user.avatarImage} alt="" className="w-full h-full object-cover" fallback={user.name.charAt(0).toUpperCase()} />
                 : user.name.charAt(0).toUpperCase()}
             </button>
             <button onClick={onLogout} title="Keluar"
@@ -2176,7 +2289,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                       <button key={u.id} onClick={() => { setView(user.role !== 'operasional' ? 'users' : 'leaderboard'); setShowSearchDropdown(false); setSearchQuery(''); }}
                         className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-700 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden">
-                          {u.avatarImage ? <img src={u.avatarImage} alt="" className="w-full h-full object-cover" /> : u.name.charAt(0).toUpperCase()}
+                          {u.avatarImage ? <AsyncImg refId={u.avatarImage} alt="" className="w-full h-full object-cover" fallback={u.name.charAt(0).toUpperCase()} /> : u.name.charAt(0).toUpperCase()}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-medium text-slate-900 truncate">{u.name}</div>
@@ -2295,7 +2408,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
         <button onClick={onOpenProfile}
           className="hidden md:flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 transition">
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-blue-700 flex items-center justify-center text-xs font-bold text-white overflow-hidden">
-            {user.avatarImage ? <img src={user.avatarImage} alt="" className="w-full h-full object-cover" /> : user.name.charAt(0).toUpperCase()}
+            {user.avatarImage ? <AsyncImg refId={user.avatarImage} alt="" className="w-full h-full object-cover" fallback={user.name.charAt(0).toUpperCase()} /> : user.name.charAt(0).toUpperCase()}
           </div>
           <div className="text-left min-w-0 max-w-[120px]">
             <div className="text-xs font-semibold text-slate-900 truncate">{user.name.split(' ')[0]}</div>
@@ -5251,7 +5364,7 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
                   <div key={c.id} className={`flex gap-2 ${isMine ? 'flex-row-reverse' : ''}`}>
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0 overflow-hidden">
                       {c.authorAvatar
-                        ? <img src={c.authorAvatar} alt="" className="w-full h-full object-cover" />
+                        ? <AsyncImg refId={c.authorAvatar} alt="" className="w-full h-full object-cover" fallback={c.authorName.charAt(0).toUpperCase()} />
                         : c.authorName.charAt(0).toUpperCase()}
                     </div>
                     <div className={`max-w-[80%] ${isMine ? 'items-end' : ''} flex flex-col`}>
@@ -6059,6 +6172,7 @@ function ReportsView({ user, allUsers }) {
   };
 
   const handleSave = async (data) => {
+    if (Array.isArray(data.attachments)) data = { ...data, attachments: await materializeImages(data.attachments) }; // lampiran ke brankas
     let list = await storage.getList('reports:all');
     if (editing) {
       list = list.map(r => r.id === editing.id ? { ...r, ...data } : r);
@@ -6165,7 +6279,7 @@ function ReportsView({ user, allUsers }) {
                   <div className="text-[10px] font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Paperclip className="w-3 h-3" /> Bukti ({r.attachments.length})</div>
                   <div className="flex gap-2 flex-wrap">
                     {r.attachments.map((img, i) => (
-                      <img key={i} src={img} alt={`Bukti ${i + 1}`}
+                      <AsyncImg key={i} refId={img} alt={`Bukti ${i + 1}`}
                         onClick={() => setLightbox({ src: img, title: `Bukti laporan ${r.authorName}` })}
                         className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition" />
                     ))}
@@ -6250,7 +6364,7 @@ function ReportForm({ report, prefill, onSave, onClose }) {
           <div className="flex items-center gap-2 flex-wrap">
             {attachments.map((img, i) => (
               <div key={i} className="relative">
-                <img src={img} alt={`Bukti ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                <AsyncImg refId={img} alt={`Bukti ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
                 <button onClick={() => setAttachments(attachments.filter((_, x) => x !== i))}
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow">
                   <X className="w-3 h-3" />
@@ -6919,6 +7033,7 @@ function AffiliateAccountsView({ user, allUsers }) {
   };
   const saveEntry = async (data) => {
     try {
+      if (Array.isArray(data.proofs)) data = { ...data, proofs: await materializeImages(data.proofs) }; // bukti GMV ke brankas
       const list = await loadAffEntries(); // baca utk cek duplikat akun+tanggal (throw → batal simpan, lindungi data)
       const existing = list.find(e => e.accountId === data.accountId && e.date === data.date);
       const rec = existing
@@ -7228,7 +7343,7 @@ function AccountGmvInputModal({ account, initial, onSave, onClose }) {
           <div className="flex items-center gap-2 flex-wrap">
             {proofs.map((img, i) => (
               <div key={i} className="relative">
-                <img src={img} alt={`Bukti ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                <AsyncImg refId={img} alt={`Bukti ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
                 <button onClick={() => setProofs(proofs.filter((_, x) => x !== i))}
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow">
                   <X className="w-3 h-3" />
@@ -10616,7 +10731,7 @@ function FeedbackView({ user, allUsers }) {
     if (!msg.trim()) return;
     setBusy(true);
     const item = {
-      id: uid(), type, message: msg.trim(), page: page.trim(), images,
+      id: uid(), type, message: msg.trim(), page: page.trim(), images: await materializeImages(images),
       userId: user.id, userName: user.name, userRole: user.role,
       status: 'baru', createdAt: new Date().toISOString(), replies: []
     };
@@ -10758,7 +10873,7 @@ function FeedbackView({ user, allUsers }) {
                     {(item.images || []).length > 0 && (
                       <div className="flex gap-2 mt-2 flex-wrap">
                         {item.images.map((img, i) => (
-                          <img key={i} src={img} alt={`Lampiran ${i + 1}`}
+                          <AsyncImg key={i} refId={img} alt={`Lampiran ${i + 1}`}
                             onClick={() => setLightbox({ src: img, title: `Lampiran dari ${item.userName}` })}
                             className="w-20 h-20 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition" />
                         ))}
@@ -10842,6 +10957,19 @@ function SettingsView({ user, settings, onSave }) {
   const [driveAuto, setDriveAuto] = useState(false);
   const driveEnabled = !!GOOGLE_CLIENT_ID;
   useEffect(() => { (async () => { try { setDriveLast(await storage.get('backup:drive-last')); setDriveAuto(!!(await storage.get('drive:auto-backup'))); } catch {} })(); }, []);
+
+  // Optimasi foto (pindahkan base64 lama ke brankas img:) — hemat egress
+  const [imgOptBusy, setImgOptBusy] = useState(false);
+  const [imgOptMsg, setImgOptMsg] = useState(null);
+  const runImageOptimize = async () => {
+    setImgOptMsg(null); setImgOptBusy(true);
+    try {
+      const res = await migrateImagesToVault({ force: true });
+      setImgOptMsg({ type: 'ok', text: `Selesai. ${res.moved || 0} kelompok foto dipindahkan ke brankas. Auto-refresh tidak lagi menarik foto besar — egress turun.` });
+    } catch (e) {
+      setImgOptMsg({ type: 'err', text: 'Gagal: ' + (e?.message || e) + '. Coba lagi saat koneksi stabil.' });
+    } finally { setImgOptBusy(false); }
+  };
 
   const doDriveBackup = async () => {
     setDriveMsg(null); setDriveBusy(true);
@@ -11232,6 +11360,27 @@ function SettingsView({ user, settings, onSave }) {
           )}
         </div>
 
+        {/* Optimasi foto — hemat egress */}
+        {(user.role === 'owner' || user.role === 'manajer') && (
+          <div className="border-t border-slate-100 pt-3">
+            <div className="text-sm font-semibold text-slate-800 flex items-center gap-2 mb-1">
+              <Sparkles className="w-4 h-4 text-blue-600" /> Optimasi Foto (Hemat Egress)
+            </div>
+            <p className="text-[11px] text-slate-500 mb-2 leading-relaxed">
+              Pindahkan foto lama (profil, bukti GMV, lampiran laporan, bukti keuangan) ke <b>brankas terpisah</b> supaya tidak ikut ke-download tiap halaman auto-refresh. Jalankan <b>sekali</b> setelah deploy. Aman & otomatis dilewati untuk foto yang sudah dipindah. Sebaiknya backup dulu, dan jalankan saat tim tidak sedang banyak input.
+            </p>
+            <button onClick={runImageOptimize} disabled={imgOptBusy}
+              className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 px-4 rounded-xl font-semibold text-sm transition shadow-sm">
+              <Sparkles className="w-4 h-4" /> {imgOptBusy ? 'Memproses… jangan tutup halaman' : 'Optimalkan Foto Sekarang'}
+            </button>
+            {imgOptMsg && (
+              <div className={`text-[11px] mt-2 p-2 rounded-lg ${imgOptMsg.type === 'ok' ? 'text-emerald-800 bg-emerald-50 border border-emerald-200' : 'text-red-700 bg-red-50 border border-red-200'}`}>
+                {imgOptMsg.type === 'ok' ? '✓ ' : '⚠️ '}{imgOptMsg.text}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Auto-backup harian (server) */}
         <div className="border-t border-slate-100 pt-3">
           <div className="text-sm font-semibold text-slate-800 flex items-center gap-2 mb-1"><Database className="w-4 h-4 text-emerald-600" /> Auto-Backup Harian</div>
@@ -11455,7 +11604,7 @@ function TodosView({ user, allUsers }) {
                         <div className="flex items-center gap-1.5 min-w-0">
                           <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[9px] font-bold text-white overflow-hidden flex-shrink-0">
                             {ownerUser?.avatarImage
-                              ? <img src={ownerUser.avatarImage} alt="" className="w-full h-full object-cover" />
+                              ? <AsyncImg refId={ownerUser.avatarImage} alt="" className="w-full h-full object-cover" fallback={todo.ownerName.charAt(0).toUpperCase()} />
                               : todo.ownerName.charAt(0).toUpperCase()}
                           </div>
                           <span className="text-[10px] font-semibold text-slate-700 truncate">{todo.ownerName}</span>
@@ -11607,6 +11756,7 @@ function DailyReportsView({ user, allUsers }) {
 
   const handleSaveReport = async (data) => {
     try {
+      if (Array.isArray(data.attachments)) data = { ...data, attachments: await materializeImages(data.attachments) }; // lampiran ke brankas
       if (editing) {
         const updated = { ...editing, ...data, updatedAt: new Date().toISOString() };
         const ok = await storage.set(RPT_REC_PREFIX + updated.id, updated);
@@ -11950,7 +12100,7 @@ function DailyReportsView({ user, allUsers }) {
                           <div className="text-[10px] font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Paperclip className="w-3 h-3" /> Bukti ({r.attachments.length})</div>
                           <div className="flex gap-2 flex-wrap">
                             {r.attachments.map((img, i) => (
-                              <img key={i} src={img} alt={`Bukti ${i + 1}`}
+                              <AsyncImg key={i} refId={img} alt={`Bukti ${i + 1}`}
                                 onClick={() => setLightbox({ src: img, title: `Bukti laporan ${r.authorName} · ${fmtDate(r.date)}` })}
                                 className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition" />
                             ))}
@@ -12366,7 +12516,7 @@ function DailyReportFormDynamic({ report, user, templates, onSave, onClose }) {
           <div className="flex items-center gap-2 flex-wrap">
             {attachments.map((img, i) => (
               <div key={i} className="relative">
-                <img src={img} alt={`Bukti ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                <AsyncImg refId={img} alt={`Bukti ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
                 <button onClick={() => setAttachments(attachments.filter((_, x) => x !== i))}
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow">
                   <X className="w-3 h-3" />
@@ -13513,7 +13663,7 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
           <div className="relative">
             <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white font-bold text-3xl overflow-hidden border-4 border-white shadow-lg">
               {form.avatarImage
-                ? <img src={form.avatarImage} alt="" className="w-full h-full object-cover" />
+                ? <AsyncImg refId={form.avatarImage} alt="" className="w-full h-full object-cover" fallback={form.name.charAt(0).toUpperCase()} />
                 : form.name.charAt(0).toUpperCase()}
             </div>
             <button onClick={() => fileRef.current?.click()} disabled={uploading}
@@ -13751,7 +13901,7 @@ function FinanceInputModal({ user, editing, onClose, onSave }) {
               <ImagePlus className="w-4 h-4" /> {form.buktiImg ? 'Ganti Foto' : 'Pilih Foto'}
               <input type="file" accept="image/*" className="hidden" onChange={e => handleImg(e.target.files?.[0])} />
             </label>
-            {form.buktiImg && <img src={form.buktiImg} alt="bukti" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />}
+            {form.buktiImg && <AsyncImg refId={form.buktiImg} alt="bukti" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />}
             {form.buktiImg && <button onClick={() => set('buktiImg', null)} className="text-xs text-rose-600 font-semibold">Hapus</button>}
           </div>
         </div>
@@ -13958,6 +14108,7 @@ function KeuanganView({ user, allUsers }) {
 
   const saveItem = async (data) => {
     try {
+      if (isInlineImg(data.buktiImg)) data = { ...data, buktiImg: await putImage(data.buktiImg) }; // bukti transaksi ke brankas
       let list = await storage.getList('keuangan:cashflow');
       if (editing) list = list.map(e => e.id === editing.id ? { ...e, ...data, updatedAt: new Date().toISOString() } : e);
       else list.unshift({ id: uid(), ...data, inputById: user.id, inputByName: user.name, createdAt: new Date().toISOString() });
