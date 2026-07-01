@@ -241,9 +241,28 @@ Hasil: SEMUA modul array rawan-tabrakan kini per-record (absensi, laporan harian
 - **Fix:** `const isNew = !(editing && editing.id)` (penentu dari ada-tidaknya id) + branch new/edit & optimistic dibalik mengikutinya. Self-heal di `loadCalendar`: record tanpa id (key rusak `calendar:rec:undefined`) otomatis diberi id baru, dipindah, key rusak dihapus (idempoten).
 - **Pelajaran:** hati-hati state dipakai ganda (prefill vs entity); kunci per-record HARUS dari id yang dijamin ada.
 
+### 27 Jun 2026 — BRANKAS FOTO `img:` (tahap 1 egress, build lulus)
+
+- Foto base64 dipindah dari record ke baris terpisah `img:<id>` (value `{id,d}`); record cukup simpan ref `img:<id>`. Tujuan: foto TIDAK ikut ke-download tiap polling list → egress turun.
+- Helper: `IMG_PREFIX`, `putImage`/`materializeImage(s)` (base64 → ref saat simpan), `fetchImage` (ambil on-demand + cache per sesi `_imgCache`/`_imgPending`), `isImgRef`/`isInlineImg`, `loadImageStore` (backup). Komponen display `AsyncImg` + `ImageLightbox` resolve ref/base64/url.
+- Semua 6 jalur simpan foto lewat `putImage`/`materializeImages`: avatar (users:list), lampiran laporan harian (daily-reports) & mingguan (reports:all), bukti GMV (affiliate-gmv proofs), gambar feedback, bukti keuangan (buktiImg). Migrasi 1x `migrateImagesToVault` (flag `imgvault:migrated-v1`) + tombol paksa di Pengaturan. `img:store` masuk BACKUP_KEYS. (Selesai antara 24–27 Jun; tak sempat tercatat.)
+
+### 1 Jul 2026 — FOTO KE SUPABASE STORAGE (tahap 2 egress, backlog selesai di kode)
+
+Melanjutkan brankas `img:` (yang masih menaruh foto base64 di DALAM database) → pindah ke **Supabase Storage** (objek/CDN): foto disajikan via URL publik + di-cache browser/CDN (Cache-Control 1 thn) → tak ke-download berulang & DB tetap kecil.
+
+- **Helper baru** (cari `SUPABASE STORAGE` di App.jsx): `STORAGE_BUCKET` (env `VITE_SUPABASE_BUCKET`, default `photos`), `_storageProbe` (flag sesi: null/true/false), `_isStorageConfigError`, `dataUrlToBlob`, `uploadImageToStorage` → `{url,path}|null`, `removeStorageImage`, + selfie: `putSelfie`/`selfieSrc`/`delSelfie`.
+- **`putImage` di-upgrade:** coba Storage dulu (return URL publik); bila gagal/bucket belum siap → **fallback OTOMATIS ke brankas DB `img:`** (perilaku lama). App **tak pernah rusak** dengan/atau tanpa bucket. Karena putImage satu-satunya choke point, ke-6 jalur simpan langsung ikut. Display sudah menangani URL polos apa adanya (fetchImage/AsyncImg/ImageLightbox) → tanpa perubahan tampilan.
+- **Selfie absen** (`selfie:<recId>`, mekanisme terpisah): `proceedAbsen` simpan `putSelfie()` = `{url,path}` (Storage) atau base64 (fallback); `viewSelfie` unwrap via `selfieSrc`; prune 60 hari + `deleteRecord` + `deleteAllRecords` pakai `delSelfie` (hapus row + objek Storage → tak jadi sampah).
+- **Migrasi di-perluas** (`_imageFieldToStorage`): kini pindahkan base64 LAMA **dan** ref brankas `img:<id>` → URL Storage; row brankas dihapus **SETELAH** record tersimpan (array `garbage`, aman dari partial-fail). Idempoten; bila Storage belum siap, ref `img:` dibiarkan (no-op). Fungsi `migrateImagesToVault` → **rename** `migratePhotosToStorage` (return `{moved,probe}`); auto-run 1x owner login (flag lama `imgvault:migrated-v1` dipertahankan → install lama TIDAK auto-migrasi massal saat deploy; owner klik tombol "Optimalkan Foto Sekarang" saat siap). Pesan tombol beri tahu bila bucket belum disiapkan.
+- **Setup 1x oleh user (WAJIB agar aktif):** `supabase-storage-setup.sql` (bikin bucket publik `photos` + policy `storage.objects` untuk anon insert/select/update/delete) dijalankan di Supabase SQL Editor; panduan `PANDUAN-SUPABASE-STORAGE.md`. Sebelum aktif, foto tetap masuk brankas DB (aman).
+- **Catatan backup:** foto di Storage TIDAK ikut backup JSON/Drive (yang ikut hanya data + foto yang masih di brankas `img:`); foto di Storage durable di Supabase. Bila rebuild project, pindah juga isi bucket. **Keamanan:** bucket publik (setara akses `kv_store` sekarang), URL id acak.
+- **Verifikasi (node tak ada di mesin user — build final di Vercel):** bracket-delta diff vs commit pra-ubah = 0 utk `() {} []`; parse pure-JS blok baru via JavaScriptCore (osascript JXA) lulus tanpa SyntaxError; rename bersih (0 sisa `migrateImagesToVault`). Semua top-level = function declaration (hoisted) / const modul → tanpa TDZ.
+- **FIX pasca review adversarial (multi-agent):** migrasi vault-drain awal punya bug **foto hilang** bila 1 ref `img:<id>` dipakai >1 record (mis. setelah restore backup / laporan mingguan menyalin lampiran harian): record pertama menghapus baris brankas → record kedua gagal `fetchImage` → tersimpan dgn ref rusak. **Perbaikan:** (a) `ctx.refToUrl` (Map ref→URL, dedup 1x per migrasi lintas semua loader), (b) penghapusan baris brankas DITUNDA sampai SELURUH migrasi selesai (`ctx.garbage` dihapus di akhir `migratePhotosToStorage`) → tak ada baris terhapus selagi record lain butuh + partial-fail = 0 foto hilang. Bonus: `viewSelfie` dibungkus try/finally (tombol tak nyangkut "memuat" saat koneksi putus). Sisa (pra-ada, dampak kecil, tak diubah): `storage.get` index selfie di `deleteRecord`/`deleteAllRecords` tak di-guard → paling banter entri index yatim (dibersihkan prune) / abort aman.
+
 ---
 
-## 4. Status Terkini (per 24 Jun 2026)
+## 4. Status Terkini (per 1 Jul 2026)
 
 - App live & dipakai harian. Build terakhir lulus (~4.96–5.23s), ~12.400+ baris.
 - Seluruh modul array rawan-tabrakan sudah per-record → data hilang massal teratasi di akar.
@@ -251,14 +270,14 @@ Hasil: SEMUA modul array rawan-tabrakan kini per-record (absensi, laporan harian
 - Google Calendar terpusat (akun Kholidfath), tanpa prompt OAuth ke karyawan.
 - Modul Keuangan lengkap (cash flow, laba rugi, dashboard, SWOT) + data historis 421 transaksi siap diimpor.
 - PWA installable, ikon kubah hijau, badge notif (saat app terbuka).
-- **Perhatian aktif:** EGRESS Supabase over-kuota — sudah dioptimasi (polling 30-60s), grace period s/d **23 Jul 2026**. Pantau beberapa hari; bila masih mepet, pindahkan foto base64 ke Storage.
+- **Perhatian aktif:** EGRESS Supabase over-kuota — sudah dioptimasi (polling 30-60s) + foto dipindah ke Supabase Storage (fallback brankas DB bila bucket belum siap), grace period s/d **23 Jul 2026**. Aktivasi penuh butuh user jalankan `supabase-storage-setup.sql` sekali, lalu tombol "Optimalkan Foto Sekarang".
 
 ---
 
 ## 5. Backlog Tersisa
 
 - Harden `handleDelete` kalender (cek `storage.set` seperti handleSave).
-- Foto selfie/bukti GMV → Google Drive/Supabase Storage (tahap 2, kurangi base64 di DB — terkait egress).
+- ~~Foto selfie/bukti GMV → Supabase Storage~~ **SELESAI di kode (1 Jul 2026)** — `putImage`+selfie upload ke bucket `photos`, fallback brankas DB. Sisa: user jalankan `supabase-storage-setup.sql` sekali + tombol "Optimalkan Foto Sekarang" untuk migrasi foto lama.
 - Command Palette (Cmd+K), loading skeleton.
 - Supabase Auth + RLS (saat ini publishable key + RLS permissive).
 - Push notification beneran (Web Push + VAPID + server, mis. Supabase Edge Function) — muncul saat app ditutup.
