@@ -175,10 +175,10 @@ function _newImgId() { return Date.now().toString(36) + Math.random().toString(3
 // Simpan 1 gambar base64 → kembalikan ref 'img:<id>'. Kalau sudah ref / bukan base64 (url/null) → kembalikan apa adanya.
 async function putImage(b64) {
   if (!b64 || isImgRef(b64) || !isInlineImg(b64)) return b64 ?? null;
-  // 1) Coba Supabase Storage (CDN) → simpan URL publik. Egress turun (cache browser/CDN) + DB tetap kecil.
+  // Langkah 1: coba Supabase Storage (CDN) → simpan URL publik. Egress turun (cache browser/CDN) + DB tetap kecil.
   const up = await uploadImageToStorage(b64);
   if (up && up.url) return up.url;
-  // 2) Fallback brankas DB 'img:' (bila bucket belum siap / upload gagal) — kompatibel penuh dgn versi lama.
+  // Langkah 2: fallback brankas DB 'img:' (bila bucket belum siap / upload gagal) — kompatibel penuh dgn versi lama.
   const id = _newImgId();
   const ref = IMG_PREFIX + id;
   const ok = await storage.set(ref, { id, d: b64 });
@@ -806,73 +806,77 @@ async function applyMergeRestore(data) {
 
 // ====== MIGRASI: pindahkan foto ke Supabase Storage (base64 LAMA & ref brankas 'img:' → URL Storage) ======
 // Idempoten & aman: yang sudah URL Storage dilewati. base64 → upload (fallback vault bila Storage belum siap);
-// ref 'img:<id>' → ambil dari brankas, upload ke Storage, tulis URL, lalu HAPUS row brankas SETELAH record tersimpan.
+// ref 'img:<id>' → ambil dari brankas, upload ke Storage, tulis URL.
+// PENTING (anti foto hilang): sebuah ref 'img:<id>' BISA dipakai >1 record (mis. setelah restore backup /
+// laporan mingguan menyalin lampiran harian). Karena itu:
+//   (a) `ctx.refToUrl` memetakan ref→URL sekali per migrasi → kemunculan berikutnya pakai URL yang sama
+//       (tak fetch/upload ulang, tak menghasilkan ref rusak), dan
+//   (b) penghapusan baris brankas DITUNDA sampai SELURUH migrasi selesai (`ctx.garbage` dihapus di akhir
+//       migratePhotosToStorage) → tak ada baris brankas terhapus selagi record lain masih memerlukannya.
 // Bila Storage belum siap, ref dibiarkan di brankas (no-op aman). Per-record set per-baris (anti tabrakan);
 // array (users/reports/feedback/keuangan) baca-segar lalu tulis sekali (get throw → batal, lindungi data).
-// Konversi 1 nilai gambar → URL Storage. `garbage` menampung key brankas 'img:' yg boleh dihapus SETELAH record aman.
-async function _imageFieldToStorage(v, garbage) {
+// Konversi 1 nilai gambar → URL Storage. `ctx` = { refToUrl:Map, garbage:[] } dibagi ke SELURUH migrasi.
+async function _imageFieldToStorage(v, ctx) {
   if (isInlineImg(v)) return await putImage(v);          // base64 → Storage (atau brankas bila fallback)
   if (isImgRef(v)) {                                      // ref brankas DB → pindahkan ke Storage
     if (_storageProbe === false) return v;                // Storage belum siap → biarkan di brankas (aman)
+    if (ctx.refToUrl.has(v)) return ctx.refToUrl.get(v);  // ref sama sudah dipindah → pakai URL yg sama (tak rusak)
     let b64 = '';
     try { b64 = await fetchImage(v); } catch { b64 = ''; }
     if (!isInlineImg(b64)) return v;                      // gagal ambil isi → jangan sentuh
     const up = await uploadImageToStorage(b64);
-    if (up && up.url) { garbage.push(v); _imgCache.delete(v); return up.url; }
+    if (up && up.url) { ctx.refToUrl.set(v, up.url); ctx.garbage.push(v); return up.url; }
     return v;                                             // upload gagal → tetap di brankas
   }
   return v;                                               // sudah URL / null / kosong
 }
-async function _migrateImgFields(rec, fields, garbage) {
+async function _migrateImgFields(rec, fields, ctx) {
   let changed = false;
   for (const f of fields) {
     if (f.multi) {
       if (Array.isArray(rec[f.name])) {
         let any = false; const out = [];
-        for (const x of rec[f.name]) { const nx = await _imageFieldToStorage(x, garbage); if (nx !== x) any = true; out.push(nx); }
+        for (const x of rec[f.name]) { const nx = await _imageFieldToStorage(x, ctx); if (nx !== x) any = true; out.push(nx); }
         if (any) { rec[f.name] = out; changed = true; }
       }
     } else {
-      const nv = await _imageFieldToStorage(rec[f.name], garbage);
+      const nv = await _imageFieldToStorage(rec[f.name], ctx);
       if (nv !== rec[f.name]) { rec[f.name] = nv; changed = true; }
     }
   }
   return changed;
 }
-async function _migratePerRecord(loader, prefix, fields) {
+async function _migratePerRecord(loader, prefix, fields, ctx) {
   const recs = await loader(); // throw saat koneksi gagal → batalkan (jangan rusak data)
   let n = 0;
   for (const rec of recs) {
     if (!rec || rec.id == null) continue;
-    const garbage = [];
-    if (await _migrateImgFields(rec, fields, garbage)) {
+    if (await _migrateImgFields(rec, fields, ctx)) {
       const ok = await storage.set(prefix + rec.id, rec); if (!ok) throw new Error('Gagal migrasi ' + prefix + rec.id);
-      for (const g of garbage) await storage.delete(g); // hapus brankas lama SETELAH record tersimpan (aman dari partial-fail)
-      n++;
+      n++; // penghapusan brankas ditunda ke akhir (ctx.garbage) — lihat catatan di atas
     }
   }
   return n;
 }
-async function _migrateArray(key, fields) {
+async function _migrateArray(key, fields, ctx) {
   const list = await storage.getList(key); // throw → batal
-  const garbage = [];
   let any = false;
-  for (const item of list) { if (item && await _migrateImgFields(item, fields, garbage)) any = true; }
-  if (any) {
-    const ok = await storage.set(key, list); if (!ok) throw new Error('Gagal migrasi ' + key);
-    for (const g of garbage) await storage.delete(g); // hapus brankas lama SETELAH array tersimpan
-  }
+  for (const item of list) { if (item && await _migrateImgFields(item, fields, ctx)) any = true; }
+  if (any) { const ok = await storage.set(key, list); if (!ok) throw new Error('Gagal migrasi ' + key); }
   return any ? 1 : 0;
 }
 async function migratePhotosToStorage({ force = false } = {}) {
   if (!force) { try { if (await storage.get('imgvault:migrated-v1')) return { skipped: true, moved: 0, probe: _storageProbe }; } catch { /* koneksi gagal → coba lagi nanti */ } }
+  const ctx = { refToUrl: new Map(), garbage: [] };
   let moved = 0;
-  moved += await _migratePerRecord(loadDailyReports, RPT_REC_PREFIX, [{ name: 'attachments', multi: true }]);
-  moved += await _migratePerRecord(loadAffEntries, AFF_REC_PREFIX, [{ name: 'proofs', multi: true }]);
-  moved += await _migrateArray('users:list', [{ name: 'avatarImage' }]);
-  moved += await _migrateArray('reports:all', [{ name: 'attachments', multi: true }]);
-  moved += await _migrateArray('feedback:all', [{ name: 'images', multi: true }]);
-  moved += await _migrateArray('keuangan:cashflow', [{ name: 'buktiImg' }]);
+  moved += await _migratePerRecord(loadDailyReports, RPT_REC_PREFIX, [{ name: 'attachments', multi: true }], ctx);
+  moved += await _migratePerRecord(loadAffEntries, AFF_REC_PREFIX, [{ name: 'proofs', multi: true }], ctx);
+  moved += await _migrateArray('users:list', [{ name: 'avatarImage' }], ctx);
+  moved += await _migrateArray('reports:all', [{ name: 'attachments', multi: true }], ctx);
+  moved += await _migrateArray('feedback:all', [{ name: 'images', multi: true }], ctx);
+  moved += await _migrateArray('keuangan:cashflow', [{ name: 'buktiImg' }], ctx);
+  // Hapus baris brankas 'img:' lama SETELAH SEMUA record tersimpan (ref bisa dipakai lintas record/loader).
+  for (const g of ctx.garbage) { await storage.delete(g); _imgCache.delete(g); }
   await storage.set('imgvault:migrated-v1', true);
   return { done: true, moved, probe: _storageProbe };
 }
@@ -9045,8 +9049,10 @@ function AttendanceView({ user, allUsers }) {
   // Lihat selfie sebuah record (dimuat saat diminta biar hemat data)
   const viewSelfie = async (r) => {
     setSelfieLoading(r.id);
-    const raw = await storage.get(`selfie:${r.id}`);
-    setSelfieLoading(null);
+    let raw = null;
+    try { raw = await storage.get(`selfie:${r.id}`); } // koneksi gagal → jangan biarkan tombol nyangkut "memuat"
+    catch (e) { return alert('Gagal memuat foto selfie (cek koneksi). Coba lagi.'); }
+    finally { setSelfieLoading(null); } // finally jalan sebelum return di catch → loading selalu direset
     const img = selfieSrc(raw); // URL Storage atau base64 (fallback) → ImageLightbox tampilkan langsung
     if (!img) return alert('Foto selfie tidak ditemukan (mungkin sudah dihapus otomatis setelah 60 hari).');
     setLightbox({ src: img, title: `Selfie ${r.userName} · ${new Date(r.timestamp).toLocaleString('id-ID')}` });
