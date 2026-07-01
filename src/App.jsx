@@ -163,6 +163,12 @@ const storage = {
   }
 };
 
+// ====== HEMAT EGRESS: jangan polling saat tab tidak dibuka ======
+// Bungkus callback interval: fn hanya jalan bila tab SEDANG dilihat (document visible).
+// Kalau tim membiarkan app terbuka di tab background, data TIDAK ditarik ulang tiap 30-60 dtk → egress turun banyak.
+// Saat user kembali ke tab, tarikan berikutnya (≤ interval) otomatis menyegarkan.
+const pollWhenVisible = (fn) => () => { if (typeof document === 'undefined' || document.visibilityState === 'visible') fn(); };
+
 // ====== BRANKAS GAMBAR (hemat egress): foto disimpan terpisah di key 'img:<id>', record cukup simpan ref. ======
 // Tujuan: foto base64 TIDAK lagi ikut ke-download tiap polling list (laporan harian, GMV, feedback, dll).
 // Foto dimuat ON-DEMAND saat ditampilkan saja + cache per sesi → polling jadi ringan, egress turun drastis.
@@ -2217,7 +2223,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
       }
     };
     loadNotifs();
-    const iv = setInterval(loadNotifs, 60000); // 60s: notif tak perlu sesering itu — hemat egress (data ditarik ulang)
+    const iv = setInterval(pollWhenVisible(loadNotifs), 60000); // 60s + hanya saat tab dibuka — hemat egress (data ditarik ulang)
     return () => { stopped = true; clearInterval(iv); };
   }, [user.id]);
 
@@ -4994,7 +5000,7 @@ function TasksView({ user, allUsers }) {
   const load = async () => setTasks(await loadTasks());
   useEffect(() => {
     load();
-    const iv = setInterval(load, 30000); // auto-refresh tiap 30 detik (hemat egress)
+    const iv = setInterval(pollWhenVisible(load), 30000); // auto-refresh tiap 30 detik (hemat egress)
     return () => clearInterval(iv);
   }, []);
 
@@ -6663,7 +6669,7 @@ function GmvView({ user, allUsers }) {
     setTargets((await storage.get('gmv:targets')) || {});
     setLoading(false);
   };
-  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
 
   const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
   const monthTargets = targets[mKey] || {};
@@ -7097,7 +7103,7 @@ function AffiliateAccountsView({ user, allUsers }) {
     setGoal(g && g[mKey] ? g[mKey] : DEFAULT_AFFILIATE_GOAL);
     setLoading(false);
   };
-  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, [mKey]);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, [mKey]);
 
   const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
   const canManage = isOwnerMgr || user.role === 'leader'; // Siti = leader
@@ -7552,7 +7558,7 @@ function KpiView({ user, allUsers }) {
     setCfg(normalizeKpiConfig(await storage.get('kpi:config')));
     setLoading(false);
   };
-  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
 
   const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
 
@@ -7761,7 +7767,7 @@ function ProblemsView({ user, allUsers }) {
   const [filter, setFilter] = useState({ status: 'aktif', urgency: 'all', division: 'all' });
 
   const load = async () => { setProblems(await storage.getList('problems:all')); setLoading(false); };
-  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
 
   const canHandle = user.role === 'owner' || user.role === 'manajer' || user.role === 'leader';
 
@@ -8067,7 +8073,7 @@ function MediaTasksView({ user, allUsers }) {
   const [tab, setTab] = useState('antrian');
 
   const load = async () => { setIdeas(await storage.getList('content-ideas:all')); setLoading(false); };
-  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
 
   const FORMATS = {
     reel: { label: 'Reel/Video', icon: '🎬' }, foto: { label: 'Foto/Carousel', icon: '📸' },
@@ -8201,7 +8207,7 @@ function SellersView({ user, allUsers }) {
   const [form, setForm] = useState({ name: '', shopName: '', phone: '', category: '', status: 'aktif', commission: '', note: '' });
 
   const load = async () => { setSellers(await storage.getList('sellers:all')); setLoading(false); };
-  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
 
   const openNew = () => { setEditing(null); setForm({ name: '', shopName: '', phone: '', category: '', status: 'aktif', commission: '', note: '' }); setShowForm(true); };
   const openEdit = (s) => { setEditing(s); setForm({ name: s.name, shopName: s.shopName || '', phone: s.phone || '', category: s.category || '', status: s.status || 'aktif', commission: s.commission || '', note: s.note || '' }); setShowForm(true); };
@@ -8881,7 +8887,7 @@ function AttendanceView({ user, allUsers }) {
       setLoading(false);
     }
   };
-  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
 
   const todayStr = new Date().toDateString();
   const myToday = records.filter(r => r.userId === user.id && new Date(r.timestamp).toDateString() === todayStr);
@@ -10306,7 +10312,7 @@ function AnnouncementsView({ user }) {
   const load = async () => setItems(await storage.getList('announcements:all'));
   useEffect(() => {
     load();
-    const iv = setInterval(load, 30000);
+    const iv = setInterval(pollWhenVisible(load), 30000);
     return () => clearInterval(iv);
   }, []);
 
@@ -10828,7 +10834,7 @@ function FeedbackView({ user, allUsers }) {
   const isManager = user.role === 'owner' || user.role === 'manajer';
 
   const load = async () => { setItems(await storage.getList('feedback:all')); setLoading(false); };
-  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
 
   const addImages = async (files) => {
     setImgBusy(true);
@@ -13219,7 +13225,7 @@ function CalendarView({ user, allUsers }) {
   const setEvents0 = async () => { try { setEvents(await loadCalendar()); } catch {} };
   const load = async () => { try { await migrateOldSchedule(); setEvents(await loadCalendar()); } catch (e) { console.warn('Gagal memuat kalender:', e?.message || e); } };
   // Muat saat buka + auto-refresh tiap 10 detik (biar agenda baru dari device lain ikut muncul)
-  useEffect(() => { load(); const iv = setInterval(() => setEvents0(), 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(() => setEvents0()), 30000); return () => clearInterval(iv); }, []);
   // Preload Google Identity Services agar popup saat simpan tidak diblokir
   useEffect(() => { if (GOOGLE_CLIENT_ID) loadGis().catch(() => {}); }, []);
 
@@ -14208,7 +14214,7 @@ function KeuanganView({ user, allUsers }) {
     catch (e) { console.warn('Load keuangan gagal (pertahankan data lama):', e?.message || e); }
     finally { setLoading(false); }
   };
-  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
 
   const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
   const shiftMonth = (delta) => { const [y, m] = mKey.split('-').map(Number); setMKey(monthKey(new Date(y, m - 1 + delta, 1))); };
