@@ -36,8 +36,9 @@ Edit `src/App.jsx` → commit ke `main` (GitHub Desktop) → push → Vercel aut
 File lain ikut di-commit HANYA bila berubah: `package.json`/`package-lock.json` (dep baru), `index.css` (CSS berubah), file PANDUAN/`.gs`.
 **Sebelum deploy besar:** backup dulu via Pengaturan App → Backup & Restore.
 
-## Perhatian Aktif (per 24 Jun 2026)
-- **Egress Supabase over-kuota** (8.91GB/5GB), grace period s/d **23 Jul 2026**. Sudah dioptimasi (polling 30–60s). Bila masih mepet: pindahkan foto base64 (avatar, bukti GMV) ke Supabase Storage.
+## Perhatian Aktif (per 1 Jul 2026)
+- **🚨 SUPABASE SUDAH DI-RESTRICT (bukan grace period lagi).** Error live: `Service ... restricted ... exceed_egress_quota. The project owner must upgrade their plan or remove spend caps to restore service.` → SEMUA baca/tulis gagal (login & dashboard tim DOWN di production). Pemulihan hanya bisa oleh owner: **upgrade plan Supabase** (restore instan, kuota jauh lebih besar) ATAU tunggu reset kuota egress siklus billing bulanan. Optimasi kode (polling + foto→Storage) mengurangi egress ke depan tapi TIDAK memulihkan restriksi yang sudah aktif.
+- **Foto → Supabase Storage (SUDAH di kode, 1 Jul):** `putImage` upload ke bucket `photos` (URL publik CDN, cache 1 thn) dengan **fallback otomatis ke brankas DB `img:`** bila bucket belum siap → app tak pernah rusak. **Butuh setup SEKALI oleh user:** jalankan `supabase-storage-setup.sql` di Supabase SQL Editor (bikin bucket + policy), lalu Pengaturan App → "Optimalkan Foto Sekarang" untuk memindahkan foto lama + selfie. Panduan: `PANDUAN-SUPABASE-STORAGE.md`.
 
 ## Backlog (lihat progress.MD §5 untuk detail)
-Harden `handleDelete` kalender · foto → Storage · Command Palette (Cmd+K) · Supabase Auth + RLS penuh · Web Push beneran · Neraca penuh keuangan.
+Harden `handleDelete` kalender · Command Palette (Cmd+K) · Supabase Auth + RLS penuh · Web Push beneran · Neraca penuh keuangan. (foto → Storage: SELESAI di kode, tunggu user jalankan SQL setup)
