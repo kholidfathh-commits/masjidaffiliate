@@ -175,6 +175,10 @@ function _newImgId() { return Date.now().toString(36) + Math.random().toString(3
 // Simpan 1 gambar base64 → kembalikan ref 'img:<id>'. Kalau sudah ref / bukan base64 (url/null) → kembalikan apa adanya.
 async function putImage(b64) {
   if (!b64 || isImgRef(b64) || !isInlineImg(b64)) return b64 ?? null;
+  // 1) Coba Supabase Storage (CDN) → simpan URL publik. Egress turun (cache browser/CDN) + DB tetap kecil.
+  const up = await uploadImageToStorage(b64);
+  if (up && up.url) return up.url;
+  // 2) Fallback brankas DB 'img:' (bila bucket belum siap / upload gagal) — kompatibel penuh dgn versi lama.
   const id = _newImgId();
   const ref = IMG_PREFIX + id;
   const ok = await storage.set(ref, { id, d: b64 });
@@ -204,6 +208,77 @@ function fetchImage(ref) {
 async function loadImageStore() {
   const rows = await storage.listByPrefix(IMG_PREFIX); // value tiap baris = {id,d}
   return rows.filter(r => r && r.id);
+}
+
+// ====== SUPABASE STORAGE (foto → CDN, egress turun + DB tetap kecil) ======
+// Foto besar (avatar, bukti GMV, lampiran laporan, bukti keuangan, selfie) di-upload ke bucket
+// Storage; record cukup menyimpan URL publiknya. Browser + CDN meng-cache foto (Cache-Control 1 thn)
+// → tidak ke-download berulang tiap render/poll → egress turun drastis & ukuran DB tetap kecil.
+// Bila bucket BELUM disiapkan (lihat supabase-storage-setup.sql) → OTOMATIS fallback ke brankas DB
+// 'img:' (aman, tetap jalan). Begitu bucket siap, foto BARU langsung masuk Storage tanpa ubah kode.
+const STORAGE_BUCKET = import.meta.env.VITE_SUPABASE_BUCKET || 'photos';
+let _storageProbe = null; // null=belum tahu | true=siap | false=belum siap (pakai fallback utk sesi ini)
+// Error yang menandakan bucket/policy belum disiapkan (bukan sekadar koneksi ngadat).
+function _isStorageConfigError(msg) {
+  const m = (msg || '').toLowerCase();
+  return m.includes('not found') || m.includes('bucket') || m.includes('does not exist')
+    || m.includes('row-level security') || m.includes('policy') || m.includes('unauthorized')
+    || m.includes('violates') || m.includes('403') || m.includes('404') || m.includes('permission');
+}
+// data:<mime>;base64,xxxx → { blob, ext, contentType }. Semua foto app = JPEG (compressImageFile), tapi umum aman.
+function dataUrlToBlob(dataUrl) {
+  const comma = dataUrl.indexOf(',');
+  const header = dataUrl.slice(0, comma);
+  const contentType = (/data:([^;]+)/.exec(header)?.[1]) || 'image/jpeg';
+  const body = dataUrl.slice(comma + 1);
+  let bytes;
+  if (/;base64/i.test(header)) {
+    const bin = atob(body);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  } else {
+    const dec = decodeURIComponent(body);
+    bytes = new Uint8Array(dec.length);
+    for (let i = 0; i < dec.length; i++) bytes[i] = dec.charCodeAt(i);
+  }
+  const ext = /png/i.test(contentType) ? 'png' : /webp/i.test(contentType) ? 'webp' : /gif/i.test(contentType) ? 'gif' : 'jpg';
+  return { blob: new Blob([bytes], { type: contentType }), ext, contentType };
+}
+// Upload 1 foto base64 → { url, path } (URL publik CDN) atau null bila Storage belum siap / gagal → pemanggil fallback.
+async function uploadImageToStorage(b64) {
+  if (!isInlineImg(b64)) return null;
+  if (_storageProbe === false) return null; // sudah ketahuan belum siap → langsung fallback (tak spam request)
+  try {
+    const { blob, ext, contentType } = dataUrlToBlob(b64);
+    const path = _newImgId() + '.' + ext;
+    const { error } = await supabase.storage.from(STORAGE_BUCKET)
+      .upload(path, blob, { contentType, cacheControl: '31536000', upsert: false });
+    if (error) {
+      if (_isStorageConfigError(error.message)) { _storageProbe = false; console.warn('Supabase Storage belum siap → pakai brankas DB. Detail:', error.message); }
+      else console.warn('Upload Storage gagal sementara, pakai brankas DB:', error.message);
+      return null;
+    }
+    _storageProbe = true;
+    const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+    return data?.publicUrl ? { url: data.publicUrl, path } : null;
+  } catch (e) { console.warn('Upload Storage error, pakai brankas DB:', e?.message || e); return null; }
+}
+// Hapus 1 objek Storage (best-effort; dipakai saat prune/hapus selfie agar tak jadi sampah).
+async function removeStorageImage(path) {
+  if (!path) return;
+  try { await supabase.storage.from(STORAGE_BUCKET).remove([path]); }
+  catch (e) { console.warn('Hapus objek Storage gagal:', e?.message || e); }
+}
+// ===== SELFIE ABSEN → Storage (fallback base64 di DB). Simpan {url,path} agar objek bisa dihapus saat prune 60 hari. =====
+async function putSelfie(b64) {
+  const up = await uploadImageToStorage(b64);
+  return up ? { url: up.url, path: up.path } : b64; // {url,path} bila Storage siap; base64 mentah bila fallback
+}
+function selfieSrc(v) { return (v && typeof v === 'object') ? (v.url || '') : (v || ''); } // ambil sumber tampil dari nilai selfie
+async function delSelfie(key) {
+  try { const v = await storage.get(key); if (v && typeof v === 'object' && v.path) await removeStorageImage(v.path); }
+  catch (e) { /* best-effort: objek Storage; row-nya tetap dihapus di bawah */ }
+  await storage.delete(key);
 }
 
 // ====== ABSENSI: baca per-record + migrasi/serap array lama 'attendance:all' otomatis ======
@@ -729,15 +804,38 @@ async function applyMergeRestore(data) {
   return n;
 }
 
-// ====== MIGRASI sekali: pindahkan foto base64 LAMA (masih nempel di record) ke brankas img: ======
-// Idempoten & aman: hanya yang masih 'data:...' dipindah; yang sudah ref dilewati. Boleh dijalankan berkali-kali.
-// Per-record pakai set per-baris (anti tabrakan); array (users/reports/feedback/keuangan) baca-segar lalu tulis sekali (get throw → batal, lindungi data).
-async function _migrateImgFields(rec, fields) {
+// ====== MIGRASI: pindahkan foto ke Supabase Storage (base64 LAMA & ref brankas 'img:' → URL Storage) ======
+// Idempoten & aman: yang sudah URL Storage dilewati. base64 → upload (fallback vault bila Storage belum siap);
+// ref 'img:<id>' → ambil dari brankas, upload ke Storage, tulis URL, lalu HAPUS row brankas SETELAH record tersimpan.
+// Bila Storage belum siap, ref dibiarkan di brankas (no-op aman). Per-record set per-baris (anti tabrakan);
+// array (users/reports/feedback/keuangan) baca-segar lalu tulis sekali (get throw → batal, lindungi data).
+// Konversi 1 nilai gambar → URL Storage. `garbage` menampung key brankas 'img:' yg boleh dihapus SETELAH record aman.
+async function _imageFieldToStorage(v, garbage) {
+  if (isInlineImg(v)) return await putImage(v);          // base64 → Storage (atau brankas bila fallback)
+  if (isImgRef(v)) {                                      // ref brankas DB → pindahkan ke Storage
+    if (_storageProbe === false) return v;                // Storage belum siap → biarkan di brankas (aman)
+    let b64 = '';
+    try { b64 = await fetchImage(v); } catch { b64 = ''; }
+    if (!isInlineImg(b64)) return v;                      // gagal ambil isi → jangan sentuh
+    const up = await uploadImageToStorage(b64);
+    if (up && up.url) { garbage.push(v); _imgCache.delete(v); return up.url; }
+    return v;                                             // upload gagal → tetap di brankas
+  }
+  return v;                                               // sudah URL / null / kosong
+}
+async function _migrateImgFields(rec, fields, garbage) {
   let changed = false;
   for (const f of fields) {
     if (f.multi) {
-      if (Array.isArray(rec[f.name]) && rec[f.name].some(isInlineImg)) { rec[f.name] = await materializeImages(rec[f.name]); changed = true; }
-    } else if (isInlineImg(rec[f.name])) { rec[f.name] = await putImage(rec[f.name]); changed = true; }
+      if (Array.isArray(rec[f.name])) {
+        let any = false; const out = [];
+        for (const x of rec[f.name]) { const nx = await _imageFieldToStorage(x, garbage); if (nx !== x) any = true; out.push(nx); }
+        if (any) { rec[f.name] = out; changed = true; }
+      }
+    } else {
+      const nv = await _imageFieldToStorage(rec[f.name], garbage);
+      if (nv !== rec[f.name]) { rec[f.name] = nv; changed = true; }
+    }
   }
   return changed;
 }
@@ -746,19 +844,28 @@ async function _migratePerRecord(loader, prefix, fields) {
   let n = 0;
   for (const rec of recs) {
     if (!rec || rec.id == null) continue;
-    if (await _migrateImgFields(rec, fields)) { const ok = await storage.set(prefix + rec.id, rec); if (!ok) throw new Error('Gagal migrasi ' + prefix + rec.id); n++; }
+    const garbage = [];
+    if (await _migrateImgFields(rec, fields, garbage)) {
+      const ok = await storage.set(prefix + rec.id, rec); if (!ok) throw new Error('Gagal migrasi ' + prefix + rec.id);
+      for (const g of garbage) await storage.delete(g); // hapus brankas lama SETELAH record tersimpan (aman dari partial-fail)
+      n++;
+    }
   }
   return n;
 }
 async function _migrateArray(key, fields) {
   const list = await storage.getList(key); // throw → batal
+  const garbage = [];
   let any = false;
-  for (const item of list) { if (item && await _migrateImgFields(item, fields)) any = true; }
-  if (any) { const ok = await storage.set(key, list); if (!ok) throw new Error('Gagal migrasi ' + key); }
+  for (const item of list) { if (item && await _migrateImgFields(item, fields, garbage)) any = true; }
+  if (any) {
+    const ok = await storage.set(key, list); if (!ok) throw new Error('Gagal migrasi ' + key);
+    for (const g of garbage) await storage.delete(g); // hapus brankas lama SETELAH array tersimpan
+  }
   return any ? 1 : 0;
 }
-async function migrateImagesToVault({ force = false } = {}) {
-  if (!force) { try { if (await storage.get('imgvault:migrated-v1')) return { skipped: true, moved: 0 }; } catch { /* koneksi gagal → coba lagi nanti */ } }
+async function migratePhotosToStorage({ force = false } = {}) {
+  if (!force) { try { if (await storage.get('imgvault:migrated-v1')) return { skipped: true, moved: 0, probe: _storageProbe }; } catch { /* koneksi gagal → coba lagi nanti */ } }
   let moved = 0;
   moved += await _migratePerRecord(loadDailyReports, RPT_REC_PREFIX, [{ name: 'attachments', multi: true }]);
   moved += await _migratePerRecord(loadAffEntries, AFF_REC_PREFIX, [{ name: 'proofs', multi: true }]);
@@ -767,7 +874,7 @@ async function migrateImagesToVault({ force = false } = {}) {
   moved += await _migrateArray('feedback:all', [{ name: 'images', multi: true }]);
   moved += await _migrateArray('keuangan:cashflow', [{ name: 'buktiImg' }]);
   await storage.set('imgvault:migrated-v1', true);
-  return { done: true, moved };
+  return { done: true, moved, probe: _storageProbe };
 }
 
 // Divisi tim Masjid Affiliate (sesuai struktur Al-Kahfi Corp)
@@ -1060,7 +1167,7 @@ export default function App() {
     if (!currentUser?.id) return;
     autoBackupIfDue(currentUser.name);          // snapshot ke server (Supabase)
     driveAutoBackupIfDue(currentUser.name);     // snapshot ke Google Drive (kalau diaktifkan)
-    if (currentUser.role === 'owner') migrateImagesToVault().catch(e => console.warn('Migrasi foto ditunda:', e?.message || e)); // 1x: foto base64 lama → brankas (hemat egress)
+    if (currentUser.role === 'owner') migratePhotosToStorage().catch(e => console.warn('Migrasi foto ditunda:', e?.message || e)); // 1x (install baru): foto base64 lama → Storage/brankas (hemat egress)
   }, [currentUser?.id]);
 
   const toggleSidebar = async () => {
@@ -8867,13 +8974,14 @@ function AttendanceView({ user, allUsers }) {
       };
       // Simpan selfie terpisah (biar daftar absensi tetap ringan) + rapikan foto lama >60 hari
       if (selfieDataUrl) {
-        await storage.set(`selfie:${rec.id}`, selfieDataUrl);
+        const selfieVal = await putSelfie(selfieDataUrl); // {url,path} bila Storage siap; base64 mentah bila fallback
+        await storage.set(`selfie:${rec.id}`, selfieVal);
         const idx = (await storage.get('attendance:selfie-index')) || [];
         idx.push({ key: `selfie:${rec.id}`, date: dayKey(now) });
         const cutoff = dayKey(new Date(Date.now() - 60 * 86400000));
         const keep = [], drop = [];
         idx.forEach(it => (it.date >= cutoff ? keep : drop).push(it));
-        for (const it of drop) await storage.delete(it.key);
+        for (const it of drop) await delSelfie(it.key); // hapus row + objek Storage bila ada
         await storage.set('attendance:selfie-index', keep);
       }
       const okSave = await storage.set(ATT_REC_PREFIX + rec.id, rec);
@@ -8937,8 +9045,9 @@ function AttendanceView({ user, allUsers }) {
   // Lihat selfie sebuah record (dimuat saat diminta biar hemat data)
   const viewSelfie = async (r) => {
     setSelfieLoading(r.id);
-    const img = await storage.get(`selfie:${r.id}`);
+    const raw = await storage.get(`selfie:${r.id}`);
     setSelfieLoading(null);
+    const img = selfieSrc(raw); // URL Storage atau base64 (fallback) → ImageLightbox tampilkan langsung
     if (!img) return alert('Foto selfie tidak ditemukan (mungkin sudah dihapus otomatis setelah 60 hari).');
     setLightbox({ src: img, title: `Selfie ${r.userName} · ${new Date(r.timestamp).toLocaleString('id-ID')}` });
   };
@@ -8969,7 +9078,7 @@ function AttendanceView({ user, allUsers }) {
     if (!confirm(`Hapus SEMUA data absensi (${records.length} rekaman)? Tindakan ini tidak bisa dibatalkan.`)) return;
     if (!confirm('Yakin 100%? Semua riwayat absen akan hilang permanen.')) return;
     const idx = (await storage.get('attendance:selfie-index')) || [];
-    for (const it of idx) await storage.delete(it.key);
+    for (const it of idx) await delSelfie(it.key); // hapus row + objek Storage bila ada
     await storage.set('attendance:selfie-index', []);
     await storage.deleteByPrefix(ATT_REC_PREFIX);
     await storage.delete('attendance:all'); // bersihkan sisa array lama bila masih ada
@@ -9173,7 +9282,7 @@ function AttendanceView({ user, allUsers }) {
     if (!confirm(`Hapus absensi ${r.userName} (${r.type === 'in' ? 'masuk' : 'pulang'}) ${new Date(r.timestamp).toLocaleString('id-ID')}?`)) return;
     await storage.delete(ATT_REC_PREFIX + r.id);
     if (r.hasSelfie) {
-      await storage.delete(`selfie:${r.id}`);
+      await delSelfie(`selfie:${r.id}`); // hapus row + objek Storage bila ada
       const idx = (await storage.get('attendance:selfie-index')) || [];
       await storage.set('attendance:selfie-index', idx.filter(it => it.key !== `selfie:${r.id}`));
     }
@@ -10964,8 +11073,11 @@ function SettingsView({ user, settings, onSave }) {
   const runImageOptimize = async () => {
     setImgOptMsg(null); setImgOptBusy(true);
     try {
-      const res = await migrateImagesToVault({ force: true });
-      setImgOptMsg({ type: 'ok', text: `Selesai. ${res.moved || 0} kelompok foto dipindahkan ke brankas. Auto-refresh tidak lagi menarik foto besar — egress turun.` });
+      const res = await migratePhotosToStorage({ force: true });
+      if (res.probe === false)
+        setImgOptMsg({ type: 'err', text: 'Bucket Supabase Storage belum disiapkan, jadi foto disimpan sementara di brankas DB. Jalankan supabase-storage-setup.sql dulu (lihat PANDUAN-SUPABASE-STORAGE.md), lalu klik tombol ini lagi untuk memindahkan ke Storage.' });
+      else
+        setImgOptMsg({ type: 'ok', text: `Selesai. ${res.moved || 0} kelompok foto dipindahkan ke Supabase Storage. Foto tak lagi ikut ke-download tiap auto-refresh & tak membebani database — egress turun.` });
     } catch (e) {
       setImgOptMsg({ type: 'err', text: 'Gagal: ' + (e?.message || e) + '. Coba lagi saat koneksi stabil.' });
     } finally { setImgOptBusy(false); }
@@ -11367,7 +11479,7 @@ function SettingsView({ user, settings, onSave }) {
               <Sparkles className="w-4 h-4 text-blue-600" /> Optimasi Foto (Hemat Egress)
             </div>
             <p className="text-[11px] text-slate-500 mb-2 leading-relaxed">
-              Pindahkan foto lama (profil, bukti GMV, lampiran laporan, bukti keuangan) ke <b>brankas terpisah</b> supaya tidak ikut ke-download tiap halaman auto-refresh. Jalankan <b>sekali</b> setelah deploy. Aman & otomatis dilewati untuk foto yang sudah dipindah. Sebaiknya backup dulu, dan jalankan saat tim tidak sedang banyak input.
+              Pindahkan foto lama (profil, bukti GMV, lampiran laporan, bukti keuangan) ke <b>Supabase Storage</b> supaya tidak ikut ke-download tiap halaman auto-refresh dan tidak membebani database. Butuh setup <b>sekali</b>: jalankan <code>supabase-storage-setup.sql</code> di Supabase (lihat PANDUAN-SUPABASE-STORAGE.md), lalu klik tombol ini. Aman & otomatis dilewati untuk foto yang sudah dipindah. Sebaiknya backup dulu, dan jalankan saat tim tidak sedang banyak input.
             </p>
             <button onClick={runImageOptimize} disabled={imgOptBusy}
               className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 px-4 rounded-xl font-semibold text-sm transition shadow-sm">
