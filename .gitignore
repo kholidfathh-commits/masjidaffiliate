@@ -12,3 +12,12 @@ dist/
 *.log
 .vite/
 vite.config.js.timestamp-*.mjs
+
+# Paket deploy salinan (Cloud Web Builder) — jangan di-commit
+deploy-cloud-web-builder.zip
+pindah-total-cloud-web-builder.zip
+alat-migrasi-cloud-web-builder.html
+alat-sinkron-penuh.html
+alat-update-aplikasi.html
+alat-pemulihan-darurat.html
+alat-pindah-balik.html
