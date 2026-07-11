@@ -1,0 +1,4 @@
+Folder ini = build aplikasi versi MySQL untuk Cloud Web Builder (jalur cadangan).
+Dipakai HANYA kalau alat migrasi tidak bisa menjangkau server platform:
+commit + push folder ini ke GitHub, lalu file diunduh dari terminal platform
+dengan perintah curl dari raw.githubusercontent.com (Claude yang siapkan perintahnya).
