@@ -3154,6 +3154,28 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
   const dim = daysInMonth(mKey);
   const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
 
+  // ====== PILIHAN PERIODE DASHBOARD (menggerakkan kartu, grafik, kontribusi & SWOT) ======
+  const monthStart = `${mKey}-01`;
+  const monthEnd = `${mKey}-${String(dim).padStart(2, '0')}`;
+  const [period, setPeriod] = useState({ id: 'this-month', label: 'Bulan Ini', start: monthStart, end: monthEnd });
+  const isThisMonth = period.id === 'this-month';
+  const todayK = dayKey();
+  // daftar tanggal periode, dipotong sampai hari ini (maks 92 hari agar grafik tetap terbaca)
+  const shownDates = useMemo(() => {
+    const out = [];
+    if (!period.start || !period.end) return out;
+    const d = new Date(period.start + 'T00:00:00');
+    const end = new Date(period.end + 'T00:00:00');
+    let guard = 0;
+    while (d <= end && guard < 92) {
+      const dk = dayKey(d);
+      if (dk <= todayK) out.push(dk);
+      d.setDate(d.getDate() + 1); guard++;
+    }
+    return out;
+  }, [period.start, period.end, todayK]);
+  const periodLabel = period.id === 'custom' ? `${fmtDate(period.start)} – ${fmtDate(period.end)}` : period.label;
+
   useEffect(() => { (async () => { const g = await storage.get('affiliate:goal'); if (g && g[mKey]) setAffGoal(g[mKey]); })(); }, [mKey]);
 
   const rpShort = (n) => {
@@ -3166,18 +3188,20 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
 
   const totals = useMemo(() => {
     const t = { mcn: 0, tap: 0, internal: 0 };
-    gmvEntries.forEach(e => { if (e.date && e.date.startsWith(mKey) && t[e.division] !== undefined) t[e.division] += Number(e.gmv) || 0; });
+    gmvEntries.forEach(e => { if (e.date && e.date >= period.start && e.date <= period.end && t[e.division] !== undefined) t[e.division] += Number(e.gmv) || 0; });
     return t;
-  }, [gmvEntries, mKey]);
+  }, [gmvEntries, period.start, period.end]);
   const targets = gmvTargets[mKey] || {};
   const grandTotal = totals.mcn + totals.tap + totals.internal;
   const grandTarget = (Number(targets.mcn) || 0) + (Number(targets.tap) || 0) + (Number(targets.internal) || 0);
 
-  const seriesByDiv = useMemo(() => ({
-    mcn: gmvDailySeries(gmvEntries, 'mcn', mKey),
-    tap: gmvDailySeries(gmvEntries, 'tap', mKey),
-    internal: gmvDailySeries(gmvEntries, 'internal', mKey)
-  }), [gmvEntries, mKey]);
+  const seriesByDiv = useMemo(() => {
+    const seriesFor = (division) => shownDates.map(dk => {
+      const e = gmvEntries.find(x => x.date === dk && x.division === division);
+      return { day: Number(dk.slice(8, 10)), date: dk, value: e ? Number(e.gmv) || 0 : 0 };
+    });
+    return { mcn: seriesFor('mcn'), tap: seriesFor('tap'), internal: seriesFor('internal') };
+  }, [gmvEntries, shownDates]);
   const n = seriesByDiv.mcn.length || 1;
   const totalSeries = Array.from({ length: n }, (_, i) => ({
     day: i + 1,
@@ -3200,49 +3224,54 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
   let cards = [];
   if (isAll) {
     const ch = change(totalSeries);
-    const pctTarget = grandTarget > 0 ? Math.round((grandTotal / grandTarget) * 100) : null;
+    const pctTarget = isThisMonth && grandTarget > 0 ? Math.round((grandTotal / grandTarget) * 100) : null;
     const share = (v) => grandTotal > 0 ? Math.round((v / grandTotal) * 100) : 0;
     cards = [
-      { label: 'GMV Bisnis Bln Ini', value: rpShort(grandTotal), sub: pctTarget !== null ? `${pctTarget}% dari target ${rpShort(grandTarget)}` : 'Belum ada target', accent: '#2563EB', bg: '#EFF6FF', trend: ch },
+      { label: isThisMonth ? 'GMV Bisnis Bln Ini' : 'GMV Bisnis Periode', value: rpShort(grandTotal), sub: pctTarget !== null ? `${pctTarget}% dari target ${rpShort(grandTarget)}` : (isThisMonth ? 'Belum ada target' : periodLabel), accent: '#2563EB', bg: '#EFF6FF', trend: ch },
       { label: 'MCN', value: rpShort(totals.mcn), sub: `${share(totals.mcn)}% kontribusi`, accent: '#10B981', bg: '#DCFCE7' },
       { label: 'TAP', value: rpShort(totals.tap), sub: `${share(totals.tap)}% kontribusi`, accent: '#F97316', bg: '#FFEDD5' },
       { label: 'Affiliator Internal', value: rpShort(totals.internal), sub: `${share(totals.internal)}% kontribusi`, accent: '#3B82F6', bg: '#DBEAFE' }
     ];
   } else {
     const tot = totals[scope];
-    const tgt = Number(targets[scope]) || 0;
+    const tgt = isThisMonth ? (Number(targets[scope]) || 0) : 0;
     const ch = change(seriesByDiv[scope]);
-    const elapsed = n;
+    // Statistik kartu dihitung dari SELURUH entri periode — BUKAN titik grafik (shownDates dipotong 92 hari
+    // agar grafik terbaca). Kalau pakai titik grafik, rata-rata/hari terbaik/hari aktif jadi salah utk periode panjang.
+    const endShown = period.end && period.end > todayK ? todayK : period.end;
+    const elapsed = (!period.start || !endShown || endShown < period.start) ? 0
+      : Math.round((new Date(endShown + 'T00:00:00') - new Date(period.start + 'T00:00:00')) / 86400000) + 1;
     const avg = elapsed > 0 ? tot / elapsed : 0;
-    const best = Math.max(...seriesByDiv[scope].map(s => s.value), 0);
-    const proj = avg * dim;
+    const inPeriod = gmvEntries.filter(e => e.division === scope && e.date && e.date >= period.start && e.date <= period.end);
+    const best = inPeriod.reduce((m, e) => Math.max(m, Number(e.gmv) || 0), 0);
+    const proj = isThisMonth ? avg * dim : 0; // proyeksi hanya bermakna utk bulan berjalan (kartunya pun hanya tampil saat itu)
     const pctTarget = tgt > 0 ? Math.round((tot / tgt) * 100) : null;
+    const activeDays = new Set(inPeriod.filter(e => (Number(e.gmv) || 0) > 0).map(e => e.date)).size;
     cards = [
-      { label: 'GMV Bulan Ini', value: rpShort(tot), sub: pctTarget !== null ? `${pctTarget}% dari target ${rpShort(tgt)}` : 'Target belum di-set', accent: divColor, bg: '#EFF6FF', trend: ch },
-      { label: 'Rata-rata / Hari', value: rpShort(avg), sub: `${elapsed} hari berjalan`, accent: '#0EA5E9', bg: '#E0F2FE' },
-      { label: 'Hari Terbaik', value: rpShort(best), sub: 'GMV tertinggi sebulan', accent: '#16A34A', bg: '#DCFCE7' },
-      { label: 'Proyeksi Akhir Bln', value: rpShort(proj), sub: tgt > 0 ? (proj >= tgt ? 'On track ✓' : `Kurang ${rpShort(tgt - proj)}`) : 'Estimasi laju saat ini', accent: proj >= tgt && tgt > 0 ? '#16A34A' : '#B45309', bg: proj >= tgt && tgt > 0 ? '#DCFCE7' : '#FEF3C7' }
+      { label: isThisMonth ? 'GMV Bulan Ini' : 'GMV Periode', value: rpShort(tot), sub: pctTarget !== null ? `${pctTarget}% dari target ${rpShort(tgt)}` : (isThisMonth ? 'Target belum di-set' : periodLabel), accent: divColor, bg: '#EFF6FF', trend: ch },
+      { label: 'Rata-rata / Hari', value: rpShort(avg), sub: `${elapsed} hari periode`, accent: '#0EA5E9', bg: '#E0F2FE' },
+      { label: 'Hari Terbaik', value: rpShort(best), sub: 'GMV tertinggi periode', accent: '#16A34A', bg: '#DCFCE7' },
+      isThisMonth
+        ? { label: 'Proyeksi Akhir Bln', value: rpShort(proj), sub: tgt > 0 ? (proj >= tgt ? 'On track ✓' : `Kurang ${rpShort(tgt - proj)}`) : 'Estimasi laju saat ini', accent: proj >= tgt && tgt > 0 ? '#16A34A' : '#B45309', bg: proj >= tgt && tgt > 0 ? '#DCFCE7' : '#FEF3C7' }
+        : { label: 'Hari Aktif', value: `${activeDays} hari`, sub: `dari ${elapsed} hari periode`, accent: '#8B5CF6', bg: '#F3E8FF' }
     ];
   }
 
   // affiliator accounts (untuk tab internal)
   const acctRows = useMemo(() => affAccounts.filter(a => a.active !== false).map(a => {
-    const real = affEntries.filter(e => e.accountId === a.id && e.date && e.date.startsWith(mKey)).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
-    const tgt = Number(a.targets?.[mKey]) || 0;
+    const real = affEntries.filter(e => e.accountId === a.id && e.date && e.date >= period.start && e.date <= period.end).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
+    const tgt = isThisMonth ? (Number(a.targets?.[mKey]) || 0) : 0;
     const pic = allUsers.find(u => u.id === a.picId);
     return { a, real, tgt, pic, pct: tgt > 0 ? Math.round((real / tgt) * 100) : 0 };
-  }).sort((x, y) => y.real - x.real), [affAccounts, affEntries, mKey, allUsers]);
+  }).sort((x, y) => y.real - x.real), [affAccounts, affEntries, mKey, allUsers, period.start, period.end, isThisMonth]);
 
   const TABS = [{ id: 'all', label: 'Keseluruhan' }, { id: 'mcn', label: 'MCN' }, { id: 'tap', label: 'TAP' }, { id: 'internal', label: 'Affiliator' }];
 
-  // Analisis SWOT — periode bisa dipilih (default bulan ini)
-  const monthStart = `${mKey}-01`;
-  const monthEnd = `${mKey}-${String(dim).padStart(2, '0')}`;
-  const [swotPeriod, setSwotPeriod] = useState({ id: 'this-month', label: 'Bulan Ini', start: monthStart, end: monthEnd });
+  // Analisis SWOT — mengikuti periode dashboard yang sama
   const dataBundle = { gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, tasks, partnerFeedback, externalSwot: extSwot };
   const analysis = useMemo(
-    () => analyzeBusiness({ scope, start: swotPeriod.start, end: swotPeriod.end, ...dataBundle }),
-    [scope, swotPeriod, gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, tasks, partnerFeedback, extSwot]
+    () => analyzeBusiness({ scope, start: period.start, end: period.end, ...dataBundle }),
+    [scope, period, gmvEntries, gmvTargets, affAccounts, affEntries, problems, attendance, reports, allUsers, tasks, partnerFeedback, extSwot]
   );
   const canEditExternal = user && (user.role === 'owner' || user.role === 'manajer');
   const saveExternalSwot = async (val) => {
@@ -3259,7 +3288,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
           <h3 className="font-display font-bold text-lg text-slate-900 flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-blue-600" /> Dashboard Bisnis
           </h3>
-          <p className="text-xs text-slate-500 mt-0.5">GMV {isAll ? 'gabungan semua lini' : GMV_DIVISIONS[scope].label} · {monthLabel}</p>
+          <p className="text-xs text-slate-500 mt-0.5">GMV {isAll ? 'gabungan semua lini' : GMV_DIVISIONS[scope].label} · {isThisMonth ? monthLabel : periodLabel}</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {TABS.filter(t => !lockedDiv || t.id === lockedDiv).map(t => (
@@ -3279,10 +3308,16 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
         </div>
       </div>
 
+      {/* pilihan tanggal / periode — menggerakkan seluruh isi dashboard */}
+      <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2 flex-wrap">
+        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide flex-shrink-0">Periode</span>
+        <PeriodPicker value={period} onChange={setPeriod} />
+      </div>
+
       {!hasData ? (
         <div className="p-10 text-center">
           <BarChart3 className="w-12 h-12 mx-auto mb-3 text-slate-200" />
-          <div className="text-sm text-slate-500 mb-3">Belum ada data GMV bulan ini.</div>
+          <div className="text-sm text-slate-500 mb-3">Belum ada data GMV pada periode ini.</div>
           <button onClick={() => onNavigate('gmv')} className="text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-xl transition">
             Input GMV Sekarang
           </button>
@@ -3330,7 +3365,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
               </>
             ) : (
               <InteractiveLineChart height={200} series={chartSeries} color={divColor}
-                targetDaily={(Number(targets[scope]) || 0) > 0 ? Math.round((Number(targets[scope]) || 0) / dim) : 0} />
+                targetDaily={isThisMonth && (Number(targets[scope]) || 0) > 0 ? Math.round((Number(targets[scope]) || 0) / dim) : 0} />
             )}
           </div>
 
@@ -3402,7 +3437,7 @@ function BusinessDashboard({ gmvEntries, gmvTargets, affAccounts, affEntries, al
           )}
 
           {/* Evaluasi otomatis format SWOT — khusus Owner/Manajer/Leader */}
-          {isMgmtUser && <SwotPanel analysis={analysis} canEdit={canEditExternal} external={extSwot} onSaveExternal={saveExternalSwot} period={swotPeriod} onPeriodChange={setSwotPeriod} />}
+          {isMgmtUser && <SwotPanel analysis={analysis} canEdit={canEditExternal} external={extSwot} onSaveExternal={saveExternalSwot} period={period} onPeriodChange={setPeriod} />}
         </div>
       )}
 
@@ -3573,6 +3608,199 @@ function analyzeBusiness({ scope = 'all', start, end, gmvEntries, gmvTargets, af
   };
 }
 
+// ====== KALENDER POPOVER (gaya marketplace: klik kolom tanggal → kalender + tab Custom/Hari/Pekan/Bulan) ======
+// Dipakai SEMUA filter tanggal dashboard. Nilai keluar selalu {id, label, start, end} (YYYY-MM-DD).
+function DateRangePopover({ value, onChange, tabs = ['custom', 'day', 'week', 'month'], defaultTab, maxDate, allowClear = false, clearLabel = 'Semua', placeholder = 'Pilih tanggal', showPresets = true, compact = false }) {
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState(defaultTab || tabs[0]);
+  const [pendStart, setPendStart] = useState(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef(null);
+  const today = dayKey();
+  const maxD = maxDate === undefined ? today : maxDate; // null = boleh masa depan
+  const start = value?.start || '';
+  const end = value?.end || '';
+  const [view, setView] = useState(() => { const c = start ? new Date(start + 'T00:00:00') : new Date(); return { y: c.getFullYear(), m: c.getMonth() }; });
+
+  const NAMA_HARI = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+  const NAMA_BLN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  const TAB_LABEL = { custom: 'Custom', day: 'Hari', week: 'Pekan', month: 'Bulan' };
+  const bulanPanjang = (dk) => new Date(dk + 'T00:00:00').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+
+  const openIt = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) {
+      const W = 336;
+      setPos({ top: Math.min(r.bottom + 6, (window.innerHeight || 700) - 80), left: Math.max(8, Math.min(r.left, (window.innerWidth || 1200) - W - 8)) });
+    }
+    const c = start ? new Date(start + 'T00:00:00') : new Date();
+    setView({ y: c.getFullYear(), m: c.getMonth() });
+    setPendStart(null);
+    setOpen(true);
+  };
+  const emit = (id, label, s, e) => { onChange({ id, label, start: s, end: e }); setOpen(false); setPendStart(null); };
+  const clampEnd = (e) => (maxD && e > maxD ? maxD : e);
+
+  const pickDay = (dk) => {
+    if (maxD && dk > maxD) return;
+    if (tab === 'day') return emit('day', 'Hari', dk, dk);
+    if (tab === 'week') {
+      const d = new Date(dk + 'T00:00:00');
+      const dow = d.getDay();
+      const mon = new Date(d); mon.setDate(d.getDate() - dow + (dow === 0 ? -6 : 1));
+      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+      return emit('week', 'Pekan', dayKey(mon), clampEnd(dayKey(sun)));
+    }
+    if (!pendStart || dk < pendStart) { setPendStart(dk); return; } // klik pertama / mundur = titik awal baru
+    emit('custom', 'Custom', pendStart, dk);
+  };
+  const pickMonth = (y, m) => {
+    const mk = `${y}-${String(m + 1).padStart(2, '0')}`;
+    if (maxD && `${mk}-01` > maxD) return; // jaga-jaga: awal bulan melewati batas (tombolnya pun sudah disabled)
+    const last = new Date(y, m + 1, 0).getDate();
+    emit('month', 'Bulan', `${mk}-01`, clampEnd(`${mk}-${String(last).padStart(2, '0')}`));
+  };
+
+  const defPresets = [
+    { label: 'Hari Ini', get: () => ({ id: 'day', label: 'Hari Ini', start: today, end: today }) },
+    { label: 'Kemarin', get: () => { const d = new Date(); d.setDate(d.getDate() - 1); const k = dayKey(d); return { id: 'day', label: 'Kemarin', start: k, end: k }; } },
+    { label: '7 Hari Terakhir', get: () => { const d = new Date(); d.setDate(d.getDate() - 6); return { id: 'custom', label: '7 Hari Terakhir', start: dayKey(d), end: today }; } },
+    { label: '28 Hari Terakhir', get: () => { const d = new Date(); d.setDate(d.getDate() - 27); return { id: 'custom', label: '28 Hari Terakhir', start: dayKey(d), end: today }; } },
+    { label: 'Bulan Ini', get: () => { const n = new Date(); const mk = monthKey(); const last = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate(); return { id: 'this-month', label: 'Bulan Ini', start: `${mk}-01`, end: `${mk}-${String(last).padStart(2, '0')}` }; } },
+    { label: 'Bulan Lalu', get: () => { const n = new Date(); const s = new Date(n.getFullYear(), n.getMonth() - 1, 1); const e = new Date(n.getFullYear(), n.getMonth(), 0); return { id: 'month', label: 'Bulan Lalu', start: dayKey(s), end: dayKey(e) }; } }
+  ];
+
+  // grid 42 sel, Senin dulu
+  const firstDow = (new Date(view.y, view.m, 1).getDay() + 6) % 7;
+  const gridStart = new Date(view.y, view.m, 1 - firstDow);
+  const cells = Array.from({ length: 42 }, (_, i) => { const d = new Date(gridStart); d.setDate(gridStart.getDate() + i); return d; });
+
+  // teks pill
+  let pillText = placeholder;
+  if (start) {
+    if (value?.id === 'month' || value?.id === 'this-month') pillText = `Bulan: ${bulanPanjang(start)}`;
+    else if (start === end) pillText = `Hari: ${start}`;
+    else pillText = `${value?.label && value.label !== 'Custom' ? value.label : 'Rentang'}: ${start} – ${end}`;
+  }
+
+  const inRange = (dk) => start && end && dk >= start && dk <= end;
+  const monthOnly = tabs.length === 1 && tabs[0] === 'month';
+
+  return (
+    <>
+      <button ref={btnRef} type="button" onClick={() => (open ? setOpen(false) : openIt())}
+        className={`flex items-center gap-2 border border-slate-300 rounded-lg bg-white hover:border-blue-400 transition text-slate-700 font-semibold ${compact ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-1.5 text-sm'}`}>
+        <span className="tabular-nums">{pillText}</span>
+        <CalendarDays className="w-4 h-4 text-slate-400 flex-shrink-0" />
+      </button>
+      {open && createPortal(
+        <div className="fixed inset-0 z-[120]" onClick={() => { setOpen(false); setPendStart(null); }}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="absolute bg-white rounded-2xl border border-slate-200 shadow-2xl flex overflow-hidden"
+            style={{ top: pos.top, left: pos.left, width: 336 }}>
+            {/* sidebar preset */}
+            {showPresets && !monthOnly && (
+              <div className="w-[104px] border-r border-slate-100 p-2 space-y-1 flex-shrink-0">
+                {defPresets.map(p => (
+                  <button key={p.label} onClick={() => { const v = p.get(); emit(v.id, v.label, v.start, v.end); }}
+                    className="w-full text-left text-[11px] font-semibold px-2 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700 transition">
+                    {p.label}
+                  </button>
+                ))}
+                {allowClear && (
+                  <button onClick={() => emit('all', clearLabel, '', '')}
+                    className="w-full text-left text-[11px] font-semibold px-2 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:border-slate-400 transition">
+                    {clearLabel}
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              {/* tab */}
+              {tabs.length > 1 && (
+                <div className="flex items-center gap-1 px-3 pt-2.5 text-[12px] font-bold">
+                  {tabs.map((t, i) => (
+                    <React.Fragment key={t}>
+                      {i > 0 && <span className="text-slate-200">|</span>}
+                      <button onClick={() => { setTab(t); setPendStart(null); }}
+                        className="px-1.5 py-1 rounded transition"
+                        style={tab === t ? { color: '#2563EB' } : { color: '#64748B' }}>
+                        {TAB_LABEL[t]}
+                      </button>
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
+              {tab === 'month' || monthOnly ? (
+                <div className="p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <button onClick={() => setView(v => ({ ...v, y: v.y - 1 }))} className="w-7 h-7 rounded-lg hover:bg-slate-100 grid place-items-center text-slate-500 font-bold">«</button>
+                    <div className="text-sm font-bold text-slate-800 tabular-nums">{view.y}</div>
+                    <button onClick={() => setView(v => ({ ...v, y: v.y + 1 }))} className="w-7 h-7 rounded-lg hover:bg-slate-100 grid place-items-center text-slate-500 font-bold">»</button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {NAMA_BLN.map((nb, mi) => {
+                      const mk = `${view.y}-${String(mi + 1).padStart(2, '0')}`;
+                      const disabled = maxD ? `${mk}-01` > maxD : false;
+                      const active = start && start.slice(0, 7) === mk;
+                      return (
+                        <button key={nb} disabled={disabled} onClick={() => pickMonth(view.y, mi)}
+                          className="text-xs font-semibold rounded-lg py-2 border transition disabled:opacity-35"
+                          style={active ? { backgroundColor: '#2563EB', color: '#fff', borderColor: '#2563EB' } : { borderColor: '#E2E8F0', color: '#475569' }}>
+                          {nb}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center">
+                      <button onClick={() => setView(v => ({ ...v, y: v.y - 1 }))} className="w-6 h-6 rounded hover:bg-slate-100 grid place-items-center text-slate-400 text-xs font-bold">«</button>
+                      <button onClick={() => setView(v => { const d = new Date(v.y, v.m - 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; })} className="w-6 h-6 rounded hover:bg-slate-100 grid place-items-center text-slate-500 font-bold">‹</button>
+                    </div>
+                    <div className="text-sm font-bold text-slate-800 tabular-nums">{view.y} - {String(view.m + 1).padStart(2, '0')}</div>
+                    <div className="flex items-center">
+                      <button onClick={() => setView(v => { const d = new Date(v.y, v.m + 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; })} className="w-6 h-6 rounded hover:bg-slate-100 grid place-items-center text-slate-500 font-bold">›</button>
+                      <button onClick={() => setView(v => ({ ...v, y: v.y + 1 }))} className="w-6 h-6 rounded hover:bg-slate-100 grid place-items-center text-slate-400 text-xs font-bold">»</button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-7 mb-1">
+                    {NAMA_HARI.map(h => <div key={h} className="text-center text-[10px] font-bold text-slate-400 py-1">{h}</div>)}
+                  </div>
+                  <div className="grid grid-cols-7 gap-y-0.5">
+                    {cells.map((d, i) => {
+                      const dk = dayKey(d);
+                      const out = d.getMonth() !== view.m;
+                      const disabled = maxD ? dk > maxD : false;
+                      const sel = dk === start || dk === end || dk === pendStart;
+                      const range = !sel && (inRange(dk) || (pendStart && dk === pendStart));
+                      return (
+                        <button key={i} disabled={disabled} onClick={() => pickDay(dk)}
+                          className={`h-8 text-xs font-semibold rounded-lg transition ${disabled ? 'text-slate-300 bg-slate-50 cursor-not-allowed' : out ? 'text-slate-300 hover:bg-slate-50' : 'text-slate-700 hover:bg-blue-50'}`}
+                          style={sel ? { backgroundColor: '#2563EB', color: '#fff' } : range ? { backgroundColor: '#EFF6FF', color: '#1D4ED8' } : {}}>
+                          {d.getDate()}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1.5 px-0.5">
+                    {tab === 'custom' ? (pendStart ? `Awal: ${pendStart} — sekarang pilih tanggal AKHIR` : 'Klik tanggal awal, lalu tanggal akhir.')
+                      : tab === 'week' ? 'Klik tanggal mana pun → otomatis satu pekan (Sen–Min).'
+                      : 'Klik satu tanggal.'}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // Panel SWOT di Dashboard Bisnis (+ faktor eksternal manual oleh owner/manajer)
 // Daftar preset periode (dipakai SWOT, Evaluasi, dll)
 function periodPresets() {
@@ -3598,37 +3826,9 @@ function periodPresets() {
   ];
 }
 
-// Kontrol pemilih periode: preset cepat + rentang tanggal custom
+// Kontrol pemilih periode — kini memakai kalender popover gaya marketplace (DateRangePopover)
 function PeriodPicker({ value, onChange }) {
-  const [showCustom, setShowCustom] = useState(false);
-  const presets = periodPresets();
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {presets.map(p => (
-        <button key={p.id} onClick={() => { onChange({ id: p.id, label: p.label, start: p.start, end: p.end }); setShowCustom(false); }}
-          style={value.id === p.id ? { backgroundColor: '#2563EB', color: '#fff', borderColor: '#2563EB' } : {}}
-          className="text-[11px] font-bold px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 transition">
-          {p.label}
-        </button>
-      ))}
-      <button onClick={() => setShowCustom(s => !s)}
-        style={value.id === 'custom' ? { backgroundColor: '#2563EB', color: '#fff', borderColor: '#2563EB' } : {}}
-        className="text-[11px] font-bold px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 transition">
-        Pilih Tanggal
-      </button>
-      {showCustom && (
-        <div className="flex items-center gap-1.5 w-full sm:w-auto mt-1.5 sm:mt-0">
-          <input type="date" value={value.start} max={value.end || dayKey()}
-            onChange={e => onChange({ id: 'custom', label: 'Custom', start: e.target.value, end: value.end || e.target.value })}
-            className="px-2 py-1 border border-slate-300 rounded-lg text-xs" />
-          <span className="text-xs text-slate-400">s/d</span>
-          <input type="date" value={value.end} min={value.start} max={dayKey()}
-            onChange={e => onChange({ id: 'custom', label: 'Custom', start: value.start || e.target.value, end: e.target.value })}
-            className="px-2 py-1 border border-slate-300 rounded-lg text-xs" />
-        </div>
-      )}
-    </div>
-  );
+  return <DateRangePopover value={value} onChange={onChange} tabs={['custom', 'day', 'week', 'month']} defaultTab="custom" />;
 }
 
 function SwotPanel({ analysis, canEdit = false, external = null, onSaveExternal, period, onPeriodChange }) {
@@ -6779,7 +6979,9 @@ function GmvView({ user, allUsers }) {
       {/* Month navigator */}
       <div className="flex items-center gap-2 mb-5">
         <button onClick={() => shiftMonth(-1)} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center"><ArrowLeft className="w-4 h-4" /></button>
-        <div className="font-display font-bold text-slate-900 text-lg min-w-[160px] text-center">{monthLabel}</div>
+        <DateRangePopover tabs={['month']} defaultTab="month" maxDate={null}
+          value={{ id: 'month', label: 'Bulan', start: `${mKey}-01`, end: `${mKey}-01` }}
+          onChange={p => setMKey(p.start.slice(0, 7))} />
         <button onClick={() => shiftMonth(1)} disabled={mKey >= monthKey()}
           className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 flex items-center justify-center"><ArrowRight className="w-4 h-4" /></button>
         {mKey !== monthKey() && <button onClick={() => setMKey(monthKey())} className="text-xs text-blue-600 font-semibold hover:underline ml-1">Bulan ini</button>}
@@ -7202,7 +7404,9 @@ function AffiliateAccountsView({ user, allUsers }) {
       {/* Month nav */}
       <div className="flex items-center gap-2 mb-5">
         <button onClick={() => shiftMonth(-1)} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center"><ArrowLeft className="w-4 h-4" /></button>
-        <div className="font-display font-bold text-slate-900 text-lg min-w-[150px] text-center">{monthLabel}</div>
+        <DateRangePopover tabs={['month']} defaultTab="month" maxDate={null}
+          value={{ id: 'month', label: 'Bulan', start: `${mKey}-01`, end: `${mKey}-01` }}
+          onChange={p => setMKey(p.start.slice(0, 7))} />
         <button onClick={() => shiftMonth(1)} disabled={mKey >= monthKey()} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 flex items-center justify-center"><ArrowRight className="w-4 h-4" /></button>
         {mKey !== monthKey() && <button onClick={() => setMKey(monthKey())} className="text-xs text-blue-600 font-semibold hover:underline ml-1">Bulan ini</button>}
       </div>
@@ -7604,7 +7808,9 @@ function KpiView({ user, allUsers }) {
       <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
         <div className="flex items-center gap-2">
           <button onClick={() => shiftMonth(-1)} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center"><ArrowLeft className="w-4 h-4" /></button>
-          <div className="font-display font-bold text-slate-900 text-lg min-w-[150px] text-center">{monthLabel}</div>
+          <DateRangePopover tabs={['month']} defaultTab="month" maxDate={null}
+          value={{ id: 'month', label: 'Bulan', start: `${mKey}-01`, end: `${mKey}-01` }}
+          onChange={p => setMKey(p.start.slice(0, 7))} />
           <button onClick={() => shiftMonth(1)} disabled={mKey >= monthKey()} className="w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 flex items-center justify-center"><ArrowRight className="w-4 h-4" /></button>
         </div>
         <div className="text-sm text-slate-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">
@@ -8960,8 +9166,12 @@ function AttendanceView({ user, allUsers }) {
   const proceedAbsen = async (type, selfieDataUrl) => {
     setSelfieFor(null); setBusy(true);
     try {
-      const loc = await getLocation();
-      const address = await getAddress(loc.lat, loc.lng);
+      // Lokasi bersifat WAJIB-DICOBA tapi TIDAK memblokir: di beberapa perangkat/hosting izin lokasi
+      // diblokir kebijakan (bukan salah karyawan) → absen tetap tercatat dengan tanda "lokasi tidak terekam".
+      let loc = null, locFailMsg = '';
+      try { loc = await getLocation(); }
+      catch (e) { locFailMsg = (e && e.message) || 'Lokasi tidak tersedia.'; }
+      const address = loc ? await getAddress(loc.lat, loc.lng) : '';
       const now = new Date();
       const myCfg = effectiveAttConfig(config, user.id, now);
       const flags = computeFlags(type, now, loc, myCfg);
@@ -8974,9 +9184,10 @@ function AttendanceView({ user, allUsers }) {
         jobTitle: user.jobTitle || '',
         type,
         timestamp: now.toISOString(),
-        latitude: loc.lat,
-        longitude: loc.lng,
-        accuracy: loc.acc,
+        latitude: loc ? loc.lat : null,
+        longitude: loc ? loc.lng : null,
+        accuracy: loc ? loc.acc : null,
+        locBlocked: !loc,
         address,
         note: note.trim(),
         hasSelfie: !!selfieDataUrl,
@@ -9003,6 +9214,7 @@ function AttendanceView({ user, allUsers }) {
       if (flags.late) warns.push(`Kamu terlambat ${flags.lateBy} menit (jam masuk ${myCfg.jamMasuk}).`);
       if (flags.earlyLeave) warns.push(`Pulang ${flags.earlyBy} menit lebih awal (jam pulang ${myCfg.jamPulang}).`);
       if (flags.locationMismatch) warns.push(`⚠️ Lokasi tidak sesuai — ±${flags.distanceM} m dari lokasi kerja (${config.lokasiLabel || 'kantor'}).`);
+      if (!loc) warns.push(`⚠️ Lokasi tidak terekam (${locFailMsg}) — absen tetap tercatat.`);
       setResult({ ok: warns.length === 0, type, time: fmtTime(rec.timestamp), warns });
       await load();
     } catch (e) {
@@ -9349,14 +9561,18 @@ function AttendanceView({ user, allUsers }) {
                                   {rec && (
                                     <div className="mt-1.5 space-y-0.5">
                                       <div className="text-[11px] text-slate-500 flex items-center gap-1 flex-wrap">
-                                        {rec.locationMismatch
-                                          ? <span className="text-rose-600 font-semibold">Lokasi tidak sesuai{rec.distanceM != null ? ` (±${rec.distanceM}m dari lokasi kerja)` : ''}</span>
-                                          : <span className="text-emerald-600 font-semibold">Lokasi sesuai</span>}
+                                        {rec.latitude == null
+                                          ? <span className="text-amber-600 font-semibold">Lokasi tidak terekam{rec.locBlocked ? ' (izin diblokir perangkat)' : ''}</span>
+                                          : rec.locationMismatch
+                                            ? <span className="text-rose-600 font-semibold">Lokasi tidak sesuai{rec.distanceM != null ? ` (±${rec.distanceM}m dari lokasi kerja)` : ''}</span>
+                                            : <span className="text-emerald-600 font-semibold">Lokasi sesuai</span>}
                                         {rec.hasSelfie ? null : (config.selfieWajib !== false && <span className="text-slate-400">· tanpa selfie</span>)}
-                                        <a href={mapsLink(rec.latitude, rec.longitude)} target="_blank" rel="noreferrer"
-                                          className="text-blue-600 hover:underline inline-flex items-center gap-0.5">
-                                          Buka Maps <ExternalLink className="w-3 h-3" />
-                                        </a>
+                                        {rec.latitude != null && (
+                                          <a href={mapsLink(rec.latitude, rec.longitude)} target="_blank" rel="noreferrer"
+                                            className="text-blue-600 hover:underline inline-flex items-center gap-0.5">
+                                            Buka Maps <ExternalLink className="w-3 h-3" />
+                                          </a>
+                                        )}
                                       </div>
                                       {rec.note && <div className="text-[11px] text-slate-600 italic">"{rec.note}"</div>}
                                     </div>
@@ -9535,8 +9751,9 @@ function AttendanceView({ user, allUsers }) {
           <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
             <h3 className="font-display font-bold text-slate-900 flex items-center gap-2"><Users className="w-5 h-5 text-blue-600" /> Status Harian Tim</h3>
             <div className="flex items-center gap-2">
-              <input type="date" value={boardDate} max={wibDayKey()} onChange={e => setBoardDate(e.target.value)}
-                className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <DateRangePopover tabs={['day']} defaultTab="day" maxDate={wibDayKey()} compact
+                value={{ id: 'day', label: 'Hari', start: boardDate, end: boardDate }}
+                onChange={p => p.start && setBoardDate(p.start)} />
               <button onClick={() => setBoardDate(wibDayKey())}
                 className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">Hari ini</button>
               <button onClick={exportBoardExcel}
@@ -9622,8 +9839,9 @@ function AttendanceView({ user, allUsers }) {
         <h3 className="font-display font-bold text-slate-900">Riwayat Absensi</h3>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <span className="text-xs text-slate-500 font-semibold">Tanggal:</span>
-          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)}
-            className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <DateRangePopover tabs={['day']} defaultTab="day" compact allowClear clearLabel="Semua" placeholder="Semua tanggal"
+            value={{ id: 'day', label: 'Hari', start: filterDate, end: filterDate }}
+            onChange={p => setFilterDate(p.start || '')} />
           <button onClick={() => setFilterDate(wibDayKey())}
             className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">Hari ini</button>
           {filterDate && (
@@ -9903,9 +10121,33 @@ function LeaveRequestModal({ izinHmin, onSave, onClose }) {
 function SelfieCaptureModal({ type, userName, onCapture, onClose }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const fileRef = useRef(null);
   const [snapshot, setSnapshot] = useState(null);
   const [camErr, setCamErr] = useState('');
   const [ready, setReady] = useState(false);
+
+  // Jalur cadangan saat kamera browser diblokir (kebijakan hosting/perangkat):
+  // input file capture="user" membuka APLIKASI KAMERA bawaan HP — tidak bisa diblokir kebijakan web.
+  const pickFile = (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 480;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        setSnapshot(canvas.toDataURL('image/jpeg', 0.65));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(f);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -9922,8 +10164,8 @@ function SelfieCaptureModal({ type, userName, onCapture, onClose }) {
         setReady(true);
       } catch (e) {
         setCamErr(e.name === 'NotAllowedError'
-          ? 'Izin kamera ditolak. Aktifkan izin kamera di browser (ikon gembok di address bar) lalu coba lagi.'
-          : (e.message || 'Gagal membuka kamera.'));
+          ? 'Kamera browser diblokir di perangkat ini. Tidak masalah — pakai tombol "Ambil Foto (Kamera HP)" di bawah, hasilnya tetap jadi bukti kehadiran.'
+          : (e.message || 'Gagal membuka kamera. Pakai tombol "Ambil Foto (Kamera HP)" di bawah.'));
       }
     })();
     return () => {
@@ -9956,10 +10198,10 @@ function SelfieCaptureModal({ type, userName, onCapture, onClose }) {
           Hai <b>{userName.split(' ')[0]}</b> — posisikan wajah di tengah, lalu ambil foto. Foto jadi bukti kehadiranmu.
         </div>
         <div className="relative rounded-2xl overflow-hidden bg-slate-900 aspect-[4/3]">
-          {camErr ? (
-            <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-red-300">{camErr}</div>
-          ) : snapshot ? (
+          {snapshot ? (
             <img src={snapshot} alt="Selfie" className="w-full h-full object-cover" />
+          ) : camErr ? (
+            <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-amber-200">{camErr}</div>
           ) : (
             <video ref={videoRef} playsInline muted className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
           )}
@@ -9967,8 +10209,20 @@ function SelfieCaptureModal({ type, userName, onCapture, onClose }) {
             <div className="absolute inset-0 flex items-center justify-center text-white/70 text-sm">Membuka kamera…</div>
           )}
         </div>
-        {camErr ? (
-          <FormActions onCancel={() => { stopCam(); onClose(); }} onSave={() => window.location.reload()} saveLabel="Muat Ulang Halaman" />
+        <input ref={fileRef} type="file" accept="image/*" capture="user" className="hidden" onChange={pickFile} />
+        {camErr && !snapshot ? (
+          <div className="space-y-2">
+            <button onClick={() => fileRef.current && fileRef.current.click()}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
+              <Camera className="w-5 h-5" /> Ambil Foto (Kamera HP)
+            </button>
+            <div className="flex gap-2">
+              <button onClick={() => window.location.reload()}
+                className="flex-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-600 font-semibold py-2.5 rounded-lg text-sm">Muat Ulang Halaman</button>
+              <button onClick={() => { stopCam(); onClose(); }}
+                className="flex-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-500 font-semibold py-2.5 rounded-lg text-sm">Batal</button>
+            </div>
+          </div>
         ) : snapshot ? (
           <div className="flex gap-2">
             <button onClick={() => setSnapshot(null)}
@@ -12101,9 +12355,9 @@ function DailyReportsView({ user, allUsers }) {
         <div>
           <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Tanggal</label>
           <div className="flex gap-2">
-            <input type="date" value={filter.date === 'all' ? '' : filter.date}
-              onChange={e => setFilter({ ...filter, date: e.target.value || 'all' })}
-              className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm" />
+            <DateRangePopover tabs={['day']} defaultTab="day" compact allowClear clearLabel="Semua" placeholder="Semua tanggal"
+              value={{ id: 'day', label: 'Hari', start: filter.date === 'all' ? '' : filter.date, end: filter.date === 'all' ? '' : filter.date }}
+              onChange={p => setFilter({ ...filter, date: p.start || 'all' })} />
             <button onClick={() => setFilter({ ...filter, date: 'all' })}
               className={`text-xs px-3 py-1.5 rounded font-semibold ${filter.date === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
               Semua
@@ -14323,7 +14577,9 @@ function KeuanganView({ user, allUsers }) {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => shiftMonth(-1)} className="p-1.5 rounded-lg border border-slate-300 hover:bg-slate-50"><ArrowLeft className="w-4 h-4" /></button>
-          <span className="text-sm font-semibold text-slate-700 min-w-[130px] text-center">{monthLabel}</span>
+          <DateRangePopover tabs={['month']} defaultTab="month" maxDate={null} compact
+            value={{ id: 'month', label: 'Bulan', start: `${mKey}-01`, end: `${mKey}-01` }}
+            onChange={p => setMKey(p.start.slice(0, 7))} />
           <button onClick={() => shiftMonth(1)} className="p-1.5 rounded-lg border border-slate-300 hover:bg-slate-50"><ArrowRight className="w-4 h-4" /></button>
         </div>
       </div>
