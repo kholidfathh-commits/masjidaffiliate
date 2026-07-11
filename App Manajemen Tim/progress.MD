@@ -261,6 +261,14 @@ Melanjutkan brankas `img:` (yang masih menaruh foto base64 di DALAM database) �
 - **HEMAT EGRESS lanjutan — polling berhenti saat tab tersembunyi:** helper `pollWhenVisible(fn)` membungkus SEMUA 13 `setInterval` (12× `load` 30s + `loadNotifs` 60s + calendar `setEvents0`) → data TIDAK ditarik ulang saat `document.visibilityState !== 'visible'` (app dibiarkan di tab background). Ini pemboros egress terbesar yg tersisa (tim sering biarkan app terbuka seharian). Saat user balik ke tab, tarikan berikutnya (≤interval) menyegarkan. Build lulus 4,15s; app tetap render (dicek di preview lokal). **Konteks:** ditemukan saat menyelidiki Supabase yang SUDAH di-restrict — lihat Perhatian Aktif di CLAUDE.md.
 - **FIX pasca review adversarial (multi-agent):** migrasi vault-drain awal punya bug **foto hilang** bila 1 ref `img:<id>` dipakai >1 record (mis. setelah restore backup / laporan mingguan menyalin lampiran harian): record pertama menghapus baris brankas → record kedua gagal `fetchImage` → tersimpan dgn ref rusak. **Perbaikan:** (a) `ctx.refToUrl` (Map ref→URL, dedup 1x per migrasi lintas semua loader), (b) penghapusan baris brankas DITUNDA sampai SELURUH migrasi selesai (`ctx.garbage` dihapus di akhir `migratePhotosToStorage`) → tak ada baris terhapus selagi record lain butuh + partial-fail = 0 foto hilang. Bonus: `viewSelfie` dibungkus try/finally (tombol tak nyangkut "memuat" saat koneksi putus). Sisa (pra-ada, dampak kecil, tak diubah): `storage.get` index selfie di `deleteRecord`/`deleteAllRecords` tak di-guard → paling banter entri index yatim (dibersihkan prune) / abort aman.
 
+### 11 Jul 2026 — FILTER TANGGAL KALENDER (DateRangePopover) + review (build 2,66s)
+
+- **`DateRangePopover`** (komponen ±190 baris, sebelum SwotPanel): pill tombol → popover portal (klik luar = tutup). Sidebar preset (Hari Ini/Kemarin/7 & 28 Hari Terakhir/Bulan Ini/Bulan Lalu), tab **Custom | Hari | Pekan | Bulan**, grid 42 sel Senin-awal, nav bulan/tahun (‹›/«»), props `tabs/defaultTab/maxDate/allowClear/compact/showPresets`. Emit `{id,label,start,end}` (YYYY-MM-DD, parse aman `+'T00:00:00'`). Dibuat sesi paralel; direview & dirapikan sesi ini.
+- **Dipasang di 9 titik:** BusinessDashboard (state `period` menggerakkan kartu/grafik/kontribusi/SWOT; grafik dipotong 92 hari; target bulanan hanya utk `this-month`), PeriodPicker/SwotPanel, GmvView + AffiliateAccountsView + KpiView + KeuanganView (mode bulan), AttendanceView ×2 + DailyReportsView (mode hari, `allowClear`).
+- **Bonus sesi paralel — selfie fallback kamera HP:** `SelfieCaptureModal` + input `type=file capture="user"` saat getUserMedia diblokir (buka app kamera bawaan; downscale 480px JPEG 0.65) — pesan error jadi amber + tombol "Ambil Foto (Kamera HP)".
+- **Review adversarial (25 agen, 21 temuan → 3 CONFIRMED, semua DIPERBAIKI):** (1) rata-rata/hari pakai jumlah titik grafik (maks 92) padahal total pakai seluruh periode → utk periode >92 hari rata-rata melambung; fix: `elapsed` dihitung dari rentang tanggal riil (start..min(end,hari ini)), `best`/`activeDays` dihitung dari SEMUA entri periode (Set tanggal), bukan titik grafik. (2) `proj = avg*dim` dihitung utk periode non-bulan (laten, kartu tersembunyi) → fix: `proj` hanya saat `isThisMonth`. (3) `pendStart` tidak direset saat popover ditutup via overlay → fix: reset di onClick overlay. +1 defensif: `pickMonth` guard `mk-01 > maxD`.
+- Verifikasi: build lulus 2,66s; app boot bersih di preview (0 error console). **BELUM di-deploy** — perubahan masih uncommitted; deploy = commit + push GitHub Desktop.
+
 ---
 
 ## 4. Status Terkini (per 1 Jul 2026)
@@ -278,7 +286,7 @@ Melanjutkan brankas `img:` (yang masih menaruh foto base64 di DALAM database) �
 ## 5. Backlog Tersisa
 
 - Harden `handleDelete` kalender (cek `storage.set` seperti handleSave).
-- ~~Foto selfie/bukti GMV → Supabase Storage~~ **SELESAI di kode (1 Jul 2026)** — `putImage`+selfie upload ke bucket `photos`, fallback brankas DB. Sisa: user jalankan `supabase-storage-setup.sql` sekali + tombol "Optimalkan Foto Sekarang" untuk migrasi foto lama.
+- ~~Foto selfie/bukti GMV → Supabase Storage~~ **SELESAI TOTAL (2 Jul 2026)** — setup SQL dijalankan (bucket `photos` publik + policy, via Chrome), tombol "Optimalkan Foto" diklik owner: 119 foto termigrasi (brankas img: 235→116 sisa blob yatim), avatar 13/13 + lampiran/bukti/feedback semua URL Storage (cache 1 thn), diverifikasi via REST (0 ref tersisa di record, objek bucket 122, serving HTTP 200). Backup pra-migrasi 18MB di scratchpad sesi Claude.
 - Command Palette (Cmd+K), loading skeleton.
 - Supabase Auth + RLS (saat ini publishable key + RLS permissive).
 - Push notification beneran (Web Push + VAPID + server, mis. Supabase Edge Function) — muncul saat app ditutup.
