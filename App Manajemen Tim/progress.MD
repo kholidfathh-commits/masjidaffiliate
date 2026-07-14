@@ -291,7 +291,8 @@ Melanjutkan brankas `img:` (yang masih menaruh foto base64 di DALAM database) �
 - Supabase Auth + RLS (saat ini publishable key + RLS permissive).
 - Push notification beneran (Web Push + VAPID + server, mis. Supabase Edge Function) — muncul saat app ditutup.
 - Publish OAuth consent screen (saat ini Testing).
-- Neraca penuh keuangan (baru ada Posisi Kas per divisi); leader divisi belum bisa lihat angka divisinya (sengaja, sensitif).
+- ~~Neraca keuangan~~ **SELESAI (14 Jul 2026)** — tab **Neraca** (basis kas) di KeuanganView: Aset=Kas, Liabilitas=0, Ekuitas=Modal(Saldo Awal)+Laba Ditahan (dipecah s/d bln lalu + laba/rugi bln ini). Identitas Kas≡Modal+LabaDitahan → selalu seimbang; useMemo `neraca` ikut filter divisi & bulan; ikon `Scale`. Diverifikasi vs data live (Apr/Jun/Jul): seimbang + "laba bln ini" cocok tab Laba Rugi. Catatan: app belum catat piutang/utang/aset-tetap terpisah (kategori "Aset & Peralatan" dibebankan), disclaimer ada di UI. leader divisi masih belum lihat angka divisinya (sengaja).
+- **FYI (pra-ada, di luar scope):** auto-backup harian ke Supabase (`backup:auto:<tgl>`) gagal `statement timeout` di preview (payload backup besar + instance nano). Backup Google Drive tetap jalan. Perlu ditinjau terpisah (mis. kecualikan `img:store` dari dump kv, atau kompres).
 
 ---
 
