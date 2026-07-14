@@ -744,9 +744,16 @@ const BACKUP_KEYS = [
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
 
 // ====== BACKUP HELPERS (export manual + auto-backup harian + restore gabung) ======
-async function buildBackupDump(byName = 'auto') {
+// Key backup BERUKURAN BESAR (brankas foto base64 'img:store'). Sengaja DIKECUALIKAN dari
+// auto-backup harian ke Supabase: menulis 1 baris JSONB raksasa ke instance nano melampaui
+// statement timeout. Foto asli sudah aman & durable di Supabase Storage (CDN); yang tersisa di
+// brankas 'img:' umumnya blob lama/yatim. Backup MANUAL & Google Drive TETAP menyertakannya
+// (tak kena batas timeout DB) agar fidelitas penuh terjaga.
+const HEAVY_BACKUP_KEYS = ['img:store'];
+async function buildBackupDump(byName = 'auto', { excludeHeavy = false } = {}) {
   const dump = { _meta: { app: 'Al-Kahfi Corp Team App', exportedAt: new Date().toISOString(), by: byName, version: 1 }, data: {} };
   for (const k of BACKUP_KEYS) {
+    if (excludeHeavy && HEAVY_BACKUP_KEYS.includes(k)) continue; // lewati brankas foto besar (khusus auto-backup Supabase → hindari statement timeout)
     let v;
     if (PER_RECORD_LOADERS[k]) {
       const recs = await PER_RECORD_LOADERS[k](); // modul per-record → kumpulkan jadi array (format backup tetap sama)
@@ -765,7 +772,7 @@ async function autoBackupIfDue(byName) {
     const todayK = wibDayKey();
     const idx = (await storage.get('backup:auto:index')) || { dates: [] };
     if (Array.isArray(idx.dates) && idx.dates.includes(todayK)) return; // sudah hari ini
-    const dump = await buildBackupDump(byName || 'auto');
+    const dump = await buildBackupDump(byName || 'auto', { excludeHeavy: true }); // tanpa brankas foto 'img:store' → payload kecil, tak kena statement timeout Supabase nano
     if (!dump.data || Object.keys(dump.data).length === 0) return; // jangan simpan snapshot kosong
     await storage.set(`backup:auto:${todayK}`, dump);
     let dates = [...(idx.dates || []).filter(d => d !== todayK), todayK].sort();
