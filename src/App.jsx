@@ -11,7 +11,7 @@ import {
   GripVertical, MapPin, ArrowRight, ArrowLeft, BarChart3, Pin, MessageSquare,
   Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle,
   Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2,
-  Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload, Wallet, Receipt
+  Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload, Wallet, Receipt, Scale
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -14522,6 +14522,23 @@ function KeuanganView({ user, allUsers }) {
     return r;
   }, [items, mKey]);
 
+  // NERACA (basis kas) — kumulatif s/d akhir bulan terpilih, ikut filter divisi.
+  // App hanya mencatat ARUS KAS (belum ada akun piutang/utang/aset tetap terpisah), jadi neraca ini basis kas:
+  //   Aset = Kas ; Liabilitas = 0 ; Ekuitas = Modal (Saldo Awal) + Laba Ditahan.
+  // Identitas selalu SEIMBANG karena Kas ≡ Modal + Laba Ditahan (langsung dari definisi arus kas).
+  const neraca = useMemo(() => {
+    const flow = (pred) => items.filter(pred).reduce((s, e) => s + (e.tipe === 'keluar' ? -1 : 1) * (Number(e.jumlah) || 0), 0);
+    const sumIn = (pred) => items.filter(pred).reduce((s, e) => s + (Number(e.jumlah) || 0), 0);
+    const upto = (e) => inDiv(e) && (e.tanggal || '').slice(0, 7) <= mKey;
+    const before = (e) => inDiv(e) && (e.tanggal || '').slice(0, 7) < mKey;
+    const kas = flow(upto);
+    const modal = sumIn(e => upto(e) && e.tipe === 'masuk' && finIsSaldoAwal(e)); // modal disetor (semua 'Saldo Awal')
+    const labaDitahan = kas - modal;                                              // Σ pendapatan non-saldoawal − Σ beban (kumulatif)
+    const labaLalu = flow(before) - sumIn(e => before(e) && e.tipe === 'masuk' && finIsSaldoAwal(e)); // laba ditahan s/d bln lalu
+    const labaBulanIni = labaDitahan - labaLalu;                                  // laba/rugi bulan berjalan (cocok tab Laba Rugi)
+    return { kas, modal, labaDitahan, labaLalu, labaBulanIni, ekuitas: modal + labaDitahan, seimbang: Math.abs(kas - (modal + labaDitahan)) < 1 };
+  }, [items, mKey, filterDiv]);
+
   // Tren 6 bulan (Pendapatan vs Beban) utk filter divisi
   const trend = useMemo(() => {
     const months = [];
@@ -14550,7 +14567,7 @@ function KeuanganView({ user, allUsers }) {
 
   if (loading) return <div className="text-slate-400 text-sm">Memuat data keuangan…</div>;
 
-  const TABS = [['dashboard', 'Dashboard', BarChart3], ['transaksi', 'Cash Flow', Receipt], ['labarugi', 'Laba Rugi', FileSpreadsheet]];
+  const TABS = [['dashboard', 'Dashboard', BarChart3], ['transaksi', 'Cash Flow', Receipt], ['labarugi', 'Laba Rugi', FileSpreadsheet], ['neraca', 'Neraca', Scale]];
   const totalKas = Object.values(kasPerDiv).reduce((a, b) => a + b, 0);
 
   return (
@@ -14697,6 +14714,58 @@ function KeuanganView({ user, allUsers }) {
           </div>
         </div>
       )}
+
+      {tab === 'neraca' && (() => {
+        const rows = (label, val, opts = {}) => (
+          <div className={`flex justify-between text-sm py-0.5 ${opts.strong ? 'font-bold' : ''}`}>
+            <span className={opts.strong ? 'text-slate-800' : 'text-slate-600 pl-3'}>{label}</span>
+            <span className="font-medium" style={{ color: val < 0 ? '#E11D48' : (opts.strong ? '#0F172A' : '#334155') }}>{fmtRupiah(val)}</span>
+          </div>
+        );
+        const secHead = (t) => <div className="font-bold text-slate-700 uppercase text-xs tracking-wide pb-1 border-b border-slate-200">{t}</div>;
+        return (
+          <div className="bg-white rounded-2xl border border-slate-200/70 p-5 sm:p-7 max-w-3xl">
+            <div className="text-center mb-1">
+              <h3 className="font-display font-extrabold text-lg text-slate-900">NERACA</h3>
+              <p className="text-sm text-slate-500">{filterDiv === 'all' ? 'Semua Divisi' : FIN_DIVISIONS[filterDiv]?.label} · per akhir {monthLabel}</p>
+            </div>
+            <div className="flex justify-center mb-6 mt-2">
+              <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full ${neraca.seimbang ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                <Scale className="w-3.5 h-3.5" /> {neraca.seimbang ? 'Seimbang ✓' : 'Tidak seimbang — cek data'}
+              </span>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-x-8 gap-y-5">
+              {/* ASET */}
+              <div>
+                {secHead('Aset')}
+                {rows('Kas & Setara Kas', neraca.kas)}
+                {filterDiv === 'all' && Object.entries(FIN_DIVISIONS).map(([d, info]) => (
+                  <div key={d} className="flex justify-between text-[11px] py-0.5">
+                    <span className="text-slate-400 pl-6 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full" style={{ background: info.color }}></span>{info.label}</span>
+                    <span style={{ color: kasPerDiv[d] < 0 ? '#E11D48' : '#94A3B8' }}>{fmtRupiah(kasPerDiv[d])}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm font-bold pt-1.5 mt-1 border-t border-slate-100"><span>Total Aset</span><span style={{ color: neraca.kas < 0 ? '#E11D48' : '#2563EB' }}>{fmtRupiah(neraca.kas)}</span></div>
+              </div>
+              {/* LIABILITAS & EKUITAS */}
+              <div>
+                {secHead('Liabilitas')}
+                {rows('Utang', 0)}
+                <div className="flex justify-between text-sm font-bold pt-1.5 mt-1 border-t border-slate-100"><span>Total Liabilitas</span><span className="text-slate-700">{fmtRupiah(0)}</span></div>
+                <div className="pt-5">{secHead('Ekuitas')}</div>
+                {rows('Modal Disetor (Saldo Awal)', neraca.modal)}
+                {rows('Laba Ditahan s/d bln lalu', neraca.labaLalu)}
+                {rows(neraca.labaBulanIni < 0 ? 'Rugi Bulan Ini' : 'Laba Bulan Ini', neraca.labaBulanIni)}
+                <div className="flex justify-between text-sm font-bold pt-1.5 mt-1 border-t border-slate-100"><span>Total Ekuitas</span><span style={{ color: neraca.ekuitas < 0 ? '#E11D48' : '#334155' }}>{fmtRupiah(neraca.ekuitas)}</span></div>
+                <div className="flex justify-between text-sm font-extrabold mt-3 p-3 rounded-xl bg-blue-50 text-blue-700"><span>Total Liabilitas + Ekuitas</span><span>{fmtRupiah(neraca.ekuitas)}</span></div>
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed mt-6 pt-4 border-t border-slate-100">
+              <b>Catatan:</b> Neraca ini <b>basis kas</b> — dihitung dari arus kas yang tercatat. Aplikasi belum mencatat piutang, utang, atau aset tetap secara terpisah (pembelian di kategori "Aset &amp; Peralatan" langsung dibebankan), sehingga <b>Aset = Kas</b> dan neraca selalu seimbang. "Laba Bulan Ini" cocok dengan tab Laba Rugi bulan yang sama.
+            </p>
+          </div>
+        );
+      })()}
 
       {showInput && <FinanceInputModal user={user} editing={editing} onClose={() => { setShowInput(false); setEditing(null); }} onSave={saveItem} />}
     </div>
