@@ -3662,7 +3662,8 @@ function DateRangePopover({ value, onChange, tabs = ['custom', 'day', 'week', 'm
     emit('custom', 'Custom', pendStart, dk);
   };
   const pickMonth = (y, m) => {
-    const mk = `${y}-${String(m + 1).padStart(2, '0')}`;
+    // tahun di-pad 4 digit supaya tanggal salah ketik (mis. "0026-07-25") tetap bisa dijangkau & dibandingkan
+    const mk = `${String(y).padStart(4, '0')}-${String(m + 1).padStart(2, '0')}`;
     if (maxD && `${mk}-01` > maxD) return; // jaga-jaga: awal bulan melewati batas (tombolnya pun sudah disabled)
     const last = new Date(y, m + 1, 0).getDate();
     emit('month', 'Bulan', `${mk}-01`, clampEnd(`${mk}-${String(last).padStart(2, '0')}`));
@@ -3742,7 +3743,10 @@ function DateRangePopover({ value, onChange, tabs = ['custom', 'day', 'week', 'm
                 <div className="p-3">
                   <div className="flex items-center justify-between mb-2">
                     <button onClick={() => setView(v => ({ ...v, y: v.y - 1 }))} className="w-7 h-7 rounded-lg hover:bg-slate-100 grid place-items-center text-slate-500 font-bold">«</button>
-                    <div className="text-sm font-bold text-slate-800 tabular-nums">{view.y}</div>
+                    <input type="number" value={view.y} onFocus={e => e.target.select()}
+                      onChange={e => { const v = parseInt(e.target.value, 10); if (Number.isFinite(v)) setView(s => ({ ...s, y: v })); }}
+                      title="Ketik tahun langsung, mis. 2026"
+                      className="w-[76px] text-center text-sm font-bold text-slate-800 tabular-nums border border-slate-200 rounded-lg py-1 focus:outline-none focus:border-blue-400" />
                     <button onClick={() => setView(v => ({ ...v, y: v.y + 1 }))} className="w-7 h-7 rounded-lg hover:bg-slate-100 grid place-items-center text-slate-500 font-bold">»</button>
                   </div>
                   <div className="grid grid-cols-3 gap-1.5">
@@ -3767,7 +3771,18 @@ function DateRangePopover({ value, onChange, tabs = ['custom', 'day', 'week', 'm
                       <button onClick={() => setView(v => ({ ...v, y: v.y - 1 }))} className="w-6 h-6 rounded hover:bg-slate-100 grid place-items-center text-slate-400 text-xs font-bold">«</button>
                       <button onClick={() => setView(v => { const d = new Date(v.y, v.m - 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; })} className="w-6 h-6 rounded hover:bg-slate-100 grid place-items-center text-slate-500 font-bold">‹</button>
                     </div>
-                    <div className="text-sm font-bold text-slate-800 tabular-nums">{view.y} - {String(view.m + 1).padStart(2, '0')}</div>
+                    <div className="flex items-center gap-1">
+                      <input type="number" value={view.y} onFocus={e => e.target.select()}
+                        onChange={e => { const v = parseInt(e.target.value, 10); if (Number.isFinite(v)) setView(s => ({ ...s, y: v })); }}
+                        title="Ketik tahun langsung, mis. 2026"
+                        className="w-[66px] text-center text-sm font-bold text-slate-800 tabular-nums border border-slate-200 rounded-lg py-0.5 focus:outline-none focus:border-blue-400" />
+                      <span className="text-slate-400 font-bold">-</span>
+                      <select value={view.m} onChange={e => setView(s => ({ ...s, m: Number(e.target.value) }))}
+                        title="Pilih bulan"
+                        className="text-sm font-bold text-slate-800 tabular-nums border border-slate-200 rounded-lg py-0.5 pl-1.5 pr-0.5 focus:outline-none focus:border-blue-400">
+                        {NAMA_BLN.map((nb, mi) => <option key={nb} value={mi}>{String(mi + 1).padStart(2, '0')}</option>)}
+                      </select>
+                    </div>
                     <div className="flex items-center">
                       <button onClick={() => setView(v => { const d = new Date(v.y, v.m + 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; })} className="w-6 h-6 rounded hover:bg-slate-100 grid place-items-center text-slate-500 font-bold">›</button>
                       <button onClick={() => setView(v => ({ ...v, y: v.y + 1 }))} className="w-6 h-6 rounded hover:bg-slate-100 grid place-items-center text-slate-400 text-xs font-bold">»</button>
@@ -14239,7 +14254,10 @@ function FinanceInputModal({ user, editing, onClose, onSave }) {
   const [busy, setBusy] = useState(false);
   const cats = form.tipe === 'masuk' ? FIN_CAT_IN : FIN_CAT_OUT;
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const valid = form.tanggal && form.divisi && form.tipe && form.kategori && Number(form.jumlah) > 0;
+  // Cegah salah ketik tahun (mis. 0026 → transaksi hilang ke tahun 26 Masehi dan tak bisa dijangkau pemilih bulan)
+  const thnInput = Number((form.tanggal || '').slice(0, 4));
+  const tglOk = !!form.tanggal && thnInput >= 2020 && thnInput <= new Date().getFullYear() + 1;
+  const valid = tglOk && form.divisi && form.tipe && form.kategori && Number(form.jumlah) > 0;
 
   const handleImg = async (file) => {
     if (!file) return;
@@ -14260,7 +14278,15 @@ function FinanceInputModal({ user, editing, onClose, onSave }) {
           <button onClick={() => { set('tipe', 'keluar'); set('kategori', ''); }} className={`py-2.5 rounded-xl font-semibold text-sm border-2 flex items-center justify-center gap-2 ${form.tipe === 'keluar' ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-slate-200 text-slate-500'}`}><TrendingDown className="w-4 h-4" /> Uang Keluar</button>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Tanggal"><input type="date" value={form.tanggal} onChange={e => set('tanggal', e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" /></Field>
+          <Field label="Tanggal">
+            <input type="date" min="2020-01-01" max={`${new Date().getFullYear() + 1}-12-31`} value={form.tanggal} onChange={e => set('tanggal', e.target.value)}
+              className={`w-full border rounded-lg px-3 py-2 text-sm ${form.tanggal && !tglOk ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
+            {form.tanggal && !tglOk && (
+              <p className="text-[11px] text-rose-600 font-semibold mt-1 leading-snug">
+                Tahun {form.tanggal.slice(0, 4)} tidak wajar — kemungkinan salah ketik (mis. 0026 seharusnya 2026). Perbaiki dulu sebelum disimpan.
+              </p>
+            )}
+          </Field>
           <Field label="Divisi">
             <select value={form.divisi} onChange={e => set('divisi', e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
               {Object.entries(FIN_DIVISIONS).map(([d, info]) => <option key={d} value={d}>{info.label}</option>)}
@@ -14458,11 +14484,18 @@ function FinanceAnalysis({ list, scopeLabel }) {
   );
 }
 
+// Rentang penuh satu bulan {id,label,start,end} dari 'YYYY-MM' — dipakai sbg periode default Keuangan
+const finMonthRange = (mk) => {
+  const [y, m] = mk.split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return { id: 'month', label: 'Bulan', start: `${mk}-01`, end: `${mk}-${String(last).padStart(2, '0')}` };
+};
+
 function KeuanganView({ user, allUsers }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('dashboard');
-  const [mKey, setMKey] = useState(monthKey());
+  const [per, setPer] = useState(() => finMonthRange(monthKey()));
   const [filterDiv, setFilterDiv] = useState('all');
   const [showInput, setShowInput] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -14477,11 +14510,26 @@ function KeuanganView({ user, allUsers }) {
   };
   useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
 
-  const monthLabel = (() => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); })();
-  const shiftMonth = (delta) => { const [y, m] = mKey.split('-').map(Number); setMKey(monthKey(new Date(y, m - 1 + delta, 1))); };
+  const isMonthMode = per.id === 'month' || per.id === 'this-month';
+  const mKey = per.end.slice(0, 7); // bulan acuan utk grafik tren
+  const tglPanjang = (d) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+  const monthLabel = (() => {
+    if (isMonthMode) { const [y, m] = per.start.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); }
+    if (per.start === per.end) return tglPanjang(per.start);
+    const f = (d) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+    return `${f(per.start)} – ${f(per.end)}`;
+  })();
+  // Panah kiri/kanan: mundur/maju 1 bulan saat mode bulan, atau sepanjang rentang saat mode custom
+  const shiftMonth = (delta) => {
+    if (isMonthMode) { const [y, m] = per.start.split('-').map(Number); return setPer(finMonthRange(monthKey(new Date(y, m - 1 + delta, 1)))); }
+    const MS = 86400000;
+    const s = new Date(per.start + 'T00:00:00'), e = new Date(per.end + 'T00:00:00');
+    const span = Math.round((e - s) / MS) + 1;
+    setPer({ ...per, id: 'custom', label: 'Custom', start: dayKey(new Date(s.getTime() + delta * span * MS)), end: dayKey(new Date(e.getTime() + delta * span * MS)) });
+  };
 
   const inDiv = (e) => filterDiv === 'all' || e.divisi === filterDiv;
-  const inMonth = (e) => e.tanggal && e.tanggal.slice(0, 7) === mKey;
+  const inMonth = (e) => e.tanggal && e.tanggal >= per.start && e.tanggal <= per.end;
 
   // Running saldo per divisi (kronologis)
   const saldoMap = useMemo(() => {
@@ -14513,21 +14561,21 @@ function KeuanganView({ user, allUsers }) {
   const totalPendapatan = monthList.filter(e => e.tipe === 'masuk' && !finIsSaldoAwal(e)).reduce((s, e) => s + (Number(e.jumlah) || 0), 0);
   const totalBeban = monthList.filter(e => e.tipe === 'keluar').reduce((s, e) => s + (Number(e.jumlah) || 0), 0);
   const labaBersih = totalPendapatan - totalBeban;
-  const saldoKas = items.filter(e => inDiv(e) && (e.tanggal || '').slice(0, 7) <= mKey).reduce((s, e) => s + (e.tipe === 'keluar' ? -1 : 1) * (Number(e.jumlah) || 0), 0);
+  const saldoKas = items.filter(e => inDiv(e) && (e.tanggal || '') <= per.end).reduce((s, e) => s + (e.tipe === 'keluar' ? -1 : 1) * (Number(e.jumlah) || 0), 0);
 
   const breakdown = (tipe) => {
     const m = {};
     monthList.filter(e => e.tipe === tipe && !(tipe === 'masuk' && finIsSaldoAwal(e))).forEach(e => { const k = e.kategori || 'Lainnya'; m[k] = (m[k] || 0) + (Number(e.jumlah) || 0); });
     return Object.entries(m).sort((a, b) => b[1] - a[1]);
   };
-  const bdKeluar = useMemo(() => breakdown('keluar'), [items, mKey, filterDiv]);
-  const bdMasuk = useMemo(() => breakdown('masuk'), [items, mKey, filterDiv]);
+  const bdKeluar = useMemo(() => breakdown('keluar'), [items, per, filterDiv]);
+  const bdMasuk = useMemo(() => breakdown('masuk'), [items, per, filterDiv]);
 
   const kasPerDiv = useMemo(() => {
     const r = {};
-    Object.keys(FIN_DIVISIONS).forEach(d => { r[d] = items.filter(e => e.divisi === d && (e.tanggal || '').slice(0, 7) <= mKey).reduce((s, e) => s + (e.tipe === 'keluar' ? -1 : 1) * (Number(e.jumlah) || 0), 0); });
+    Object.keys(FIN_DIVISIONS).forEach(d => { r[d] = items.filter(e => e.divisi === d && (e.tanggal || '') <= per.end).reduce((s, e) => s + (e.tipe === 'keluar' ? -1 : 1) * (Number(e.jumlah) || 0), 0); });
     return r;
-  }, [items, mKey]);
+  }, [items, per]);
 
   // NERACA (basis kas) — kumulatif s/d akhir bulan terpilih, ikut filter divisi.
   // App hanya mencatat ARUS KAS (belum ada akun piutang/utang/aset tetap terpisah), jadi neraca ini basis kas:
@@ -14536,15 +14584,15 @@ function KeuanganView({ user, allUsers }) {
   const neraca = useMemo(() => {
     const flow = (pred) => items.filter(pred).reduce((s, e) => s + (e.tipe === 'keluar' ? -1 : 1) * (Number(e.jumlah) || 0), 0);
     const sumIn = (pred) => items.filter(pred).reduce((s, e) => s + (Number(e.jumlah) || 0), 0);
-    const upto = (e) => inDiv(e) && (e.tanggal || '').slice(0, 7) <= mKey;
-    const before = (e) => inDiv(e) && (e.tanggal || '').slice(0, 7) < mKey;
+    const upto = (e) => inDiv(e) && (e.tanggal || '') <= per.end;
+    const before = (e) => inDiv(e) && (e.tanggal || '') < per.start;
     const kas = flow(upto);
     const modal = sumIn(e => upto(e) && e.tipe === 'masuk' && finIsSaldoAwal(e)); // modal disetor (semua 'Saldo Awal')
     const labaDitahan = kas - modal;                                              // Σ pendapatan non-saldoawal − Σ beban (kumulatif)
     const labaLalu = flow(before) - sumIn(e => before(e) && e.tipe === 'masuk' && finIsSaldoAwal(e)); // laba ditahan s/d bln lalu
     const labaBulanIni = labaDitahan - labaLalu;                                  // laba/rugi bulan berjalan (cocok tab Laba Rugi)
     return { kas, modal, labaDitahan, labaLalu, labaBulanIni, ekuitas: modal + labaDitahan, seimbang: Math.abs(kas - (modal + labaDitahan)) < 1 };
-  }, [items, mKey, filterDiv]);
+  }, [items, per, filterDiv]);
 
   // Tren 6 bulan (Pendapatan vs Beban) utk filter divisi
   const trend = useMemo(() => {
@@ -14557,7 +14605,7 @@ function KeuanganView({ user, allUsers }) {
     });
     const pend = mk2series('masuk'), beb = mk2series('keluar');
     return { pend, beb, hasData: pend.some(p => p.value) || beb.some(b => b.value) };
-  }, [items, mKey, filterDiv]);
+  }, [items, per, filterDiv]);
 
   const tableList = items.filter(e => inMonth(e) && inDiv(e) && (!q || (e.keterangan || '').toLowerCase().includes(q.toLowerCase()) || (e.kategori || '').toLowerCase().includes(q.toLowerCase())))
     .sort((a, b) => (b.tanggal || '').localeCompare(a.tanggal || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -14569,7 +14617,7 @@ function KeuanganView({ user, allUsers }) {
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [{ wch: 12 }, { wch: 13 }, { wch: 8 }, { wch: 20 }, { wch: 32 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 30 }];
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Cash Flow');
-    XLSX.writeFile(wb, `Keuangan-${filterDiv === 'all' ? 'Semua' : FIN_DIVISIONS[filterDiv]?.label}-${mKey}.xlsx`);
+    XLSX.writeFile(wb, `Keuangan-${filterDiv === 'all' ? 'Semua' : FIN_DIVISIONS[filterDiv]?.label}-${isMonthMode ? mKey : `${per.start}_sd_${per.end}`}.xlsx`);
   };
 
   if (loading) return <div className="text-slate-400 text-sm">Memuat data keuangan…</div>;
@@ -14601,9 +14649,8 @@ function KeuanganView({ user, allUsers }) {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => shiftMonth(-1)} className="p-1.5 rounded-lg border border-slate-300 hover:bg-slate-50"><ArrowLeft className="w-4 h-4" /></button>
-          <DateRangePopover tabs={['month']} defaultTab="month" maxDate={null} compact
-            value={{ id: 'month', label: 'Bulan', start: `${mKey}-01`, end: `${mKey}-01` }}
-            onChange={p => setMKey(p.start.slice(0, 7))} />
+          <DateRangePopover tabs={['custom', 'day', 'week', 'month']} defaultTab="month" maxDate={null} compact
+            value={per} onChange={setPer} />
           <button onClick={() => shiftMonth(1)} className="p-1.5 rounded-lg border border-slate-300 hover:bg-slate-50"><ArrowRight className="w-4 h-4" /></button>
         </div>
       </div>
@@ -14734,7 +14781,7 @@ function KeuanganView({ user, allUsers }) {
           <div className="bg-white rounded-2xl border border-slate-200/70 p-5 sm:p-7 max-w-3xl">
             <div className="text-center mb-1">
               <h3 className="font-display font-extrabold text-lg text-slate-900">NERACA</h3>
-              <p className="text-sm text-slate-500">{filterDiv === 'all' ? 'Semua Divisi' : FIN_DIVISIONS[filterDiv]?.label} · per akhir {monthLabel}</p>
+              <p className="text-sm text-slate-500">{filterDiv === 'all' ? 'Semua Divisi' : FIN_DIVISIONS[filterDiv]?.label} · posisi per {tglPanjang(per.end)}</p>
             </div>
             <div className="flex justify-center mb-6 mt-2">
               <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full ${neraca.seimbang ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
