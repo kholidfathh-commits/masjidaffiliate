@@ -15,7 +15,7 @@ Catatan pengembangan teknis aplikasi manajemen tim internal Al-Kahfi Corp (MCN T
 - **Storage:** Supabase free tier (region Tokyo), tabel `kv_store`. Risiko: auto-pause 7 hari, tanpa PITR/backup otomatis → mitigasi lewat fitur Backup & Restore + auto-backup harian + backup Google Drive.
 - **Versi artifact paralel:** `AlKahfiTeamApp.jsx` (pakai `window.storage`, style inline), diturunkan dari versi deploy via script konversi.
 - **Peran:** 4 role (owner / manajer / leader / operasional) + flag `isSecretariat`.
-- **Divisi:** manajemen, internal, mcn, tap, media, event, mabit, keuangan.
+- **Divisi (struktur 2026-2029, sejak 4 Agu 2026):** manajemen, keuangan, mabit, mcn, tap, event (= MMC "Malam Mabit Cuan", key internal tetap `event`), internal. Divisi `media` DIHAPUS — label key tak dikenal ditampilkan via helper `divLabel()` → "Divisi Lama (pindahkan)".
 - **Tema (sejak redesign 13 Jun):** biru elektrik #2563EB, bg app #F4F7FE, sidebar gelap navy #0B1120, font Inter.
 - **PWA:** installable di HP (jalur internal, bukan App Store) via `public/manifest.webmanifest` + `public/sw.js`.
 
@@ -268,6 +268,51 @@ Melanjutkan brankas `img:` (yang masih menaruh foto base64 di DALAM database) �
 - **Bonus sesi paralel — selfie fallback kamera HP:** `SelfieCaptureModal` + input `type=file capture="user"` saat getUserMedia diblokir (buka app kamera bawaan; downscale 480px JPEG 0.65) — pesan error jadi amber + tombol "Ambil Foto (Kamera HP)".
 - **Review adversarial (25 agen, 21 temuan → 3 CONFIRMED, semua DIPERBAIKI):** (1) rata-rata/hari pakai jumlah titik grafik (maks 92) padahal total pakai seluruh periode → utk periode >92 hari rata-rata melambung; fix: `elapsed` dihitung dari rentang tanggal riil (start..min(end,hari ini)), `best`/`activeDays` dihitung dari SEMUA entri periode (Set tanggal), bukan titik grafik. (2) `proj = avg*dim` dihitung utk periode non-bulan (laten, kartu tersembunyi) → fix: `proj` hanya saat `isThisMonth`. (3) `pendStart` tidak direset saat popover ditutup via overlay → fix: reset di onClick overlay. +1 defensif: `pickMonth` guard `mk-01 > maxD`.
 - Verifikasi: build lulus 2,66s; app boot bersih di preview (0 error console). **BELUM di-deploy** — perubahan masih uncommitted; deploy = commit + push GitHub Desktop.
+
+### 4 Agu 2026 — HALAMAN "DIVISI" + SINKRON STRUKTUR 2026-2029 (build lulus 4,51s)
+
+Struktur resmi Al-Kahfi Corp 2026-2029: Dewan Direksi (Aditya) → CEO (Azka) → Manager (Kholid), didampingi Keuangan (Camelia) & Sekretariat (Alma); 5 leader divisi: Mabit Scholar (Agung), MCN (Ardiansyah), TAP (Fajar), MMC (Najib, membawahi volunteer), Affiliator (Siti).
+
+**Bagian 1 — Sinkron daftar divisi:**
+
+- **`media` DIHAPUS** dari `DIVISIONS`, `DIVISION_FEATURES`, `LEADER_DIV_SHORT`. Fitur `media-tasks` (menu "Eksekusi Konten") kini efektif hanya terlihat owner/manajer (tidak dihapus, tinggal tak ter-assign divisi manapun).
+- **`event` di-relabel "MMC (Malam Mabit Cuan)"** — key internal TETAP `'event'` (nol migrasi data); `LEADER_DIV_SHORT.event = 'MMC'`.
+- **Urutan tampil** (= urutan key `DIVISIONS`, dipakai semua dropdown `Object.entries/keys(DIVISIONS)`): Manajemen, Keuangan, Mabit Scholar, MCN, TAP, MMC, Affiliator Internal. `GMV_DIVISIONS` TIDAK disentuh.
+- **Anti-crash:** helper baru `divLabel(key)` = `DIVISIONS[key]?.label || 'Divisi Lama (pindahkan)'` — dipakai di semua lookup label yang key-nya dinamis (export absensi ×2, LeaveDetailModal, halaman Divisi). Ada user PRODUCTION nyata berdivisi `media` (trisya, leader) — diuji langsung: app & halaman Divisi TIDAK crash, label fallback tampil.
+- **Anggota Tim:** banner amber untuk owner/manajer bila ada anggota berdivisi lama ("X anggota masih di divisi lama — ubah divisinya lewat tombol Edit") + `UserForm` menampilkan option "Divisi Lama (pindahkan)" agar select tidak salah tampil saat edit user lama.
+
+**Bagian 2 — Modul data Rencana Divisi (per-record):**
+
+- Key logis **`division-plans:all`** → loader `loadDivisionPlans()` baca prefix **`divplan:`** via `listByPrefix` (LIKE, sesuai aturan #5). Terdaftar di `PER_RECORD_LOADERS`, `PER_RECORD_PREFIX`, dan `BACKUP_KEYS` (ikut backup manual/auto/Drive + Restore Gabung otomatis lewat mesin per-record).
+- Field: `{id, division, title*, detail, target(indikator), picId+picName(dari anggota divisi), dueDate, status: rencana|berjalan|selesai|batal, createdById/Name, createdAt, updatedAt, doneAt(diisi saat selesai)}`. Const `DIVPLAN_STATUS` + helper `canWriteDivPlan(user, div)`: owner/manajer semua divisi, leader hanya divisinya; operasional tanpa akses baca/tulis.
+
+**Bagian 3 — Halaman baru "Divisi" (view `division-review`):**
+
+- Sidebar grup Utama tepat di bawah Dashboard, label "Divisi", icon `Building2`, `show: role !== 'operasional'`; operasional yang nyasar ke view ini di-redirect ke dashboard (useEffect).
+- Owner/manajer: switcher pill semua divisi; leader terkunci divisinya (tanpa switcher). Filter periode `DateRangePopover` (custom/hari/pekan/bulan + preset), default Bulan Ini.
+- Data: `loadTasks/loadAttendanceRecs/loadDailyReports/loadGmvEntries/loadCalendar/loadLeaves/loadDivisionPlans` + `getList('problems:all')`, polling `pollWhenVisible` 30 dtk. Anggota divisi = `(u.division||'internal') === div`.
+- Susunan: header gradient (nama divisi, Avatar leader, jumlah anggota) → kartu ringkasan (anggota · tiket selesai periode via `completedAt` · tiket berjalan todo/in_progress/qc · laporan harian periode · GMV periode KHUSUS divisi mcn/tap/internal) → grid anggota (Avatar, `displayJobTitle`, badge role, status absen hari ini via `wibDayKey` + izin approved) → Sedang Dikerjakan (tiket aktif + agenda kalender 7 hari yang melibatkan anggota) → Sudah Dilakukan (tiket done, masalah resolved via `p.division` + `resolvedAt`, 5 laporan harian terakhir dgn cuplikan ±120 kar) → Rencana ke Depan (urut berjalan→rencana→dueDate; riwayat selesai/batal collapsible; modal `DivPlanFormModal`) → Kendala Aktif (`p.division === div`, status ≠ resolved, badge urgency).
+- **Helper bersama `reportFieldsOf(r)`** diangkat dari pola `fieldsOf` ReportsView (format template `fieldsSnapshot` ATAU legacy field langsung) — ReportsView kini memakai helper yang sama, tidak ada parser baru.
+
+**Verifikasi:** build 4,51s lulus; bracket-delta vs commit pra-ubah (5e4726c) = 0. Diuji live di preview (data production): manajer → menu tampil + ganti-ganti divisi OK + kartu GMV muncul hanya di MCN/TAP/Internal; leader MCN → terkunci tanpa switcher; leader `media` (trisya) → fallback, no crash; operasional → menu tidak tampil. Rencana diuji end-to-end: tambah via modal → baris `divplan:<id>` terverifikasi di kv_store (semua field benar) → dihapus lagi (data uji bersih). Teks lama "Media, Event" di hint KPI & stat landing "8 Divisi" ikut disesuaikan (7).
+
+### 4 Agu 2026 — HAPUS 4 FITUR TAK TERPAKAI: Creator & Konten (build lulus 3,02s, −1.150 baris)
+
+Keputusan user: fitur-fitur ini belum pernah dipakai perusahaan (diverifikasi: `creators:all` di server = array kosong, `content-ideas:all` tidak ada barisnya) → dihapus TOTAL dari kode, bukan sekadar disembunyikan (mengikuti preseden penghapusan Tugas Harian Ronde 5).
+
+**Yang dihapus:**
+
+- **4 view + turunannya:** `CreatorsView` + `CreatorForm` + `ImportCsvButton` + `DownloadTemplateButton` + `ExportCreatorsButton` ("Database Creator"), `CreatorManagementView` ("Pengelolaan Creator"), `ContentIdeasView` + `ContentIdeaForm` + `AssignIdeaModal` + `PublishIdeaModal` + `RejectIdeaModal` ("Bank Ide Konten"), `MediaTasksView` ("Eksekusi Konten").
+- **Const:** `CREATOR_STATUS`, `CONTENT_STATUS`, `CONTENT_FORMAT`. **Helper `can`:** `manageAllCreators`, `assignCreator`, `canSeeCreator`.
+- **Sidebar:** 4 item menu; grup "Creator & Seller" di-rename **"Seller & Mitra"** (isi: Database Seller, Kalkulator Komisi, Kepuasan Mitra). **Routes:** 4 entri view dihapus.
+- **`DIVISION_FEATURES`:** `creators`/`creator-management` dicabut dari manajemen & mcn (fitur `media-tasks` sudah hilang saat divisi media dihapus).
+- **`BACKUP_KEYS`:** `creators:all`, `creators:last-sync`, `content-ideas:all` dikeluarkan (datanya memang kosong; baris sisa di kv_store dibiarkan, tak mengganggu).
+- **TopBar:** hasil pencarian global & quick action "+Tambah" tanpa creator/ide konten; placeholder search disesuaikan.
+- **Dashboard:** kartu "Creator Dikelola" & mini-kartu "Creator Aktif" dihapus; kartu "GMV Total" (yang menghitung dari data creator = selalu 0) diganti **"GMV Bulan Ini"** dari `gmvEntries` (data riil GMV divisi), klik → Target & GMV.
+
+**Verifikasi:** build 3,02s lulus (bundle −50 kB), bracket-delta = 0, `grep` 0 referensi yatim. Diuji live di preview: manajer & leader MCN boot normal, 4 menu hilang, grup Seller & Mitra tampil, kartu dashboard benar. **Catatan penting:** preview sempat menampilkan bundle lama karena cache service worker PWA sesi sebelumnya — setelah unregister SW + hapus cache, semua benar. Di production pun user perlu **hard refresh** setelah deploy (alur biasa).
+
+**Total perubahan 4 Agu belum di-deploy** (fitur Divisi + penghapusan 4 fitur sama-sama masih uncommitted; watcher auto-commit sedang tidak aktif).
 
 ---
 
