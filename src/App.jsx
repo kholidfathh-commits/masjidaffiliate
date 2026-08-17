@@ -11,7 +11,7 @@ import {
   GripVertical, MapPin, ArrowRight, ArrowLeft, BarChart3, Pin, MessageSquare,
   Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle,
   Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2,
-  Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload, Wallet, Receipt, Scale
+  Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload, Wallet, Receipt, Scale, Building2
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -31,8 +31,6 @@ const can = {
   createOperasional: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
   editAppSettings: u => u.role === 'owner' || u.role === 'manajer',
   viewAllData: u => u.role === 'owner' || u.role === 'manajer',
-  manageAllCreators: u => u.role === 'owner' || u.role === 'manajer',
-  assignCreator: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
   createTasks: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
   postAnnouncements: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
   manageSchedule: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
@@ -52,15 +50,6 @@ const can = {
     }
     return false;
   },
-  canSeeCreator: (viewer, creator, allUsers) => {
-    if (viewer.role === 'owner' || viewer.role === 'manajer') return true;
-    if (creator.managerId === viewer.id) return true;
-    if (viewer.role === 'leader') {
-      const manager = allUsers.find(u => u.id === creator.managerId);
-      return manager && (manager.leaderId === viewer.id || manager.id === viewer.id);
-    }
-    return false;
-  }
 };
 
 // ============ STORAGE ============
@@ -447,9 +436,18 @@ async function loadCalendar() {
   return recs;
 }
 
+// Rencana Divisi (division-plans:all) — per-record, prefix 'divplan:'. Modul BARU sejak awal
+// per-record → tidak ada array legacy yang perlu diserap.
+// Field: {id, division, title, detail?, target?, picId?, picName?, dueDate?, status(rencana|berjalan|selesai|batal),
+//         createdById, createdByName, createdAt, updatedAt, doneAt(diisi saat selesai)}.
+const DIVPLAN_REC_PREFIX = 'divplan:';
+async function loadDivisionPlans() {
+  return await storage.listByPrefix(DIVPLAN_REC_PREFIX); // throw saat koneksi gagal → pemanggil pertahankan state lama
+}
+
 // Daftar modul per-record (key backup logis → loader & prefix baris). Tambah modul baru di sini.
-const PER_RECORD_LOADERS = { 'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar, 'img:store': loadImageStore };
-const PER_RECORD_PREFIX = { 'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX, 'img:store': IMG_PREFIX };
+const PER_RECORD_LOADERS = { 'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar, 'division-plans:all': loadDivisionPlans, 'img:store': loadImageStore };
+const PER_RECORD_PREFIX = { 'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX, 'division-plans:all': DIVPLAN_REC_PREFIX, 'img:store': IMG_PREFIX };
 
 // ============ CRYPTO (PBKDF2 password hashing) ============
 async function hashPassword(password, salt) {
@@ -611,30 +609,10 @@ const TASK_STATUS = {
   qc:          { label: 'Menunggu QC', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
   done:        { label: 'Selesai',     color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' }
 };
-const CREATOR_STATUS = {
-  aktif:   { label: 'Aktif',   color: 'bg-blue-100 text-blue-700' },
-  pasif:   { label: 'Pasif',   color: 'bg-slate-100 text-slate-600' },
-  pending: { label: 'Pending', color: 'bg-amber-100 text-amber-800' }
-};
 const SCHEDULE_TYPE = {
   live:        { label: 'Live Shopping', color: 'bg-purple-100 text-purple-800', icon: '🔴' },
   piket_admin: { label: 'Piket Admin',   color: 'bg-blue-100 text-blue-800',     icon: '💼' },
   piket_grup:  { label: 'Piket Grup',    color: 'bg-cyan-100 text-cyan-800',     icon: '👥' }
-};
-
-const CONTENT_STATUS = {
-  idea:        { label: 'Ide',          color: 'bg-amber-100 text-amber-800',   dot: 'bg-amber-400' },
-  approved:    { label: 'Disetujui',    color: 'bg-blue-100 text-blue-700',     dot: 'bg-blue-500' },
-  in_progress: { label: 'Produksi',     color: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
-  published:   { label: 'Sudah Tayang', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
-  rejected:    { label: 'Ditolak',      color: 'bg-red-100 text-red-700',       dot: 'bg-red-500' }
-};
-const CONTENT_FORMAT = {
-  reel:     { label: 'Reel/Video TikTok', icon: '🎬' },
-  carousel: { label: 'Carousel IG',       icon: '📑' },
-  photo:    { label: 'Foto Tunggal',      icon: '📸' },
-  live:     { label: 'Live Shopping',     icon: '🔴' },
-  story:    { label: 'Story',             icon: '⚡' }
 };
 
 const TODO_STATUS = {
@@ -675,6 +653,15 @@ const DEFAULT_DAILY_FIELDS = [
   { id: 'contentCount', label: 'Jumlah Konten',        type: 'number',   required: false },
   { id: 'liveCount',    label: 'Jumlah Live',          type: 'number',   required: false }
 ];
+
+// Baca field laporan harian dengan aman — laporan punya 2 format: template (fieldsSnapshot
+// array {id,label,type,value}) dan legacy (field langsung r.activities/r.results/dll).
+// Dipakai di ReportsView ("Buat dari Laporan Harian") & halaman Divisi. JANGAN tulis parser baru.
+function reportFieldsOf(r) {
+  return r.fieldsSnapshot && Array.isArray(r.fieldsSnapshot)
+    ? r.fieldsSnapshot
+    : DEFAULT_DAILY_FIELDS.map(f => ({ id: f.id, label: f.label, type: f.type, value: r[f.id] }));
+}
 
 const DEFAULT_ROLE_LABELS = { owner: 'Owner', manajer: 'Manajer', leader: 'Leader', operasional: 'Karyawan' };
 const DEFAULT_JOB_TITLES = ['Creator Manager', 'Admin Live', 'Admin Grup', 'Creator Hunter', 'Content Creator', 'Tim Ads', 'Marketing', 'Editor Video', 'Affiliator', 'Admin Campaign', 'Dokumentasi', 'Live Streaming'];
@@ -730,14 +717,14 @@ function effectiveAttConfig(config, userId, dateObj) {
 
 // Semua key data tim (shared) yang ikut di-backup. ui:* & current-user TIDAK ikut (khusus per-perangkat).
 const BACKUP_KEYS = [
-  'users:list', 'app:settings', 'tasks:all', 'todos:all', 'creators:all', 'creators:last-sync',
+  'users:list', 'app:settings', 'tasks:all', 'todos:all',
   'sellers:all', 'attendance:all', 'attendance:config', 'activities:all', 'announcements:all', 'schedule:all', 'calendar:all',
-  'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all', 'content-ideas:all',
+  'daily-reports:all', 'daily-report-templates:all', 'reports:all', 'targets:all',
   'gmv:daily', 'gmv:targets', 'kpi:config', 'problems:all', 'affiliate-accounts:all', 'affiliate-gmv:daily', 'affiliate:goal', 'feedback:all',
   'attendance:selfie-index', 'tap-commission:tiers', 'tap-commission:history',
   'partner-feedback:all', 'swot:external', 'backup:last', 'leave-requests:all',
   'drive:auto-backup', 'backup:drive-last',
-  'keuangan:cashflow',
+  'keuangan:cashflow', 'division-plans:all',
   'img:store' // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
@@ -894,33 +881,36 @@ async function migratePhotosToStorage({ force = false } = {}) {
   return { done: true, moved, probe: _storageProbe };
 }
 
-// Divisi tim Masjid Affiliate (sesuai struktur Al-Kahfi Corp)
+// Divisi tim Masjid Affiliate (sesuai struktur organisasi Al-Kahfi Corp 2026-2029).
+// Urutan key = urutan tampil di semua dropdown/filter divisi.
 const DIVISIONS = {
   manajemen: { label: 'Manajemen', color: 'bg-violet-100 text-violet-800' },
-  internal:  { label: 'Affiliator Internal', color: 'bg-blue-100 text-blue-800' },
+  keuangan:  { label: 'Keuangan', color: 'bg-slate-100 text-slate-700' },
+  mabit:     { label: 'Mabit Scholar', color: 'bg-teal-100 text-teal-800' },
   mcn:       { label: 'MCN', color: 'bg-emerald-100 text-emerald-800' },
   tap:       { label: 'TAP', color: 'bg-orange-100 text-orange-800' },
-  media:     { label: 'Media & Creative', color: 'bg-pink-100 text-pink-800' },
-  event:     { label: 'Event', color: 'bg-amber-100 text-amber-800' },
-  mabit:     { label: 'Mabit Scholar', color: 'bg-teal-100 text-teal-800' },
-  keuangan:  { label: 'Keuangan', color: 'bg-slate-100 text-slate-700' }
+  // key 'event' = divisi MMC (Malam Mabit Cuan) — kegiatan rutin 2 pekan sekali di Masjid Affiliate untuk pembelajaran affiliate
+  event:     { label: 'MMC (Malam Mabit Cuan)', color: 'bg-amber-100 text-amber-800' },
+  internal:  { label: 'Affiliator Internal', color: 'bg-blue-100 text-blue-800' }
 };
+// Label divisi dengan fallback AMAN — masih mungkin ada user/record lama berdivisi yang sudah
+// dihapus (mis. 'media'). Jangan pernah akses DIVISIONS[key].label langsung pada key dinamis.
+function divLabel(key) { return DIVISIONS[key]?.label || 'Divisi Lama (pindahkan)'; }
 
 // Fitur apa yang relevan untuk tiap divisi (selain menu umum yang dipakai semua).
 // Owner & Manajer selalu lihat semua. Divisi 'manajemen' juga lihat semua.
 const DIVISION_FEATURES = {
-  manajemen: ['creators', 'creator-management', 'sellers', 'gmv', 'affiliate-accounts', 'tap-commission', 'finance'],
-  internal:  ['gmv', 'affiliate-accounts'],
-  mcn:       ['creators', 'creator-management', 'gmv'],
-  tap:       ['sellers', 'gmv', 'tap-commission'],
-  media:     ['media-tasks'],
-  event:     [],
+  manajemen: ['sellers', 'gmv', 'affiliate-accounts', 'tap-commission', 'finance'],
+  keuangan:  ['gmv', 'finance'],
   mabit:     [],
-  keuangan:  ['gmv', 'finance']
+  mcn:       ['gmv'],
+  tap:       ['sellers', 'gmv', 'tap-commission'],
+  event:     [],
+  internal:  ['gmv', 'affiliate-accounts']
 };
 // Label jabatan yang ditampilkan di kartu anggota:
 // Manajer/Owner = tidak perlu (perannya sudah jabatan) · Leader = otomatis "Leader <Divisi>" · Staff = jobTitle kalau diisi.
-const LEADER_DIV_SHORT = { mcn: 'MCN', tap: 'TAP', internal: 'Affiliator', media: 'Media', event: 'Event', mabit: 'Mabit', keuangan: 'Keuangan', manajemen: 'Manajemen' };
+const LEADER_DIV_SHORT = { manajemen: 'Manajemen', keuangan: 'Keuangan', mabit: 'Mabit', mcn: 'MCN', tap: 'TAP', event: 'MMC', internal: 'Affiliator' };
 function displayJobTitle(u) {
   if (!u) return null;
   if (u.role === 'owner' || u.role === 'manajer') return null;
@@ -933,6 +923,19 @@ function canAccessFeature(user, feature) {
   if (user.role === 'owner' || user.role === 'manajer') return true;
   const div = user.division || 'internal';
   return (DIVISION_FEATURES[div] || []).includes(feature);
+}
+
+// ====== RENCANA DIVISI (halaman "Divisi") ======
+const DIVPLAN_STATUS = {
+  rencana:  { label: 'Rencana',  color: 'bg-slate-100 text-slate-700',     dot: 'bg-slate-400' },
+  berjalan: { label: 'Berjalan', color: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500' },
+  selesai:  { label: 'Selesai',  color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  batal:    { label: 'Batal',    color: 'bg-red-100 text-red-600',         dot: 'bg-red-400' }
+};
+// Hak tulis Rencana Divisi: owner & manajer semua divisi; leader hanya divisinya sendiri.
+function canWriteDivPlan(user, division) {
+  if (user.role === 'owner' || user.role === 'manajer') return true;
+  return user.role === 'leader' && (user.division || 'internal') === division;
 }
 
 // ====== GMV TRACKING ======
@@ -1006,7 +1009,7 @@ function computeTapCommission(price, raise, tiers = DEFAULT_TAP_TIERS) {
 
 // ====== KPI POIN (v2 — adil per peran & divisi) ======
 // 5 komponen: Kehadiran (hadir) · Disiplin (tepat waktu) · Tugas (kualitas+volume) · Laporan Harian · Capaian Target GMV.
-// Untuk anggota yang tidak pegang target GMV (Media, Event, dll), bobot Target otomatis dialihkan ke Tugas & Laporan — tetap fair.
+// Untuk anggota yang tidak pegang target GMV (Manajemen, MMC, dll), bobot Target otomatis dialihkan ke Tugas & Laporan — tetap fair.
 const DEFAULT_KPI_CONFIG = {
   targetScore: 85,      // target bulanan, >= ini = Mumtaz
   workdays: 26,         // target hari kerja per bulan
@@ -1255,10 +1258,9 @@ export default function App() {
             setView={setView} allUsers={allUsers} />
           <div className="p-4 sm:p-6 lg:p-8 animate-fade-in" key={view}>
             {view === 'dashboard' && <Dashboard user={currentUser} allUsers={allUsers} setView={setView} settings={settings} />}
+            {view === 'division-review' && <DivisionReviewView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'tasks' && <TasksView user={currentUser} allUsers={allUsers} />}
             {view === 'todos' && <TodosView user={currentUser} allUsers={allUsers} />}
-            {view === 'creators' && <CreatorsView user={currentUser} allUsers={allUsers} />}
-            {view === 'creator-management' && <CreatorManagementView user={currentUser} allUsers={allUsers} />}
             {view === 'sellers' && <SellersView user={currentUser} allUsers={allUsers} />}
             {view === 'tap-commission' && <TapCommissionView user={currentUser} />}
             {view === 'partner-feedback' && <PartnerFeedbackView user={currentUser} />}
@@ -1274,8 +1276,6 @@ export default function App() {
             {view === 'leaderboard' && <LeaderboardView allUsers={allUsers} />}
             {view === 'announcements' && <AnnouncementsView user={currentUser} />}
             {view === 'feedback' && <FeedbackView user={currentUser} allUsers={allUsers} />}
-            {view === 'content-ideas' && <ContentIdeasView user={currentUser} allUsers={allUsers} settings={settings} />}
-            {view === 'media-tasks' && <MediaTasksView user={currentUser} allUsers={allUsers} />}
             {view === 'users' && <UsersView user={currentUser} allUsers={allUsers} settings={settings} onRefresh={refreshAll} />}
             {view === 'settings' && <SettingsView user={currentUser} settings={settings} onSave={async s => { await storage.set('app:settings', s); await refreshAll(); }} />}
           </div>
@@ -1298,7 +1298,7 @@ function LandingPage({ settings, onGetStarted }) {
   const stats = [
     { value: '400+', label: 'Creator Dikelola' },
     { value: 'Rp 1M+', label: 'Target GMV / Bulan' },
-    { value: '8', label: 'Divisi Tim' },
+    { value: '7', label: 'Divisi Tim' },
     { value: '24/7', label: 'Akses Multi-Device' }
   ];
   return (
@@ -1849,7 +1849,8 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
     {
       label: 'Utama',
       items: [
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true }
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
+        { id: 'division-review', label: 'Divisi', icon: Building2, show: user.role !== 'operasional' }
       ]
     },
     {
@@ -1864,15 +1865,11 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       ]
     },
     {
-      label: 'Creator & Seller',
+      label: 'Seller & Mitra',
       items: [
-        { id: 'creators', label: 'Database Creator', icon: Users, show: canAccessFeature(user, 'creators') },
-        { id: 'creator-management', label: 'Pengelolaan Creator', icon: Network, show: canAccessFeature(user, 'creator-management') },
         { id: 'sellers', label: 'Database Seller', icon: Briefcase, show: canAccessFeature(user, 'sellers') },
         { id: 'tap-commission', label: 'Kalkulator Komisi', icon: Calculator, show: canAccessFeature(user, 'tap-commission') },
-        { id: 'partner-feedback', label: 'Kepuasan Mitra', icon: Heart, show: true },
-        { id: 'content-ideas', label: 'Bank Ide Konten', icon: Lightbulb, show: true },
-        { id: 'media-tasks', label: 'Eksekusi Konten', icon: Clapperboard, show: canAccessFeature(user, 'media-tasks') }
+        { id: 'partner-feedback', label: 'Kepuasan Mitra', icon: Heart, show: true }
       ]
     },
     {
@@ -2051,7 +2048,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
   }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState({ tasks: [], creators: [], users: [] });
+  const [searchResults, setSearchResults] = useState({ tasks: [], users: [] });
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [showQuickAction, setShowQuickAction] = useState(false);
@@ -2237,18 +2234,15 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
   // Global search
   useEffect(() => {
     if (!searchQuery.trim()) {
-      setSearchResults({ tasks: [], creators: [], users: [] });
+      setSearchResults({ tasks: [], users: [] });
       return;
     }
     const q = searchQuery.toLowerCase();
     (async () => {
       const tasks = await loadTasks();
-      const creators = await storage.getList('creators:all');
       setSearchResults({
         tasks: tasks.filter(t => can.canSeeTask(user, t, allUsers) &&
           ((t.title || '').toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q))).slice(0, 5),
-        creators: creators.filter(c => can.canSeeCreator(user, c, allUsers) &&
-          ((c.name || '').toLowerCase().includes(q) || (c.username || '').toLowerCase().includes(q))).slice(0, 5),
         users: allUsers.filter(u => (u.name || '').toLowerCase().includes(q) || (u.jobTitle || '').toLowerCase().includes(q)).slice(0, 5)
       });
     })();
@@ -2289,13 +2283,11 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
 
   const quickActions = [
     ...(user.role !== 'operasional' ? [{ label: 'Tiket Baru', icon: CheckSquare, view: 'tasks', color: 'text-blue-600 bg-blue-50' }] : []),
-    { label: 'Creator Baru', icon: Users, view: 'creators', color: 'text-purple-600 bg-purple-50' },
     { label: 'Laporan Harian', icon: ClipboardList, view: 'daily-reports', color: 'text-blue-600 bg-blue-50' },
-    { label: 'Ide Konten Baru', icon: Lightbulb, view: 'content-ideas', color: 'text-amber-600 bg-amber-50' },
     { label: 'Pengumuman', icon: Megaphone, view: 'announcements', color: 'text-rose-600 bg-rose-50' }
   ];
 
-  const hasResults = searchResults.tasks.length + searchResults.creators.length + searchResults.users.length > 0;
+  const hasResults = searchResults.tasks.length + searchResults.users.length > 0;
 
   return (
     <>
@@ -2355,7 +2347,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
           <input type="text" value={searchQuery}
             onChange={e => { setSearchQuery(e.target.value); setShowSearchDropdown(true); }}
             onFocus={() => setShowSearchDropdown(true)}
-            placeholder="Cari tugas, creator, anggota tim..."
+            placeholder="Cari tugas atau anggota tim..."
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400" />
           {searchQuery && (
             <button onClick={() => { setSearchQuery(''); setShowSearchDropdown(false); }} className="text-slate-400 hover:text-slate-700">
@@ -2384,23 +2376,6 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-medium text-slate-900 truncate">{t.title}</div>
                           <div className="text-xs text-slate-500 truncate">PIC: {t.assigneeName} · {TASK_STATUS[t.status]?.label}</div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {searchResults.creators.length > 0 && (
-                  <div>
-                    <div className="px-4 py-2 text-[10px] uppercase font-bold text-slate-500 bg-slate-50/50">Creator ({searchResults.creators.length})</div>
-                    {searchResults.creators.map(c => (
-                      <button key={c.id} onClick={() => { setView('creators'); setShowSearchDropdown(false); setSearchQuery(''); }}
-                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center flex-shrink-0">
-                          <Users className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-medium text-slate-900 truncate">{c.name}</div>
-                          <div className="text-xs text-slate-500 truncate">{c.username ? `@${c.username} · ` : ''}{c.status}</div>
                         </div>
                       </button>
                     ))}
@@ -2548,7 +2523,6 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
 // ============ DASHBOARD ============
 function Dashboard({ user, allUsers, setView, settings }) {
   const [tasks, setTasks] = useState([]);
-  const [creators, setCreators] = useState([]);
   const [activities, setActivities] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
@@ -2573,7 +2547,6 @@ function Dashboard({ user, allUsers, setView, settings }) {
   useEffect(() => {
     (async () => {
       setTasks(await loadTasks());
-      setCreators(await storage.getList('creators:all'));
       setActivities(await storage.getList('activities:all'));
       setAnnouncements(await storage.getList('announcements:all'));
       setDailyReports(await loadDailyReports());
@@ -2607,11 +2580,10 @@ function Dashboard({ user, allUsers, setView, settings }) {
   };
 
   const visibleTasks = tasks.filter(t => can.canSeeTask(user, t, allUsers));
-  const visibleCreators = creators.filter(c => can.canSeeCreator(user, c, allUsers));
   const myTasks = tasks.filter(t => t.assigneeId === user.id && t.status !== 'done');
   const overdue = myTasks.filter(t => t.deadline && new Date(t.deadline) < new Date()).length;
-  const totalGmv = visibleCreators.reduce((s, c) => s + (Number(c.totalGmv) || 0), 0);
-  const activeCreators = visibleCreators.filter(c => c.status === 'aktif').length;
+  // GMV bulan berjalan dari data GMV divisi (menggantikan GMV agregat creator yang fiturnya sudah dihapus)
+  const gmvThisMonth = gmvEntries.filter(e => e && (e.date || '').startsWith(monthKey())).reduce((s, e) => s + (Number(e.gmv) || 0), 0);
   const today = dayKey();
   const upcomingEvents = calendarEvents
     .filter(e => e.date >= today)
@@ -2634,8 +2606,6 @@ function Dashboard({ user, allUsers, setView, settings }) {
   const deadlineToday = myTasks.filter(t => t.deadline === today);
   const myReportedToday = dailyReports.some(r => r.authorId === user.id && r.date === today);
   const todayEventsCount = calendarEvents.filter(e => e.date === today && e.status !== 'cancelled').length;
-  const myCreators = visibleCreators.filter(c => c.managerId === user.id || (user.role === 'manajer' || user.role === 'owner'));
-  const myActiveCreators = myCreators.filter(c => c.status === 'aktif').length;
 
   // Stats with badge status
   const stats = [
@@ -2652,22 +2622,12 @@ function Dashboard({ user, allUsers, setView, settings }) {
       action: () => setView('tasks')
     },
     {
-      label: 'Creator Dikelola', value: fmtNumber(visibleCreators.length),
-      sub: `${activeCreators} aktif dari ${visibleCreators.length}`,
-      icon: Users,
-      gradient: 'from-purple-500/15 to-pink-500/15 text-purple-700',
-      badge: activeCreators > 0
-        ? { text: 'Aktif', color: 'bg-blue-100 text-blue-700 border-blue-200' }
-        : { text: 'Perlu Follow Up', color: 'bg-amber-100 text-amber-700 border-amber-200' },
-      action: () => setView('creators')
-    },
-    {
-      label: 'GMV Total', value: fmtRupiah(totalGmv),
-      sub: 'Yang Anda kelola',
+      label: 'GMV Bulan Ini', value: fmtRupiah(gmvThisMonth),
+      sub: 'Semua divisi gabungan',
       icon: TrendingUp,
       gradient: 'from-amber-500/15 to-orange-500/15 text-amber-700',
       badge: { text: 'Live', color: 'bg-amber-100 text-amber-700 border-amber-200' },
-      action: () => setView('leaderboard')
+      action: () => canAccessFeature(user, 'gmv') ? setView('gmv') : setView('leaderboard')
     },
     {
       label: 'Tim Visible', value: visibleMembers,
@@ -2698,12 +2658,6 @@ function Dashboard({ user, allUsers, setView, settings }) {
       icon: ClipboardList, iconBg: myReportedToday ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600',
       sub: myReportedToday ? 'Sudah submit' : 'Belum submit',
       action: () => setView('daily-reports')
-    },
-    {
-      label: 'Creator Aktif', value: myActiveCreators,
-      icon: Sparkles, iconBg: 'bg-rose-100 text-rose-600',
-      sub: 'Yang Anda kelola',
-      action: () => setView('creators')
     },
     (() => {
       // Target Aktif = target GMV divisi bulan ini (dari "Set Target" di Target & GMV) + target tim manual
@@ -4937,6 +4891,11 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
     operasional: visible.filter(u => u.role === 'operasional')
   };
 
+  // Anggota yang masih memakai key divisi lama yang sudah dihapus dari struktur (mis. 'media')
+  const staleDivMembers = (user.role === 'manajer' || user.role === 'owner')
+    ? allUsers.filter(u => u.division && !DIVISIONS[u.division])
+    : [];
+
   const handleSave = async (data) => {
     let list = await storage.getList('users:list');
     if (editing) {
@@ -4992,6 +4951,13 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
             <Plus className="w-4 h-4" /> Anggota Baru
           </button>
         } />
+
+      {staleDivMembers.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-2.5 mb-4 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span><b>{staleDivMembers.length} anggota</b> masih di divisi lama ({staleDivMembers.map(u => u.name).join(', ')}) — ubah divisinya lewat tombol Edit.</span>
+        </div>
+      )}
 
       {['manajer', 'leader', 'operasional'].map(role => {
         if (grouped[role].length === 0) return null;
@@ -5123,9 +5089,10 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
         <Field label="Divisi / Tim *">
           <select value={form.division} onChange={e => setForm({ ...form, division: e.target.value })}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            {form.division && !DIVISIONS[form.division] && <option value={form.division}>Divisi Lama (pindahkan)</option>}
             {Object.entries(DIVISIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
-          <div className="text-[11px] text-slate-500 mt-1">💡 Menu yang muncul untuk anggota ini menyesuaikan divisinya. Mis. Internal & TAP tidak melihat menu Creator.</div>
+          <div className="text-[11px] text-slate-500 mt-1">💡 Menu yang muncul untuk anggota ini menyesuaikan divisinya. Mis. hanya TAP & Manajemen yang melihat menu Seller.</div>
         </Field>
         <Field label="Posisi / Jabatan">
           <input type="text" value={form.jobTitle} onChange={e => setForm({ ...form, jobTitle: e.target.value })}
@@ -5845,615 +5812,6 @@ function TaskForm({ task, user, assignableUsers, onSave, onClose }) {
   );
 }
 
-// ============ CREATORS ============
-function CreatorsView({ user, allUsers }) {
-  const [creators, setCreators] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [filter, setFilter] = useState({ status: 'all', manager: 'all', search: '' });
-  const [selectedIds, setSelectedIds] = useState([]);
-
-  const load = async () => { setCreators(await storage.getList('creators:all')); setSelectedIds([]); };
-  useEffect(() => { load(); }, []);
-
-  const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
-
-  const handleSave = async (data) => {
-    let list = await storage.getList('creators:all');
-    if (editing) {
-      list = list.map(c => c.id === editing.id ? { ...c, ...data, updatedAt: new Date().toISOString() } : c);
-    } else {
-      const manager = allUsers.find(u => u.id === data.managerId);
-      list.unshift({
-        id: uid(), ...data,
-        managerName: manager?.name || '-',
-        createdAt: new Date().toISOString()
-      });
-      await logActivity(`menambah creator "${data.name}"`, user.name);
-    }
-    await storage.set('creators:all', list);
-    setShowForm(false); setEditing(null); load();
-  };
-  const handleDelete = async (c) => {
-    if (!confirm(`Hapus creator "${c.name}"?`)) return;
-    const list = (await storage.getList('creators:all')).filter(x => x.id !== c.id);
-    await storage.set('creators:all', list);
-    load();
-  };
-
-  // Hapus beberapa creator sekaligus (yang diceklis)
-  const handleDeleteSelected = async () => {
-    if (selectedIds.length === 0) return;
-    if (!confirm(`Hapus ${selectedIds.length} creator yang diceklis? Tindakan ini tidak bisa dibatalkan.`)) return;
-    const idSet = new Set(selectedIds);
-    const list = (await storage.getList('creators:all')).filter(x => !idSet.has(x.id));
-    await storage.set('creators:all', list);
-    await logActivity(`menghapus ${selectedIds.length} creator sekaligus`, user.name);
-    load();
-  };
-
-  // Hapus SEMUA creator (owner/manajer, konfirmasi ganda)
-  const handleDeleteAll = async () => {
-    if (!confirm(`Hapus SEMUA creator (${creators.length} data)? Tindakan ini tidak bisa dibatalkan.`)) return;
-    if (!confirm('Yakin 100%? Seluruh database creator akan hilang permanen. Disarankan Export Data dulu sebagai cadangan.')) return;
-    await storage.set('creators:all', []);
-    await logActivity(`menghapus SEMUA creator (${creators.length} data)`, user.name);
-    load();
-  };
-
-  const toggleSelect = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-
-  const visibleCreators = creators.filter(c => can.canSeeCreator(user, c, allUsers));
-  const managers = useMemo(() => {
-    if ((user.role === 'manajer' || user.role === 'owner')) return allUsers.filter(u => u.role === 'operasional' || u.role === 'leader');
-    if (user.role === 'leader') return allUsers.filter(u => u.leaderId === user.id || u.id === user.id);
-    return [user];
-  }, [user, allUsers]);
-
-  const filtered = visibleCreators.filter(c => {
-    if (filter.status !== 'all' && c.status !== filter.status) return false;
-    if (filter.manager !== 'all' && c.managerId !== filter.manager) return false;
-    if (filter.search) {
-      const q = filter.search.toLowerCase();
-      if (!c.name.toLowerCase().includes(q) && !(c.tiktokHandle || '').toLowerCase().includes(q)) return false;
-    }
-    return true;
-  });
-  const totalGmv = filtered.reduce((s, c) => s + (Number(c.totalGmv) || 0), 0);
-  const totalOrders = filtered.reduce((s, c) => s + (Number(c.totalOrders) || 0), 0);
-
-  return (
-    <div className="max-w-7xl">
-      <PageHeader title="Database Creator" subtitle="Catat dan kelola semua creator affiliate"
-        action={
-          <div className="flex gap-2 flex-wrap">
-            <DownloadTemplateButton />
-            <ExportCreatorsButton creators={filtered} />
-            <ImportCsvButton onImported={load} user={user} managers={managers} />
-            <button onClick={() => { setEditing(null); setShowForm(true); }}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-              <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Creator Baru</span><span className="sm:hidden">Baru</span>
-            </button>
-          </div>
-        } />
-
-      <div className="grid grid-cols-3 gap-4 mb-4">
-        <MiniStat label="Total Creator" value={fmtNumber(filtered.length)} color="emerald" />
-        <MiniStat label="Total GMV" value={fmtRupiah(totalGmv)} color="amber" />
-        <MiniStat label="Total Order" value={fmtNumber(totalOrders)} color="blue" />
-      </div>
-
-      <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4 flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" placeholder="Cari nama atau @tiktok..." value={filter.search}
-            onChange={e => setFilter({ ...filter, search: e.target.value })}
-            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <select value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })}
-          className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-          <option value="all">Semua Status</option>
-          {Object.entries(CREATOR_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-        </select>
-        <select value={filter.manager} onChange={e => setFilter({ ...filter, manager: e.target.value })}
-          className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-          <option value="all">Semua Manager</option>
-          {managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
-      </div>
-
-      {/* Bulk action bar: hapus terpilih / hapus semua */}
-      {(selectedIds.length > 0 || (isOwnerMgr && creators.length > 0)) && (
-        <div className="mb-4 flex items-center gap-2 flex-wrap bg-white rounded-xl border border-slate-200 p-3">
-          {selectedIds.length > 0 ? (
-            <>
-              <span className="text-sm text-slate-600"><b className="text-blue-700">{selectedIds.length}</b> creator diceklis</span>
-              <button onClick={handleDeleteSelected}
-                className="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5">
-                <Trash2 className="w-4 h-4" /> Hapus Terpilih ({selectedIds.length})
-              </button>
-              <button onClick={() => setSelectedIds([])}
-                className="text-sm text-slate-500 hover:text-slate-700 font-semibold px-2 py-1.5">Batal pilih</button>
-            </>
-          ) : (
-            <span className="text-xs text-slate-400">Ceklis baris untuk hapus beberapa sekaligus</span>
-          )}
-          {isOwnerMgr && (
-            <button onClick={handleDeleteAll} disabled={creators.length === 0}
-              className="ml-auto bg-white border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 text-sm font-semibold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5">
-              <Trash2 className="w-4 h-4" /> Hapus Semua Creator
-            </button>
-          )}
-        </div>
-      )}
-
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        {filtered.length === 0 ? (
-          <EmptyState icon={Users} text="Belum ada creator. Klik 'Creator Baru' atau import CSV." />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
-                <tr>
-                  <th className="p-3 w-10">
-                    <input type="checkbox" title="Ceklis semua (hasil filter)"
-                      checked={filtered.length > 0 && filtered.every(c => selectedIds.includes(c.id))}
-                      onChange={e => setSelectedIds(e.target.checked ? filtered.map(c => c.id) : [])}
-                      className="w-4 h-4 accent-blue-600 rounded cursor-pointer" />
-                  </th>
-                  <th className="text-left p-3 font-semibold">Creator</th>
-                  <th className="text-left p-3 font-semibold">Kategori</th>
-                  <th className="text-left p-3 font-semibold">Status</th>
-                  <th className="text-right p-3 font-semibold">Order</th>
-                  <th className="text-right p-3 font-semibold">GMV</th>
-                  <th className="text-left p-3 font-semibold">Manager</th>
-                  <th className="p-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(c => (
-                  <tr key={c.id} className={`border-t border-slate-100 hover:bg-slate-50 ${selectedIds.includes(c.id) ? 'bg-blue-50/50' : ''}`}>
-                    <td className="p-3">
-                      <input type="checkbox" checked={selectedIds.includes(c.id)} onChange={() => toggleSelect(c.id)}
-                        className="w-4 h-4 accent-blue-600 rounded cursor-pointer" />
-                    </td>
-                    <td className="p-3">
-                      <div className="font-medium text-slate-800">{c.name}</div>
-                      <div className="text-xs text-slate-500">
-                        {c.tiktokHandle && <span>TikTok: @{c.tiktokHandle.replace('@', '')}</span>}
-                      </div>
-                    </td>
-                    <td className="p-3 text-sm text-slate-700">{c.category || '-'}</td>
-                    <td className="p-3">
-                      <span className={`text-xs px-2 py-1 rounded font-semibold ${CREATOR_STATUS[c.status].color}`}>{CREATOR_STATUS[c.status].label}</span>
-                    </td>
-                    <td className="p-3 text-sm text-right tabular-nums text-slate-700">{fmtNumber(c.totalOrders)}</td>
-                    <td className="p-3 text-sm text-right tabular-nums font-semibold text-slate-800">{fmtRupiah(c.totalGmv)}</td>
-                    <td className="p-3 text-sm text-slate-600">{c.managerName || '-'}</td>
-                    <td className="p-3 text-right whitespace-nowrap">
-                      <button onClick={() => { setEditing(c); setShowForm(true); }} className="text-slate-400 hover:text-blue-600 p-1">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(c)} className="text-slate-400 hover:text-red-600 p-1">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {showForm && <CreatorForm creator={editing} user={user} managers={managers}
-        onSave={handleSave} onClose={() => { setShowForm(false); setEditing(null); }} />}
-    </div>
-  );
-}
-
-function CreatorForm({ creator, user, managers, onSave, onClose }) {
-  const [form, setForm] = useState({
-    name: creator?.name || '',
-    tiktokHandle: creator?.tiktokHandle || '',
-    category: creator?.category || '',
-    status: creator?.status || 'pending',
-    totalOrders: creator?.totalOrders || 0,
-    totalGmv: creator?.totalGmv || 0,
-    managerId: creator?.managerId || (user.role === 'operasional' ? user.id : managers[0]?.id || ''),
-    notes: creator?.notes || ''
-  });
-  return (
-    <Modal title={creator ? 'Edit Creator' : 'Creator Baru'} onClose={onClose}>
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Nama Creator *">
-            <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-          </Field>
-          <Field label="Kategori">
-            <input type="text" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
-              placeholder="Beauty, Fashion, Food..."
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-          </Field>
-          <Field label="TikTok Handle">
-            <input type="text" value={form.tiktokHandle} onChange={e => setForm({ ...form, tiktokHandle: e.target.value })}
-              placeholder="@username"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-          </Field>
-          <Field label="Total Order">
-            <input type="number" value={form.totalOrders} onChange={e => setForm({ ...form, totalOrders: Number(e.target.value) })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" />
-          </Field>
-          <Field label="Total GMV (Rp)">
-            <input type="number" value={form.totalGmv} onChange={e => setForm({ ...form, totalGmv: Number(e.target.value) })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" />
-          </Field>
-          <Field label="Status">
-            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
-              {Object.entries(CREATOR_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Manager / PIC *">
-            <select value={form.managerId} onChange={e => setForm({ ...form, managerId: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
-              <option value="">- Pilih manager -</option>
-              {managers.map(m => <option key={m.id} value={m.id}>{m.name}{m.jobTitle ? ` · ${m.jobTitle}` : ""} — {ROLES[m.role].label}</option>)}
-            </select>
-          </Field>
-        </div>
-        <Field label="Catatan">
-          <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
-            rows={2} className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none" />
-        </Field>
-        <FormActions onCancel={onClose} onSave={() => onSave(form)} disabled={!form.name.trim() || !form.managerId} />
-      </div>
-    </Modal>
-  );
-}
-
-// ============ CREATOR MANAGEMENT (Mapping siapa kelola siapa) ============
-function CreatorManagementView({ user, allUsers }) {
-  const [creators, setCreators] = useState([]);
-  const [reassigning, setReassigning] = useState(null);
-  const [lastSync, setLastSync] = useState(null);
-
-  const load = async () => {
-    setCreators(await storage.getList('creators:all'));
-    setLastSync(await storage.get('creators:last-sync'));
-  };
-  useEffect(() => { load(); }, []);
-
-  const visibleCreators = creators.filter(c => can.canSeeCreator(user, c, allUsers));
-  // Group by manager
-  const grouped = useMemo(() => {
-    const m = {};
-    visibleCreators.forEach(c => {
-      const key = c.managerId || 'unassigned';
-      if (!m[key]) m[key] = [];
-      m[key].push(c);
-    });
-    return m;
-  }, [visibleCreators]);
-
-  const handleReassign = async (newManagerId) => {
-    const newManager = allUsers.find(u => u.id === newManagerId);
-    const list = (await storage.getList('creators:all')).map(c =>
-      c.id === reassigning.id ? { ...c, managerId: newManagerId, managerName: newManager?.name || '-' } : c
-    );
-    await storage.set('creators:all', list);
-    await logActivity(`memindahkan creator "${reassigning.name}" ke ${newManager?.name}`, user.name);
-    setReassigning(null);
-    load();
-  };
-
-  // Dashboard ini khusus MCN: hanya tampilkan anggota divisi MCN (leader/operasional)
-  const managers = allUsers.filter(u => (u.role === 'operasional' || u.role === 'leader') && (u.division || '') === 'mcn');
-  // Filter managers based on user role
-  const visibleManagers = managers.filter(m => can.canSeeUser(user, m));
-
-  return (
-    <div className="max-w-7xl">
-      <PageHeader title="Pengelolaan Creator"
-        subtitle="Visual mapping: siapa mengelola siapa, dan performa per manager"
-        action={can.editAppSettings(user) ? null : null} />
-
-      <div className="bg-gradient-to-br from-blue-50 to-violet-50 border border-blue-200 rounded-xl p-5 mb-6">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
-            <Link2 className="w-6 h-6 text-white" />
-          </div>
-          <div className="flex-1">
-            <h3 className="font-display font-bold text-slate-900">Integrasi TikTok / MCN Dashboard</h3>
-            <p className="text-sm text-slate-600 mt-1">
-              Integrasi langsung TikTok API tidak tersedia di versi ini. Untuk update data GMV/order creator:
-              <b> export CSV dari TikTok Seller Center</b> → klik <b>Import CSV</b> di halaman Database Creator → data otomatis ter-update.
-            </p>
-            {lastSync && (
-              <div className="text-xs text-slate-500 mt-2 flex items-center gap-1">
-                <RefreshCw className="w-3 h-3" /> Last sync: {fmtDateTime(lastSync)}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {visibleManagers.length === 0 ? (
-        <EmptyState icon={Network} text="Belum ada Manager. Tambahkan di menu Anggota Tim." />
-      ) : (
-        <div className="space-y-4">
-          {visibleManagers.map(manager => {
-            const myCreators = grouped[manager.id] || [];
-            const totalGmv = myCreators.reduce((s, c) => s + (Number(c.totalGmv) || 0), 0);
-            const totalOrders = myCreators.reduce((s, c) => s + (Number(c.totalOrders) || 0), 0);
-            const aktif = myCreators.filter(c => c.status === 'aktif').length;
-            return (
-              <div key={manager.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                <div className="p-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white font-bold">
-                      {manager.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="font-display font-bold text-slate-900">{manager.name}</div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded ${ROLES[manager.role].color}`}>{ROLES[manager.role].label}</span>
-                    </div>
-                  </div>
-                  <div className="flex gap-5 text-xs">
-                    <div><div className="text-slate-500">Creator</div><div className="font-bold text-slate-900 text-lg">{myCreators.length}</div></div>
-                    <div><div className="text-slate-500">Aktif</div><div className="font-bold text-blue-700 text-lg">{aktif}</div></div>
-                    <div><div className="text-slate-500">Order</div><div className="font-bold text-slate-900 text-lg">{fmtNumber(totalOrders)}</div></div>
-                    <div><div className="text-slate-500">GMV</div><div className="font-bold text-amber-700 text-lg">{fmtRupiah(totalGmv)}</div></div>
-                  </div>
-                </div>
-                {myCreators.length === 0 ? (
-                  <div className="p-6 text-center text-sm text-slate-400">Belum mengelola creator</div>
-                ) : (
-                  <div className="divide-y divide-slate-100">
-                    {myCreators.map(c => (
-                      <div key={c.id} className="p-4 flex items-center justify-between hover:bg-slate-50">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium text-slate-800">{c.name}</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${CREATOR_STATUS[c.status].color}`}>{CREATOR_STATUS[c.status].label}</span>
-                            {c.category && <span className="text-xs text-slate-500">· {c.category}</span>}
-                          </div>
-                          <div className="text-xs text-slate-500 mt-0.5">
-                            {c.tiktokHandle && <span>TikTok: @{c.tiktokHandle.replace('@', '')}</span>}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4 text-xs">
-                          <div className="text-right">
-                            <div className="text-slate-500">Order / GMV</div>
-                            <div className="font-semibold tabular-nums">{fmtNumber(c.totalOrders)} / {fmtRupiah(c.totalGmv)}</div>
-                          </div>
-                          {can.assignCreator(user) && (
-                            <button onClick={() => setReassigning(c)} className="text-xs px-3 py-1.5 bg-slate-100 hover:bg-blue-100 hover:text-blue-700 rounded-md font-semibold transition">
-                              Pindah Manager
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Unassigned creators */}
-          {grouped.unassigned && grouped.unassigned.length > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
-              <div className="p-4 border-b border-amber-200">
-                <div className="font-bold text-amber-900 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4" /> Creator Tanpa Manager ({grouped.unassigned.length})
-                </div>
-                <div className="text-xs text-amber-700 mt-1">Segera assign ke manager untuk akuntabilitas.</div>
-              </div>
-              <div className="divide-y divide-amber-100">
-                {grouped.unassigned.map(c => (
-                  <div key={c.id} className="p-4 flex items-center justify-between">
-                    <div className="font-medium text-slate-800">{c.name}</div>
-                    <button onClick={() => setReassigning(c)} className="text-xs px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-md font-semibold">
-                      Assign Manager
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {reassigning && (
-        <Modal title={`Pindah "${reassigning.name}" ke...`} onClose={() => setReassigning(null)}>
-          <div className="space-y-2 max-h-96 overflow-y-auto">
-            {managers.map(m => (
-              <button key={m.id} onClick={() => handleReassign(m.id)}
-                className={`w-full flex items-center justify-between p-3 rounded-lg border transition ${
-                  reassigning.managerId === m.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-500 hover:bg-blue-50'
-                }`}>
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm">
-                    {m.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="text-left">
-                    <div className="font-semibold text-slate-800">{m.name}</div>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${ROLES[m.role].color}`}>{ROLES[m.role].label}</span>
-                  </div>
-                </div>
-                {reassigning.managerId === m.id && <Check className="w-5 h-5 text-blue-600" />}
-              </button>
-            ))}
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ============ IMPORT CSV BUTTON ============
-function ImportCsvButton({ onImported, user, managers }) {
-  const inputRef = useRef();
-  const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState(null);
-
-  const handleFile = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setImporting(true);
-    const text = await file.text();
-    const lines = text.split('\n').filter(l => l.trim());
-    if (lines.length < 2) { setImporting(false); return alert('CSV kosong atau format salah.'); }
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
-    const rows = lines.slice(1).map(line => {
-      const cells = [];
-      let cur = '', inQuote = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') inQuote = !inQuote;
-        else if (ch === ',' && !inQuote) { cells.push(cur.trim()); cur = ''; }
-        else cur += ch;
-      }
-      cells.push(cur.trim());
-      const row = {};
-      headers.forEach((h, i) => row[h] = (cells[i] || '').replace(/^"|"$/g, ''));
-      return row;
-    });
-
-    // Parse angka Rupiah Indonesia: "Rp27.006.784.021" -> 27006784021
-    const parseRp = (v) => Number(String(v || '').replace(/[^\d]/g, '')) || 0;
-
-    const list = await storage.getList('creators:all');
-    let added = 0, updated = 0, skipped = 0;
-    rows.forEach(row => {
-      // Dukung header template sederhana DAN export TikTok Partner Center
-      const name = row.name || row.nama || row.creator || row['creator name'] || row['nama pengguna kreator'] || row['nama kreator'];
-      // Lewati baris ringkasan/total dari export TikTok
-      if (!name || ['ringkasan', 'summary', 'total', '-'].includes(name.toLowerCase().trim())) { skipped++; return; }
-      const tiktok = row.tiktok || row['tiktok handle'] || row.handle || row['username'] || (row['nama pengguna kreator'] ? '@' + row['nama pengguna kreator'] : '');
-      // GMV: utamakan "GMV Afiliasi" dari TikTok, fallback ke kolom sederhana
-      const gmv = parseRp(row['gmv afiliasi'] || row.gmv || row['total gmv'] || '0');
-      const gmvLive = parseRp(row['gmv live afiliasi'] || '0');
-      const gmvVideo = parseRp(row['gmv video afiliasi'] || '0');
-      const orders = parseRp(row['pesanan dari afiliasi'] || row.orders || row.order || row['total orders'] || '0');
-      const category = row.category || row.kategori || row['kategori level 1'] || row['kategori level 2'] || '';
-      const existing = list.find(c =>
-        c.name.toLowerCase() === name.toLowerCase() ||
-        (tiktok && c.tiktokHandle && c.tiktokHandle.toLowerCase() === tiktok.toLowerCase())
-      );
-      const data = {
-        totalGmv: gmv, totalOrders: orders, category, tiktokHandle: tiktok,
-        gmvLive, gmvVideo
-      };
-      if (existing) {
-        Object.assign(existing, data, { updatedAt: new Date().toISOString() });
-        updated++;
-      } else {
-        list.push({
-          id: uid(), name, ...data,
-          status: 'aktif',
-          managerId: user.role === 'operasional' ? user.id : (managers[0]?.id || ''),
-          managerName: user.role === 'operasional' ? user.name : (managers[0]?.name || '-'),
-          notes: 'Diimport dari CSV',
-          createdAt: new Date().toISOString()
-        });
-        added++;
-      }
-    });
-    await storage.set('creators:all', list);
-    await storage.set('creators:last-sync', new Date().toISOString());
-    await logActivity(`import CSV: ${added} creator baru, ${updated} update`, user.name);
-    setResult({ added, updated });
-    setImporting(false);
-    onImported();
-    e.target.value = '';
-    setTimeout(() => setResult(null), 5000);
-  };
-
-  return (
-    <>
-      <button onClick={() => inputRef.current?.click()} disabled={importing}
-        className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-        <FileSpreadsheet className="w-4 h-4" /> {importing ? 'Importing...' : 'Import CSV'}
-      </button>
-      <input ref={inputRef} type="file" accept=".csv" onChange={handleFile} className="hidden" />
-      {result && (
-        <div className="fixed top-20 right-8 bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg z-50 text-sm">
-          ✅ {result.added} creator baru, {result.updated} di-update
-        </div>
-      )}
-    </>
-  );
-}
-
-// ============ DOWNLOAD TEMPLATE CSV ============
-function DownloadTemplateButton() {
-  const handleDownload = () => {
-    // Header jelas + contoh. Import juga otomatis mengenali file export TikTok Partner Center.
-    const headers = 'name,tiktok,category,gmv,orders';
-    const samples = [
-      '"Nama Creator (wajib)","@username","Kategori",GMV_angka,jumlah_order',
-      '"Fadila Teja","@fadilatejapratamaa","Menswear",6090340648,60691',
-      '"Apin","@apin.ketiduran","Electronics",1208650547,12696',
-      '"Contoh Beauty","@beautycreator","Beauty",1500000,12'
-    ];
-    const csv = [headers, ...samples].join('\n');
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'template-creator-import.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-  return (
-    <button onClick={handleDownload} title="Download template CSV. Import juga bisa langsung dari file export TikTok Partner Center."
-      className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-      <FileDown className="w-4 h-4" /> Template CSV
-    </button>
-  );
-}
-
-// ============ EXPORT DATA CREATOR (rapi) ============
-function ExportCreatorsButton({ creators }) {
-  const handleExport = () => {
-    if (!creators || creators.length === 0) { alert('Belum ada data creator untuk diexport.'); return; }
-    const rows = [['Nama', 'TikTok', 'Kategori', 'Status', 'Manager', 'GMV Total', 'GMV LIVE', 'GMV Video', 'Total Order', 'Catatan']];
-    creators.forEach(c => {
-      rows.push([
-        c.name || '',
-        c.tiktokHandle || '',
-        c.category || '',
-        c.status || 'aktif',
-        c.managerName || '-',
-        c.totalGmv || 0,
-        c.gmvLive || 0,
-        c.gmvVideo || 0,
-        c.totalOrders || 0,
-        (c.notes || '').replace(/"/g, "'")
-      ]);
-    });
-    const csv = rows.map(r => r.map(x => `"${x}"`).join(',')).join('\n');
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Data-Creator-${dayKey()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-  return (
-    <button onClick={handleExport} title="Download data creator yang sudah rapi (buka di Excel)"
-      className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-      <Download className="w-4 h-4" /> Export Data
-    </button>
-  );
-}
-
 // ============ REPORTS ============
 function ReportsView({ user, allUsers }) {
   if (user.role === 'operasional') return <NoAccess />;
@@ -6481,9 +5839,7 @@ function ReportsView({ user, allUsers }) {
       return;
     }
     const dayLabel = (d) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric' });
-    const fieldsOf = (r) => r.fieldsSnapshot && Array.isArray(r.fieldsSnapshot)
-      ? r.fieldsSnapshot
-      : DEFAULT_DAILY_FIELDS.map(f => ({ id: f.id, label: f.label, type: f.type, value: r[f.id] }));
+    const fieldsOf = reportFieldsOf; // helper bersama (dipakai juga di halaman Divisi)
     const achievements = [], blockers = [];
     let gmv = 0, contentCount = 0, lastPlan = '';
     daily.forEach(r => {
@@ -7964,7 +7320,7 @@ function KpiConfigModal({ cfg, onSave, onClose }) {
             <Field label="Laporan Harian"><input type="text" inputMode="numeric" value={form.weights.reports} onChange={e => setW('reports', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
             <Field label="Capaian Target GMV"><input type="text" inputMode="numeric" value={form.weights.target} onChange={e => setW('target', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg tabular-nums" /></Field>
           </div>
-          <div className="text-[11px] text-slate-500 mt-2 bg-slate-50 rounded-lg p-2">💡 Anggota yang tidak pegang target GMV (mis. Media, Event): bobot "Capaian Target" otomatis dialihkan ke Tugas & Laporan — semua tetap dinilai dari 100.</div>
+          <div className="text-[11px] text-slate-500 mt-2 bg-slate-50 rounded-lg p-2">💡 Anggota yang tidak pegang target GMV (mis. Manajemen, MMC): bobot "Capaian Target" otomatis dialihkan ke Tugas & Laporan — semua tetap dinilai dari 100.</div>
         </div>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
         <FormActions onCancel={onClose} onSave={submit} saveLabel="Simpan Pengaturan" />
@@ -8290,138 +7646,6 @@ function RootCauseViewModal({ problem, onClose }) {
         </div>
       </div>
     </Modal>
-  );
-}
-
-// ============ LEADERBOARD ============
-// ============ EKSEKUSI KONTEN (Media & Creative) ============
-function MediaTasksView({ user, allUsers }) {
-  const [ideas, setIdeas] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('antrian');
-
-  const load = async () => { setIdeas(await storage.getList('content-ideas:all')); setLoading(false); };
-  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
-
-  const FORMATS = {
-    reel: { label: 'Reel/Video', icon: '🎬' }, foto: { label: 'Foto/Carousel', icon: '📸' },
-    live: { label: 'Live', icon: '🔴' }, story: { label: 'Story', icon: '⚡' }, lainnya: { label: 'Lainnya', icon: '📝' }
-  };
-  // Ide yang sudah di-approve & belum tayang = antrian kerja Media Creative
-  const antrian = ideas.filter(i => i.status === 'approved' || i.status === 'in_progress');
-  const selesai = ideas.filter(i => i.status === 'published');
-  const list = tab === 'antrian' ? antrian : selesai;
-
-  // Tandai mulai dikerjakan
-  const markProgress = async (idea) => {
-    const all = (await storage.getList('content-ideas:all')).map(i =>
-      i.id === idea.id ? { ...i, status: 'in_progress', startedAt: new Date().toISOString() } : i);
-    await storage.set('content-ideas:all', all);
-    await logActivity(`mulai garap konten "${idea.title}"`, user.name); load();
-  };
-  // Centang selesai → status published
-  const markDone = async (idea) => {
-    const all = (await storage.getList('content-ideas:all')).map(i =>
-      i.id === idea.id ? { ...i, status: 'published', publishedAt: new Date().toISOString(), doneByName: user.name } : i);
-    await storage.set('content-ideas:all', all);
-    await logActivity(`menyelesaikan konten "${idea.title}"`, user.name); load();
-  };
-  // Balikkan ke antrian (kalau salah centang)
-  const undoDone = async (idea) => {
-    const all = (await storage.getList('content-ideas:all')).map(i =>
-      i.id === idea.id ? { ...i, status: 'in_progress' } : i);
-    await storage.set('content-ideas:all', all); load();
-  };
-
-  const fmtDate = ts => ts ? new Date(isDateOnly(ts) ? ts + 'T00:00:00' : ts).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', ...(isDateOnly(ts) ? {} : { timeZone: 'Asia/Jakarta' }) }) : '-';
-
-  if (loading) return <div className="text-slate-400 text-sm">Memuat...</div>;
-
-  return (
-    <div className="max-w-5xl">
-      <PageHeader title="Eksekusi Konten" subtitle="Antrian konten yang sudah di-approve — siap digarap tim Media & Creative" />
-
-      <div className="grid grid-cols-2 gap-3 mb-5">
-        <div className="bg-gradient-to-br from-amber-50 to-white rounded-2xl border border-amber-200 p-4">
-          <div className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Perlu Dikerjakan</div>
-          <div className="font-display font-bold text-3xl text-amber-700 mt-1">{antrian.length}</div>
-        </div>
-        <div className="bg-gradient-to-br from-emerald-50 to-white rounded-2xl border border-emerald-200 p-4">
-          <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">Sudah Selesai</div>
-          <div className="font-display font-bold text-3xl text-emerald-700 mt-1">{selesai.length}</div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg border border-slate-200 p-1 inline-flex mb-4">
-        <button onClick={() => setTab('antrian')}
-          className={`px-4 py-2 rounded text-sm font-semibold transition ${tab === 'antrian' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
-          📋 Antrian Kerja ({antrian.length})
-        </button>
-        <button onClick={() => setTab('selesai')}
-          className={`px-4 py-2 rounded text-sm font-semibold transition ${tab === 'selesai' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
-          ✅ Selesai ({selesai.length})
-        </button>
-      </div>
-
-      {list.length === 0 ? (
-        <EmptyState icon={Clapperboard} text={tab === 'antrian'
-          ? 'Belum ada konten untuk dikerjakan. Ide yang di-approve di Bank Ide Konten otomatis muncul di sini.'
-          : 'Belum ada konten yang diselesaikan.'} />
-      ) : (
-        <div className="space-y-3">
-          {list.map(idea => (
-            <div key={idea.id} className={`bg-white rounded-2xl border shadow-sm p-4 ${idea.status === 'in_progress' ? 'border-blue-200' : 'border-slate-200'}`}>
-              <div className="flex items-start gap-3">
-                <button
-                  onClick={() => tab === 'selesai' ? undoDone(idea) : markDone(idea)}
-                  title={tab === 'selesai' ? 'Batalkan selesai' : 'Tandai selesai'}
-                  className={`mt-0.5 w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition ${
-                    tab === 'selesai' ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 hover:border-emerald-500 hover:bg-emerald-50'
-                  }`}>
-                  {tab === 'selesai' && <Check className="w-4 h-4" />}
-                </button>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-lg">{FORMATS[idea.format]?.icon || '📝'}</span>
-                    <span className={`font-semibold text-slate-900 ${tab === 'selesai' ? 'line-through text-slate-400' : ''}`}>{idea.title}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">{FORMATS[idea.format]?.label || 'Konten'}</span>
-                    {idea.status === 'in_progress' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">SEDANG DIGARAP</span>}
-                  </div>
-                  {idea.description && <p className="text-sm text-slate-600 mt-1">{idea.description}</p>}
-                  <div className="flex items-center gap-3 mt-2 text-xs text-slate-500 flex-wrap">
-                    {idea.assignedToName && <span>👤 PIC: <b className="text-slate-700">{idea.assignedToName}</b></span>}
-                    {idea.targetDate && <span>🎯 Target: {fmtDate(idea.targetDate)}</span>}
-                    <span>💡 Dari: {idea.proposedByName}</span>
-                  </div>
-                  {idea.assignNotes && (
-                    <div className="mt-2 text-xs bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-amber-800">
-                      📌 Brief: {idea.assignNotes}
-                    </div>
-                  )}
-                  {tab === 'antrian' && (
-                    <div className="flex gap-2 mt-3">
-                      {idea.status === 'approved' && (
-                        <button onClick={() => markProgress(idea)}
-                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition">
-                          ▶ Mulai Garap
-                        </button>
-                      )}
-                      <button onClick={() => markDone(idea)}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1">
-                        <Check className="w-3.5 h-3.5" /> Tandai Selesai
-                      </button>
-                    </div>
-                  )}
-                  {tab === 'selesai' && idea.doneByName && (
-                    <div className="text-[11px] text-emerald-600 mt-2">✅ Diselesaikan oleh {idea.doneByName}</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -9417,7 +8641,7 @@ function AttendanceView({ user, allUsers }) {
         ].filter(Boolean).join(' \u00b7 ');
         aoa.push([
           fmtDate(g.date), g.userName,
-          DIVISIONS[g.division]?.label || g.division || '-', g.jobTitle || '-',
+          g.division ? divLabel(g.division) : '-', g.jobTitle || '-',
           inRec ? fmtTime(inRec.timestamp) : '\u2013',
           outRec ? fmtTime(outRec.timestamp) : '\u2013',
           durMin == null ? '\u2013' : `${Math.floor(durMin / 60)}j ${String(durMin % 60).padStart(2, '0')}m`,
@@ -9505,7 +8729,7 @@ function AttendanceView({ user, allUsers }) {
       built.forEach(({ u, status, ket, inRec, outRec, durMin }) => {
         aoa.push([
           fmtDate(boardDate), u.name,
-          DIVISIONS[u.division]?.label || u.division || '-', u.jobTitle || '-',
+          u.division ? divLabel(u.division) : '-', u.jobTitle || '-',
           status,
           inRec ? fmtTime(inRec.timestamp) : '–',
           outRec ? fmtTime(outRec.timestamp) : '–',
@@ -10050,7 +9274,7 @@ function LeaveDetailModal({ leave, person, canDecide, canCancel, onApprove, onRe
           <Avatar person={person || { name: leave.userName }} size="md" />
           <div className="flex-1 min-w-0">
             <div className="font-display font-bold text-slate-900">{leave.userName}</div>
-            <div className="text-xs text-slate-500">{person?.jobTitle || ROLES[person?.role]?.label || ''}{person?.division ? ` · ${DIVISIONS[person.division]?.label || person.division}` : ''}</div>
+            <div className="text-xs text-slate-500">{person?.jobTitle || ROLES[person?.role]?.label || ''}{person?.division ? ` · ${divLabel(person.division)}` : ''}</div>
           </div>
           <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${statusBadge.c}`}>{statusBadge.t}</span>
         </div>
@@ -10668,415 +9892,6 @@ function AnnouncementsView({ user }) {
         </Modal>
       )}
     </div>
-  );
-}
-
-// ============ CONTENT IDEAS (Bank Ide Konten) ============
-function ContentIdeasView({ user, allUsers, settings }) {
-  const [items, setItems] = useState([]);
-  const [creators, setCreators] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [assigning, setAssigning] = useState(null);
-  const [publishing, setPublishing] = useState(null);
-  const [rejecting, setRejecting] = useState(null);
-  const [filter, setFilter] = useState({ status: 'all', format: 'all', search: '' });
-
-  const load = async () => {
-    setItems(await storage.getList('content-ideas:all'));
-    setCreators(await storage.getList('creators:all'));
-  };
-  useEffect(() => { load(); }, []);
-
-  const canEditIdea = (idea) => idea.proposedById === user.id || (user.role === 'manajer' || user.role === 'owner');
-  const canApprove = (user.role === 'manajer' || user.role === 'owner') || user.role === 'leader';
-  const canExecute = (idea) => idea.assignedToId === user.id || (user.role === 'manajer' || user.role === 'owner');
-
-  const handleSave = async (data) => {
-    let list = await storage.getList('content-ideas:all');
-    if (editing) {
-      list = list.map(i => i.id === editing.id ? { ...i, ...data, updatedAt: new Date().toISOString() } : i);
-    } else {
-      list.unshift({
-        id: uid(), ...data,
-        status: 'idea',
-        proposedById: user.id, proposedByName: user.name,
-        proposedAt: new Date().toISOString()
-      });
-      await logActivity(`mengusulkan ide konten "${data.title}"`, user.name);
-    }
-    await storage.set('content-ideas:all', list);
-    setShowForm(false); setEditing(null); load();
-  };
-
-  const handleDelete = async (idea) => {
-    if (!confirm(`Hapus ide "${idea.title}"?`)) return;
-    const list = (await storage.getList('content-ideas:all')).filter(i => i.id !== idea.id);
-    await storage.set('content-ideas:all', list);
-    load();
-  };
-
-  const handleApprove = async ({ assignedToId, targetDate, assignNotes }) => {
-    const assignee = allUsers.find(u => u.id === assignedToId);
-    const list = (await storage.getList('content-ideas:all')).map(i =>
-      i.id === assigning.id ? {
-        ...i, status: 'approved',
-        assignedToId, assignedToName: assignee?.name || '-',
-        targetDate, assignNotes,
-        approvedById: user.id, approvedByName: user.name, approvedAt: new Date().toISOString()
-      } : i
-    );
-    await storage.set('content-ideas:all', list);
-    await logActivity(`menyetujui ide "${assigning.title}" → ${assignee?.name}`, user.name);
-    setAssigning(null); load();
-  };
-
-  const handleStartProduction = async (idea) => {
-    const list = (await storage.getList('content-ideas:all')).map(i =>
-      i.id === idea.id ? { ...i, status: 'in_progress', startedAt: new Date().toISOString() } : i
-    );
-    await storage.set('content-ideas:all', list);
-    await logActivity(`mulai produksi konten "${idea.title}"`, user.name);
-    load();
-  };
-
-  const handlePublish = async ({ publishedUrl, publishNotes }) => {
-    const list = (await storage.getList('content-ideas:all')).map(i =>
-      i.id === publishing.id ? {
-        ...i, status: 'published',
-        publishedUrl, publishNotes,
-        publishedAt: new Date().toISOString()
-      } : i
-    );
-    await storage.set('content-ideas:all', list);
-    await logActivity(`merilis konten "${publishing.title}"`, user.name);
-    setPublishing(null); load();
-  };
-
-  const handleReject = async (reason) => {
-    const list = (await storage.getList('content-ideas:all')).map(i =>
-      i.id === rejecting.id ? {
-        ...i, status: 'rejected', rejectionReason: reason,
-        rejectedById: user.id, rejectedByName: user.name, rejectedAt: new Date().toISOString()
-      } : i
-    );
-    await storage.set('content-ideas:all', list);
-    await logActivity(`menolak ide "${rejecting.title}"`, user.name);
-    setRejecting(null); load();
-  };
-
-  // Filter
-  const filtered = items.filter(i => {
-    if (filter.status !== 'all' && i.status !== filter.status) return false;
-    if (filter.format !== 'all' && i.contentFormat !== filter.format) return false;
-    if (filter.search) {
-      const q = filter.search.toLowerCase();
-      if (!i.title.toLowerCase().includes(q) && !(i.description || '').toLowerCase().includes(q)) return false;
-    }
-    return true;
-  });
-
-  // Counts per status
-  const counts = items.reduce((acc, i) => { acc[i.status] = (acc[i.status] || 0) + 1; return acc; }, {});
-
-  return (
-    <div className="max-w-6xl">
-      <PageHeader title="Bank Ide Konten"
-        subtitle="Siapapun bisa usulkan ide. Manajer/Leader approve & assign ke tim konten."
-        action={
-          <button onClick={() => { setEditing(null); setShowForm(true); }}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-            <Lightbulb className="w-4 h-4" /> Usulkan Ide
-          </button>
-        } />
-
-      {/* Status overview */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
-        {Object.entries(CONTENT_STATUS).map(([k, v]) => (
-          <button key={k} onClick={() => setFilter({ ...filter, status: filter.status === k ? 'all' : k })}
-            className={`p-3 rounded-xl border-2 text-left transition ${
-              filter.status === k ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-slate-300'
-            }`}>
-            <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${v.dot}`}></span>
-              <span className="text-xs font-semibold text-slate-700">{v.label}</span>
-            </div>
-            <div className="font-display font-bold text-2xl text-slate-900 mt-1">{counts[k] || 0}</div>
-          </button>
-        ))}
-      </div>
-
-      {/* Filter bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4 flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" placeholder="Cari judul atau deskripsi..." value={filter.search}
-            onChange={e => setFilter({ ...filter, search: e.target.value })}
-            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <select value={filter.format} onChange={e => setFilter({ ...filter, format: e.target.value })}
-          className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-          <option value="all">Semua Format</option>
-          {Object.entries(CONTENT_FORMAT).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
-        </select>
-      </div>
-
-      {/* List */}
-      {filtered.length === 0 ? (
-        <EmptyState icon={Lightbulb} text="Belum ada ide konten. Klik 'Usulkan Ide' untuk mulai." />
-      ) : (
-        <div className="space-y-3">
-          {filtered.map(idea => {
-            const fmt = CONTENT_FORMAT[idea.contentFormat] || { label: idea.contentFormat, icon: '📌' };
-            const st = CONTENT_STATUS[idea.status];
-            return (
-              <div key={idea.id} className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-sm transition">
-                <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className={`text-xs px-2 py-1 rounded font-semibold ${st.color}`}>● {st.label}</span>
-                      <span className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700 font-medium">{fmt.icon} {fmt.label}</span>
-                      {idea.productName && <span className="text-xs text-slate-500">📦 {idea.productName}</span>}
-                    </div>
-                    <h4 className="font-display font-bold text-slate-900 text-lg">{idea.title}</h4>
-                    {idea.description && <p className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{idea.description}</p>}
-                  </div>
-                  {canEditIdea(idea) && idea.status === 'idea' && (
-                    <div className="flex gap-1 flex-shrink-0">
-                      <button onClick={() => { setEditing(idea); setShowForm(true); }} className="text-slate-400 hover:text-blue-600 p-1">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(idea)} className="text-slate-400 hover:text-red-600 p-1">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {(idea.hook || idea.cta || idea.hashtags || idea.references) && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3 text-xs">
-                    {idea.hook && <div className="bg-slate-50 p-2 rounded"><b className="text-slate-700">Hook:</b> <span className="text-slate-600">{idea.hook}</span></div>}
-                    {idea.cta && <div className="bg-slate-50 p-2 rounded"><b className="text-slate-700">CTA:</b> <span className="text-slate-600">{idea.cta}</span></div>}
-                    {idea.hashtags && <div className="bg-slate-50 p-2 rounded col-span-2"><b className="text-slate-700">Hashtags:</b> <span className="text-slate-600">{idea.hashtags}</span></div>}
-                    {idea.references && (
-                      <div className="bg-slate-50 p-2 rounded col-span-2">
-                        <b className="text-slate-700">Referensi:</b> <a href={idea.references} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline inline-flex items-center gap-1">
-                          {idea.references} <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between flex-wrap gap-3 pt-3 border-t border-slate-100">
-                  <div className="text-xs text-slate-500 space-y-0.5">
-                    <div>💡 Diusulkan: <b className="text-slate-700">{idea.proposedByName}</b> · {fmtDateTime(idea.proposedAt)}</div>
-                    {idea.assignedToName && (
-                      <div>🎬 Ditugaskan ke: <b className="text-slate-700">{idea.assignedToName}</b>
-                        {idea.targetDate && <span> · Target: <b className="text-amber-700">{fmtDate(idea.targetDate)}</b></span>}
-                      </div>
-                    )}
-                    {idea.status === 'published' && idea.publishedUrl && (
-                      <div>🚀 Tayang: <a href={idea.publishedUrl} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline inline-flex items-center gap-1">{idea.publishedUrl} <ExternalLink className="w-3 h-3" /></a> · {fmtDate(idea.publishedAt)}</div>
-                    )}
-                    {idea.status === 'rejected' && idea.rejectionReason && (
-                      <div className="text-red-600">❌ Alasan: {idea.rejectionReason}</div>
-                    )}
-                    {idea.assignNotes && idea.status !== 'idea' && (
-                      <div className="italic text-slate-500">📝 Catatan: {idea.assignNotes}</div>
-                    )}
-                  </div>
-
-                  {/* Action buttons based on status + role */}
-                  <div className="flex gap-2 flex-wrap">
-                    {idea.status === 'idea' && canApprove && (
-                      <>
-                        <button onClick={() => setAssigning(idea)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded font-semibold flex items-center gap-1">
-                          <Check className="w-3 h-3" /> Setujui & Assign
-                        </button>
-                        <button onClick={() => setRejecting(idea)}
-                          className="bg-white border border-red-300 hover:bg-red-50 text-red-700 text-xs px-3 py-1.5 rounded font-semibold">
-                          Tolak
-                        </button>
-                      </>
-                    )}
-                    {idea.status === 'approved' && canExecute(idea) && (
-                      <button onClick={() => handleStartProduction(idea)}
-                        className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 rounded font-semibold">
-                        Mulai Produksi
-                      </button>
-                    )}
-                    {idea.status === 'in_progress' && canExecute(idea) && (
-                      <button onClick={() => setPublishing(idea)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded font-semibold">
-                        Tandai Sudah Tayang
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {showForm && <ContentIdeaForm idea={editing} creators={creators}
-        onSave={handleSave} onClose={() => { setShowForm(false); setEditing(null); }} />}
-      {assigning && <AssignIdeaModal idea={assigning} allUsers={allUsers}
-        onSave={handleApprove} onClose={() => setAssigning(null)} />}
-      {publishing && <PublishIdeaModal idea={publishing}
-        onSave={handlePublish} onClose={() => setPublishing(null)} />}
-      {rejecting && <RejectIdeaModal idea={rejecting}
-        onSave={handleReject} onClose={() => setRejecting(null)} />}
-    </div>
-  );
-}
-
-function ContentIdeaForm({ idea, creators, onSave, onClose }) {
-  const [form, setForm] = useState({
-    title: idea?.title || '',
-    description: idea?.description || '',
-    contentFormat: idea?.contentFormat || 'reel',
-    productName: idea?.productName || '',
-    hook: idea?.hook || '',
-    cta: idea?.cta || '',
-    hashtags: idea?.hashtags || '',
-    references: idea?.references || ''
-  });
-  return (
-    <Modal title={idea ? 'Edit Ide Konten' : 'Usulkan Ide Konten Baru'} onClose={onClose} wide>
-      <div className="space-y-3">
-        <Field label="Judul Ide *">
-          <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
-            placeholder="Mis. Review jujur skincare A pakai before-after"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Format Konten *">
-            <select value={form.contentFormat} onChange={e => setForm({ ...form, contentFormat: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
-              {Object.entries(CONTENT_FORMAT).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Produk yang Dipromosikan">
-            <input type="text" value={form.productName} onChange={e => setForm({ ...form, productName: e.target.value })}
-              placeholder="Mis. Skincare A, Hijab Premium"
-              list="creator-products"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-            <datalist id="creator-products">
-              {creators.map(c => <option key={c.id} value={c.name} />)}
-            </datalist>
-          </Field>
-        </div>
-        <Field label="Deskripsi / Konsep Konten *">
-          <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-            rows={4} placeholder="Gambarkan idenya. Mis: Buka dengan hook 'Kalian wajib coba ini!', lalu unboxing produk, kasih testimoni, tutup dengan CTA beli sebelum harga naik."
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none" />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Hook Pembuka (opsional)">
-            <input type="text" value={form.hook} onChange={e => setForm({ ...form, hook: e.target.value })}
-              placeholder="Mis. 'Stop scrolling kalau kulitmu berjerawat!'"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-          </Field>
-          <Field label="CTA / Call to Action (opsional)">
-            <input type="text" value={form.cta} onChange={e => setForm({ ...form, cta: e.target.value })}
-              placeholder="Mis. 'Klik keranjang kuning, diskon 50% hari ini'"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-          </Field>
-        </div>
-        <Field label="Hashtags (opsional)">
-          <input type="text" value={form.hashtags} onChange={e => setForm({ ...form, hashtags: e.target.value })}
-            placeholder="#skincareterbaik #fyp #racun_belanja"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-        </Field>
-        <Field label="Link Referensi/Inspirasi (opsional)">
-          <input type="url" value={form.references} onChange={e => setForm({ ...form, references: e.target.value })}
-            placeholder="https://tiktok.com/@... (link konten yang jadi inspirasi)"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-        </Field>
-        <FormActions onCancel={onClose} onSave={() => onSave(form)} disabled={!form.title.trim() || !form.description.trim()} />
-      </div>
-    </Modal>
-  );
-}
-
-function AssignIdeaModal({ idea, allUsers, onSave, onClose }) {
-  // Tim konten = operasional + leader (semua bisa di-assign)
-  const candidates = allUsers.filter(u => u.role === 'operasional' || u.role === 'leader');
-  const [form, setForm] = useState({
-    assignedToId: candidates[0]?.id || '',
-    targetDate: '',
-    assignNotes: ''
-  });
-  return (
-    <Modal title={`Setujui & Assign: "${idea.title}"`} onClose={onClose}>
-      <div className="space-y-3">
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs p-3 rounded-lg">
-          ✅ Status akan berubah dari "Ide" → "Disetujui". Tim yang ditugaskan akan lihat ide ini di dashboard mereka.
-        </div>
-        <Field label="Tugaskan ke Tim Konten *">
-          <select value={form.assignedToId} onChange={e => setForm({ ...form, assignedToId: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
-            {candidates.map(c => <option key={c.id} value={c.id}>{c.name}{c.jobTitle ? ` · ${c.jobTitle}` : ""} — {ROLES[c.role].label}</option>)}
-          </select>
-        </Field>
-        <Field label="Target Tayang">
-          <input type="date" value={form.targetDate} onChange={e => setForm({ ...form, targetDate: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-        </Field>
-        <Field label="Catatan untuk Tim Konten">
-          <textarea value={form.assignNotes} onChange={e => setForm({ ...form, assignNotes: e.target.value })}
-            rows={3} placeholder="Mis. 'Fokus ke pain point jerawat, gaya bicara santai. Durasi max 30 detik.'"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none" />
-        </Field>
-        <FormActions onCancel={onClose} onSave={() => onSave(form)} disabled={!form.assignedToId} saveLabel="Setujui & Assign" />
-      </div>
-    </Modal>
-  );
-}
-
-function PublishIdeaModal({ idea, onSave, onClose }) {
-  const [form, setForm] = useState({ publishedUrl: '', publishNotes: '' });
-  return (
-    <Modal title={`Tandai Tayang: "${idea.title}"`} onClose={onClose}>
-      <div className="space-y-3">
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs p-3 rounded-lg">
-          🚀 Status akan berubah ke "Sudah Tayang". Simpan link konten untuk tracking performance.
-        </div>
-        <Field label="Link Konten yang Tayang *">
-          <input type="url" value={form.publishedUrl} onChange={e => setForm({ ...form, publishedUrl: e.target.value })}
-            placeholder="https://tiktok.com/@... atau https://instagram.com/..."
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-        </Field>
-        <Field label="Catatan (opsional)">
-          <textarea value={form.publishNotes} onChange={e => setForm({ ...form, publishNotes: e.target.value })}
-            rows={2} placeholder="Mis. 'Sedikit penyesuaian dari konsep awal, ditambah testimoni langsung dari creator.'"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none" />
-        </Field>
-        <FormActions onCancel={onClose} onSave={() => onSave(form)} disabled={!form.publishedUrl.trim()} saveLabel="Tandai Tayang" />
-      </div>
-    </Modal>
-  );
-}
-
-function RejectIdeaModal({ idea, onSave, onClose }) {
-  const [reason, setReason] = useState('');
-  return (
-    <Modal title={`Tolak Ide: "${idea.title}"`} onClose={onClose}>
-      <div className="space-y-3">
-        <div className="bg-red-50 border border-red-200 text-red-800 text-xs p-3 rounded-lg">
-          ⚠️ Berikan alasan jelas supaya tim bisa belajar dari penolakan dan usulkan ide yang lebih baik.
-        </div>
-        <Field label="Alasan Penolakan *">
-          <textarea value={reason} onChange={e => setReason(e.target.value)}
-            rows={4} placeholder="Mis. 'Konsep sudah pernah dipakai bulan lalu', 'Tidak sesuai brand guideline produk', 'Hook terlalu agresif'"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg resize-none" />
-        </Field>
-        <FormActions onCancel={onClose} onSave={() => onSave(reason)} disabled={!reason.trim()} saveLabel="Tolak Ide" />
-      </div>
-    </Modal>
   );
 }
 
@@ -14182,6 +12997,489 @@ function ProfileModal({ user, onSaveProfile, onChangePassword, onClose }) {
 }
 
 // ============ SHARED COMPONENTS ============
+// ============ HALAMAN DIVISI (review per divisi: anggota, pekerjaan, rencana, kendala) ============
+function DivisionReviewView({ user, allUsers, setView }) {
+  const isMgr = user.role === 'owner' || user.role === 'manajer';
+  const isOperational = user.role === 'operasional';
+  // Role operasional tidak berhak melihat halaman ini (mis. sisa state view lama) → kembalikan ke dashboard
+  useEffect(() => { if (isOperational) setView('dashboard'); }, [isOperational]);
+
+  // Owner/manajer bebas ganti divisi; leader terkunci ke divisinya sendiri
+  const [selDiv, setSelDiv] = useState(isMgr ? (DIVISIONS[user.division] ? user.division : 'manajemen') : (user.division || 'internal'));
+  const div = isMgr ? selDiv : (user.division || 'internal');
+
+  const mk0 = monthKey();
+  const [period, setPeriod] = useState({ id: 'this-month', label: 'Bulan Ini', start: `${mk0}-01`, end: `${mk0}-${String(daysInMonth(mk0)).padStart(2, '0')}` });
+
+  const [tasks, setTasks] = useState([]);
+  const [attRecs, setAttRecs] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [gmvEntries, setGmvEntries] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [leaves, setLeaves] = useState([]);
+  const [problems, setProblems] = useState([]);
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showPlanForm, setShowPlanForm] = useState(false);
+  const [editingPlan, setEditingPlan] = useState(null);
+
+  const load = async () => {
+    try {
+      const [t, a, r, g, c, l, p, pl] = await Promise.all([
+        loadTasks(), loadAttendanceRecs(), loadDailyReports(), loadGmvEntries(),
+        loadCalendar(), loadLeaves(), storage.getList('problems:all'), loadDivisionPlans()
+      ]);
+      setTasks(t); setAttRecs(a); setReports(r); setGmvEntries(g); setEvents(c); setLeaves(l); setProblems(p); setPlans(pl);
+    } catch (e) {
+      console.warn('Muat halaman Divisi gagal (dicoba lagi di poll berikutnya):', e?.message || e);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
+
+  const members = useMemo(() => allUsers.filter(u => (u.division || 'internal') === div), [allUsers, div]);
+  const memberIds = useMemo(() => new Set(members.map(m => m.id)), [members]);
+  const todayK = wibDayKey();
+  const presentToday = useMemo(() => new Set(attRecs.filter(r => r && r.type === 'in' && wibDayKey(r.timestamp) === todayK).map(r => r.userId)), [attRecs, todayK]);
+  const izinToday = useMemo(() => new Set(leaves.filter(l => l && l.status === 'approved' && l.date === todayK).map(l => l.userId)), [leaves, todayK]);
+
+  if (isOperational) return null;
+  if (loading) return <div className="text-slate-400 text-sm">Memuat...</div>;
+
+  const inRange = (dk) => !!dk && dk >= period.start && dk <= period.end;
+  const divLeaders = members.filter(m => m.role === 'leader');
+
+  // Tiket
+  const doneTasks = tasks.filter(t => t && memberIds.has(t.assigneeId) && t.status === 'done' && t.completedAt && inRange(wibDayKey(t.completedAt)))
+    .sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''));
+  const activeTasks = tasks.filter(t => t && memberIds.has(t.assigneeId) && ['todo', 'in_progress', 'qc'].includes(t.status))
+    .sort((a, b) => (a.deadline || '9999').localeCompare(b.deadline || '9999'));
+
+  // Laporan harian
+  const periodReports = reports.filter(r => r && memberIds.has(r.authorId) && inRange(r.date));
+  const latestReports = reports.filter(r => r && memberIds.has(r.authorId))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 5);
+  const reportSnippet = (r) => {
+    const texts = reportFieldsOf(r)
+      .filter(f => (f.type === 'textarea' || f.type === 'text') && f.value !== undefined && f.value !== null && String(f.value).trim() !== '')
+      .map(f => String(f.value).trim());
+    const s = texts.join(' · ');
+    return s.length > 120 ? s.slice(0, 120) + '…' : (s || '(tidak ada isian teks)');
+  };
+
+  // GMV — hanya divisi penghasil GMV (mcn/tap/internal)
+  const isGmvDiv = !!GMV_DIVISIONS[div];
+  const gmvTotal = isGmvDiv ? gmvEntries.filter(e => e && e.division === div && inRange(e.date)).reduce((s, e) => s + (Number(e.gmv) || 0), 0) : 0;
+
+  // Agenda kalender 7 hari ke depan yang melibatkan anggota divisi
+  const week7End = dayKey(new Date(Date.now() + 7 * 86400000));
+  const upcomingEvents = events.filter(e => e && e.date >= todayK && e.date <= week7End &&
+    ((Array.isArray(e.attendeeIds) && e.attendeeIds.some(id => memberIds.has(id))) || memberIds.has(e.createdById)))
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  // Masalah — record masalah punya field division sendiri (JANGAN filter lewat pelapor)
+  const resolvedProblems = problems.filter(p => p && p.division === div && p.status === 'resolved' && p.resolvedAt && inRange(wibDayKey(p.resolvedAt)))
+    .sort((a, b) => (b.resolvedAt || '').localeCompare(a.resolvedAt || ''));
+  const activeProblems = problems.filter(p => p && p.division === div && p.status !== 'resolved')
+    .sort((a, b) => ((URGENCY[b.urgency]?.rank || 0) - (URGENCY[a.urgency]?.rank || 0)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  // Rencana divisi: berjalan dulu, lalu rencana, lalu dueDate terdekat; selesai/batal masuk riwayat
+  const divPlans = plans.filter(p => p && p.division === div);
+  const planOrder = { berjalan: 0, rencana: 1 };
+  const activePlans = divPlans.filter(p => p.status !== 'selesai' && p.status !== 'batal')
+    .sort((a, b) => ((planOrder[a.status] ?? 1) - (planOrder[b.status] ?? 1)) || (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
+  const historyPlans = divPlans.filter(p => p.status === 'selesai' || p.status === 'batal')
+    .sort((a, b) => (b.doneAt || b.updatedAt || '').localeCompare(a.doneAt || a.updatedAt || ''));
+  const canWrite = canWriteDivPlan(user, div);
+
+  const savePlan = async (data) => {
+    try {
+      const now = new Date().toISOString();
+      if (editingPlan) {
+        const updated = { ...editingPlan, ...data, updatedAt: now, doneAt: data.status === 'selesai' ? (editingPlan.doneAt || now) : null };
+        const ok = await storage.set(DIVPLAN_REC_PREFIX + updated.id, updated);
+        if (!ok) throw new Error('Gagal menyimpan ke server.');
+      } else {
+        const rec = {
+          id: uid(), division: div, ...data,
+          createdById: user.id, createdByName: user.name,
+          createdAt: now, updatedAt: now, doneAt: data.status === 'selesai' ? now : null
+        };
+        const ok = await storage.set(DIVPLAN_REC_PREFIX + rec.id, rec);
+        if (!ok) throw new Error('Gagal menyimpan ke server.');
+        await logActivity(`menambah rencana divisi ${divLabel(div)}: "${data.title}"`, user.name);
+      }
+      setShowPlanForm(false); setEditingPlan(null); load();
+    } catch (err) { alert('⚠️ Gagal menyimpan rencana: ' + (err?.message || err)); }
+  };
+  const setPlanStatus = async (p, status) => {
+    if (!canWrite) return;
+    try {
+      const now = new Date().toISOString();
+      const updated = { ...p, status, updatedAt: now, doneAt: status === 'selesai' ? (p.doneAt || now) : null };
+      const ok = await storage.set(DIVPLAN_REC_PREFIX + p.id, updated);
+      if (!ok) throw new Error('Gagal menyimpan ke server.');
+      load();
+    } catch (err) { alert('⚠️ Gagal mengubah status rencana: ' + (err?.message || err)); }
+  };
+  const deletePlan = async (p) => {
+    if (!canWrite) return;
+    if (!confirm(`Hapus rencana "${p.title}"?`)) return;
+    try {
+      const ok = await storage.delete(DIVPLAN_REC_PREFIX + p.id);
+      if (!ok) throw new Error('Gagal menghapus di server.');
+      load();
+    } catch (err) { alert('⚠️ Gagal menghapus: ' + (err?.message || err)); }
+  };
+
+  const attBadge = (m) => presentToday.has(m.id)
+    ? { t: 'Hadir', c: 'bg-emerald-100 text-emerald-700' }
+    : izinToday.has(m.id)
+      ? { t: 'Izin', c: 'bg-amber-100 text-amber-700' }
+      : { t: 'Belum absen', c: 'bg-slate-100 text-slate-500' };
+
+  const SectionTitle = ({ children }) => <h3 className="font-display font-bold text-slate-800 mb-3">{children}</h3>;
+
+  return (
+    <div className="max-w-6xl">
+      <PageHeader title="Divisi" subtitle="Ringkasan kondisi tiap divisi: anggota, pekerjaan, rencana, dan kendala"
+        action={<DateRangePopover value={period} onChange={setPeriod} tabs={['custom', 'day', 'week', 'month']} defaultTab="month" maxDate={null} showPresets />} />
+
+      {/* Switcher divisi — hanya owner/manajer; leader terkunci ke divisinya */}
+      {isMgr && (
+        <div className="flex items-center gap-1.5 flex-wrap mb-5">
+          {Object.keys(DIVISIONS).map(k => (
+            <button key={k} onClick={() => setSelDiv(k)}
+              className={`px-3 py-1.5 rounded-full text-sm font-semibold transition border ${div === k ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+              style={div === k ? { background: 'linear-gradient(135deg, #2563EB, #1D4ED8)', boxShadow: '0 6px 16px -6px rgba(37,99,235,0.6)' } : undefined}>
+              {divLabel(k)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Header divisi */}
+      <div className="rounded-2xl p-5 mb-5 text-white"
+        style={{ background: 'linear-gradient(135deg, #0B1B45 0%, #1D4ED8 100%)', boxShadow: '0 16px 40px -12px rgba(37,99,235,0.5)' }}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-display font-bold text-2xl">{divLabel(div)}</div>
+            <div className="text-sm mt-0.5" style={{ color: '#BFDBFE' }}>{members.length} anggota · periode {period.label || `${fmtDate(period.start)} – ${fmtDate(period.end)}`}</div>
+          </div>
+          {divLeaders.length > 0 && (
+            <div className="flex items-center gap-2">
+              {divLeaders.map(l => (
+                <div key={l.id} className="flex items-center gap-2 rounded-full pl-1 pr-3 py-1" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }}>
+                  <Avatar person={l} size="sm" />
+                  <div className="text-xs">
+                    <div className="font-semibold">{l.name}</div>
+                    <div style={{ color: '#BFDBFE' }}>Leader</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Kartu ringkasan */}
+      <div className={`grid grid-cols-2 sm:grid-cols-4 ${isGmvDiv ? 'lg:grid-cols-5' : ''} gap-3 mb-6`}>
+        <div className="bg-white rounded-2xl border border-slate-200 p-3"><div className="text-xs font-semibold text-slate-500 uppercase">Anggota</div><div className="font-display font-bold text-3xl text-slate-800 mt-0.5">{members.length}</div></div>
+        <div className="bg-emerald-50 rounded-2xl border border-emerald-200 p-3"><div className="text-xs font-semibold text-emerald-600 uppercase">Tiket Selesai</div><div className="font-display font-bold text-3xl text-emerald-700 mt-0.5">{doneTasks.length}</div><div className="text-[10px] text-emerald-600">dalam periode</div></div>
+        <div className="bg-blue-50 rounded-2xl border border-blue-200 p-3"><div className="text-xs font-semibold text-blue-600 uppercase">Tiket Berjalan</div><div className="font-display font-bold text-3xl text-blue-700 mt-0.5">{activeTasks.length}</div><div className="text-[10px] text-blue-600">belum selesai</div></div>
+        <div className="bg-white rounded-2xl border border-slate-200 p-3"><div className="text-xs font-semibold text-slate-500 uppercase">Laporan Harian</div><div className="font-display font-bold text-3xl text-slate-800 mt-0.5">{periodReports.length}</div><div className="text-[10px] text-slate-400">masuk dalam periode</div></div>
+        {isGmvDiv && (
+          <div className="col-span-2 sm:col-span-4 lg:col-span-1 bg-white rounded-2xl border border-slate-200 p-3"><div className="text-xs font-semibold text-slate-500 uppercase">GMV Periode</div><div className="font-display font-bold text-xl text-slate-800 mt-1.5">{fmtRupiah(gmvTotal)}</div></div>
+        )}
+      </div>
+
+      {/* Anggota */}
+      <div className="mb-6">
+        <SectionTitle>Anggota ({members.length})</SectionTitle>
+        {members.length === 0 ? (
+          <EmptyState icon={Users} text="Belum ada anggota di divisi ini." />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {members.map(m => {
+              const badge = attBadge(m);
+              return (
+                <div key={m.id} className="bg-white rounded-xl border border-slate-200 p-3 flex items-center gap-3">
+                  <Avatar person={m} size="md" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-slate-900 text-sm truncate">{m.name}</div>
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                      {displayJobTitle(m) && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">{displayJobTitle(m)}</span>}
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold border ${ROLES[m.role]?.color || 'bg-slate-100 text-slate-600'}`}>{ROLES[m.role]?.label || m.role}</span>
+                    </div>
+                  </div>
+                  <span className={`text-[10px] px-2 py-1 rounded-full font-bold flex-shrink-0 ${badge.c}`}>{badge.t}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Sedang dikerjakan */}
+      <div className="mb-6">
+        <SectionTitle>Sedang Dikerjakan</SectionTitle>
+        <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100">
+          {activeTasks.length === 0 ? (
+            <div className="p-4 text-sm text-slate-400">Tidak ada tiket yang sedang berjalan di divisi ini.</div>
+          ) : activeTasks.map(t => {
+            const late = t.deadline && t.deadline < todayK;
+            return (
+              <div key={t.id} className="p-3 flex items-center gap-3">
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${TASK_STATUS[t.status]?.dot || 'bg-slate-400'}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-slate-800 truncate">{t.title}</div>
+                  <div className="text-[11px] text-slate-500">{t.assigneeName}{t.deadline ? <> · deadline <span className={late ? 'text-red-600 font-bold' : ''}>{fmtDate(t.deadline)}{late ? ' (lewat)' : ''}</span></> : ''}</div>
+                </div>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex-shrink-0 ${TASK_STATUS[t.status]?.color || 'bg-slate-100'}`}>{TASK_STATUS[t.status]?.label || t.status}</span>
+              </div>
+            );
+          })}
+        </div>
+        {upcomingEvents.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-200 mt-3 p-4">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Agenda 7 Hari ke Depan</div>
+            <div className="space-y-1.5">
+              {upcomingEvents.map(e => (
+                <div key={e.id} className="flex items-center gap-2 text-sm">
+                  <span>{EVENT_TYPE[e.type]?.icon || '📌'}</span>
+                  <span className="font-semibold text-slate-700 flex-1 min-w-0 truncate">{e.title}</span>
+                  <span className="text-xs text-slate-500 flex-shrink-0">{fmtDate(e.date)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Sudah dilakukan (periode) */}
+      <div className="mb-6">
+        <SectionTitle>Sudah Dilakukan <span className="text-xs font-normal text-slate-400">({period.label || `${fmtDate(period.start)} – ${fmtDate(period.end)}`})</span></SectionTitle>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <div className="text-xs font-bold text-emerald-600 uppercase tracking-wide mb-2">Tiket Selesai ({doneTasks.length})</div>
+            {doneTasks.length === 0 ? <div className="text-sm text-slate-400">Belum ada tiket selesai.</div> : (
+              <div className="space-y-2">
+                {doneTasks.slice(0, 8).map(t => (
+                  <div key={t.id} className="text-sm">
+                    <div className="font-semibold text-slate-800">{t.title}</div>
+                    <div className="text-[11px] text-slate-500">{t.assigneeName} · {fmtDate(t.completedAt)}</div>
+                  </div>
+                ))}
+                {doneTasks.length > 8 && <div className="text-[11px] text-slate-400">+{doneTasks.length - 8} tiket lainnya</div>}
+              </div>
+            )}
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <div className="text-xs font-bold text-blue-600 uppercase tracking-wide mb-2">Masalah Terselesaikan ({resolvedProblems.length})</div>
+            {resolvedProblems.length === 0 ? <div className="text-sm text-slate-400">Tidak ada masalah yang diselesaikan pada periode ini.</div> : (
+              <div className="space-y-2">
+                {resolvedProblems.slice(0, 8).map(p => (
+                  <div key={p.id} className="text-sm">
+                    <div className="font-semibold text-slate-800">{p.title}</div>
+                    <div className="text-[11px] text-slate-500">selesai {fmtDate(p.resolvedAt)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Laporan Harian Terakhir</div>
+            {latestReports.length === 0 ? <div className="text-sm text-slate-400">Belum ada laporan harian dari divisi ini.</div> : (
+              <div className="space-y-2.5">
+                {latestReports.map(r => (
+                  <div key={r.id} className="text-sm">
+                    <div className="font-semibold text-slate-800">{r.authorName} <span className="font-normal text-[11px] text-slate-400">· {fmtDate(r.date)}</span></div>
+                    <div className="text-[12px] text-slate-500">{reportSnippet(r)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Rencana ke depan */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-display font-bold text-slate-800">Rencana ke Depan</h3>
+          {canWrite && (
+            <button onClick={() => { setEditingPlan(null); setShowPlanForm(true); }}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-semibold text-sm flex items-center gap-1.5">
+              <Plus className="w-4 h-4" /> Rencana
+            </button>
+          )}
+        </div>
+        {activePlans.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-6 text-center">
+            <div className="text-sm text-slate-500">Belum ada rencana untuk divisi ini. Tuliskan rencana ke depan supaya satu tim tahu arah divisi — target, PIC, dan tenggatnya.</div>
+            {canWrite && (
+              <button onClick={() => { setEditingPlan(null); setShowPlanForm(true); }}
+                className="mt-3 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm inline-flex items-center gap-1.5">
+                <Plus className="w-4 h-4" /> Tulis Rencana Pertama
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {activePlans.map(p => (
+              <div key={p.id} className="bg-white rounded-2xl border border-slate-200 p-4">
+                <div className="flex items-start gap-3">
+                  <span className={`mt-1.5 w-2.5 h-2.5 rounded-full flex-shrink-0 ${DIVPLAN_STATUS[p.status]?.dot || 'bg-slate-400'}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-slate-900">{p.title}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${DIVPLAN_STATUS[p.status]?.color || 'bg-slate-100'}`}>{DIVPLAN_STATUS[p.status]?.label || p.status}</span>
+                    </div>
+                    {p.detail && <p className="text-sm text-slate-600 mt-1">{p.detail}</p>}
+                    {p.target && <div className="text-[12px] text-slate-500 mt-1">🎯 Indikator: {p.target}</div>}
+                    <div className="text-[11px] text-slate-400 mt-1.5">
+                      {p.picName ? `PIC: ${p.picName}` : 'Belum ada PIC'}
+                      {p.dueDate ? ` · target ${fmtDate(p.dueDate)}` : ''}
+                      {` · dibuat ${p.createdByName || '-'}`}
+                    </div>
+                  </div>
+                  {canWrite && (
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <select value={p.status || 'rencana'} onChange={e => setPlanStatus(p, e.target.value)}
+                        className="text-xs border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                        {Object.entries(DIVPLAN_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                      </select>
+                      <button onClick={() => { setEditingPlan(p); setShowPlanForm(true); }} title="Edit" className="text-slate-400 hover:text-blue-600 p-1"><Edit2 className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => deletePlan(p)} title="Hapus" className="text-slate-400 hover:text-red-600 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {historyPlans.length > 0 && (
+          <details className="mt-3">
+            <summary className="text-sm font-semibold text-slate-500 cursor-pointer select-none">Riwayat rencana ({historyPlans.length}) — selesai / batal</summary>
+            <div className="space-y-2 mt-2">
+              {historyPlans.map(p => (
+                <div key={p.id} className="bg-slate-50 rounded-xl border border-slate-200 p-3 flex items-center gap-3">
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${DIVPLAN_STATUS[p.status]?.dot || 'bg-slate-400'}`} />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold text-slate-700">{p.title}</span>
+                    <span className="text-[11px] text-slate-400 ml-2">{p.status === 'selesai' && p.doneAt ? `selesai ${fmtDate(p.doneAt)}` : DIVPLAN_STATUS[p.status]?.label}</span>
+                  </div>
+                  {canWrite && (
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <select value={p.status || 'rencana'} onChange={e => setPlanStatus(p, e.target.value)}
+                        className="text-xs border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                        {Object.entries(DIVPLAN_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                      </select>
+                      <button onClick={() => deletePlan(p)} title="Hapus" className="text-slate-400 hover:text-red-600 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+
+      {/* Kendala aktif */}
+      <div className="mb-6">
+        <SectionTitle>Kendala Aktif ({activeProblems.length})</SectionTitle>
+        {activeProblems.length === 0 ? (
+          <EmptyState icon={CheckCircle2} text="Tidak ada kendala aktif di divisi ini. 🎉" />
+        ) : (
+          <div className="space-y-2">
+            {activeProblems.map(p => (
+              <div key={p.id} className={`bg-white rounded-2xl border p-3 flex items-start gap-3 ${p.urgency === 'kritis' ? 'border-red-300' : 'border-slate-200'}`}>
+                <span className="mt-1 w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: URGENCY[p.urgency]?.dot || '#94A3B8' }} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-slate-900 text-sm">{p.title}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${URGENCY[p.urgency]?.color || 'bg-slate-100'}`}>{URGENCY[p.urgency]?.label || p.urgency}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${PROBLEM_STATUS[p.status]?.color || 'bg-slate-100'}`}>{PROBLEM_STATUS[p.status]?.label || p.status}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-1">Dilapor: {p.reportedByName} · {fmtDateTime(p.createdAt)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showPlanForm && (
+        <DivPlanFormModal divisionKey={div} members={members} editing={editingPlan}
+          onSave={savePlan} onClose={() => { setShowPlanForm(false); setEditingPlan(null); }} />
+      )}
+    </div>
+  );
+}
+
+// Form tambah/edit Rencana Divisi (modal via createPortal lewat komponen Modal)
+function DivPlanFormModal({ divisionKey, members, editing, onSave, onClose }) {
+  const [form, setForm] = useState({
+    title: editing?.title || '',
+    detail: editing?.detail || '',
+    target: editing?.target || '',
+    picId: editing?.picId || '',
+    dueDate: editing?.dueDate || '',
+    status: editing?.status || 'rencana'
+  });
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (!form.title.trim()) return setError('Judul rencana wajib diisi.');
+    const pic = members.find(m => m.id === form.picId);
+    onSave({
+      title: form.title.trim(), detail: form.detail.trim(), target: form.target.trim(),
+      picId: pic ? pic.id : null, picName: pic ? pic.name : '',
+      dueDate: form.dueDate || null, status: form.status
+    });
+  };
+  return (
+    <Modal title={editing ? 'Edit Rencana Divisi' : `Rencana Baru — ${divLabel(divisionKey)}`} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Judul rencana *">
+          <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+            placeholder="mis. Rekrut 5 affiliator baru bulan depan"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </Field>
+        <Field label="Detail (opsional)">
+          <textarea value={form.detail} onChange={e => setForm({ ...form, detail: e.target.value })} rows={3}
+            placeholder="Langkah-langkah / catatan tambahan..."
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+        </Field>
+        <Field label="Indikator keberhasilan (opsional)">
+          <input type="text" value={form.target} onChange={e => setForm({ ...form, target: e.target.value })}
+            placeholder="mis. 5 affiliator aktif posting minimal 3 konten"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="PIC (opsional)">
+            <select value={form.picId} onChange={e => setForm({ ...form, picId: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">- Tanpa PIC -</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Target tanggal (opsional)">
+            <input type="date" value={form.dueDate || ''} onChange={e => setForm({ ...form, dueDate: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </Field>
+        </div>
+        <Field label="Status">
+          <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            {Object.entries(DIVPLAN_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </Field>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
+        <FormActions onCancel={onClose} onSave={submit} saveLabel="Simpan Rencana" />
+      </div>
+    </Modal>
+  );
+}
+
 function NoAccess() {
   return (
     <div className="max-w-md mx-auto mt-20 text-center">
