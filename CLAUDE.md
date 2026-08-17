@@ -16,7 +16,7 @@ Sistem manajemen tim internal **Al-Kahfi Corp (MCN TAP + Masjid Affiliate)**. Li
 - React 18 + Vite 5 + Tailwind 3, **single-file** di `src/App.jsx` (~14.400 baris — SEMUA komponen di sini) + `src/index.css`.
 - Data: **Supabase** (tabel `kv_store`, key-value) dengan fallback localStorage. Region Tokyo. Password di-hash PBKDF2.
 - Deploy: push ke `main` → Vercel auto-deploy.
-- 4 role: owner / manajer / leader / operasional (+ flag `isSecretariat`). Divisi: manajemen, internal, mcn, tap, media, event, mabit, keuangan.
+- 4 role: owner / manajer / leader / operasional (+ flag `isSecretariat`). Divisi (struktur 2026-2029): manajemen, keuangan, mabit, mcn, tap, event (= MMC "Malam Mabit Cuan"), internal. Divisi `media` sudah dihapus — label key dinamis WAJIB via helper `divLabel()`.
 
 ## ATURAN WAJIB (langgar = app rusak / blank screen)
 1. **Warna gelap/gradient → inline `style={{}}`, BUKAN `bg-[#hex]`.** Tema: biru #2563EB, bg app #F4F7FE, sidebar navy #0B1120, font Inter.
