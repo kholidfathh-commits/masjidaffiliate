@@ -11,7 +11,8 @@ import {
   GripVertical, MapPin, ArrowRight, ArrowLeft, BarChart3, Pin, MessageSquare,
   Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle,
   Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2,
-  Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload, Wallet, Receipt, Scale, Building2
+  Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload, Wallet, Receipt, Scale, Building2,
+  ChevronLeft, ChevronRight, PieChart
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -6145,7 +6146,8 @@ async function syncInternalFromAccounts() {
 
 // Kurva interaktif: arahkan kursor / sentuh untuk lihat nilai per tanggal.
 // Bisa 1 garis (props series+color) atau multi-garis (props lines=[{label,color,series}]).
-function InteractiveLineChart({ series, color = '#2563EB', lines, height = 150, targetDaily = 0 }) {
+function InteractiveLineChart({ series, color = '#2563EB', lines, height = 150, targetDaily = 0, format }) {
+  const fmtNilai = format || fmtRupiah; // default tetap Rupiah (dipakai GMV/Keuangan); Laporan Harian kirim format sendiri
   const [hover, setHover] = useState(null);
   const wrapRef = useRef(null);
   const gradId = useMemo(() => 'ilc-' + Math.random().toString(36).slice(2, 8), []);
@@ -6223,7 +6225,7 @@ function InteractiveLineChart({ series, color = '#2563EB', lines, height = 150, 
           {data.map((l, li) => l.series[hover] ? (
             <div key={li} className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: l.color }}></span>
-              {l.label ? `${l.label}: ` : ''}{fmtRupiah(l.series[hover].value)}
+              {l.label ? `${l.label}: ` : ''}{fmtNilai(l.series[hover].value)}
             </div>
           ) : null)}
         </div>
@@ -10934,6 +10936,690 @@ function TodoForm({ todo, user, visibleOwners, onSave, onClose }) {
 }
 
 
+// ============ LAPORAN HARIAN — MESIN RINGKASAN (ala tab "Jawaban" Google Forms) ============
+// PENTING: seluruh analitik di bawah BEBAS HARDCODE nama field. Jenis diagram ditentukan dari
+// tipe field template (FIELD_TYPES) + kata kunci pada label — jadi template divisi lain tetap jalan.
+
+// Angka di laporan bisa Number asli ATAU teks format Indonesia: "2.200.000", "Rp 205.400",
+// "1.234,5", "35 video". Kembalikan Number, atau null bila jelas bukan angka.
+function parseAngkaID(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (v === null || v === undefined || Array.isArray(v)) return null;
+  const asli = String(v).trim();
+  if (!asli) return null;
+  const negatif = /^-/.test(asli) || /^\(.*\)$/.test(asli);
+  let s = asli.replace(/[^\d.,]/g, ''); // buang "Rp", spasi, satuan huruf
+  if (!/\d/.test(s)) return null;
+  const iKoma = s.lastIndexOf(','), iTitik = s.lastIndexOf('.');
+  if (iKoma > -1 && iTitik > -1) {
+    // pemisah yang paling belakang = desimal
+    s = iKoma > iTitik ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  } else if (iKoma > -1) {
+    s = /^\d{1,3}(,\d{3})+$/.test(s) ? s.replace(/,/g, '') : s.replace(',', '.');
+  } else if (iTitik > -1) {
+    if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, ''); // "2.200.000" = ribuan, bukan desimal
+  }
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return negatif ? -Math.abs(n) : n;
+}
+
+// Kata umum yang tidak membedakan makna field — dibuang saat mencocokkan pasangan target↔realisasi.
+const LAP_STOPWORD = new Set(['target', 'realisasi', 'tercapai', 'capaian', 'pencapaian', 'jumlah', 'total', 'berapa',
+  'hari', 'ini', 'kemarin', 'harian', 'yang', 'sudah', 'dilakukan', 'dan', 'atau', 'per', 'pada', 'dari', 'ke', 'di',
+  'untuk', 'apa', 'saja', 'nya', 'sebutkan', 'isi', 'nama']);
+function tokenLabelLaporan(label) {
+  return Array.from(new Set(String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    .split(' ').filter(w => w.length > 1 && !LAP_STOPWORD.has(w))));
+}
+const lapIsTarget = (label) => /\btarget\b|\bgoal\b/i.test(String(label || ''));
+const lapIsUang = (label) => /gmv|komisi|omzet|omset|rupiah|\brp\b|harga|pendapatan|penghasilan|biaya|penjualan|saldo|nominal|revenue/i.test(String(label || ''));
+const lapFmt = (uang) => (n) => (uang ? fmtRupiah(Math.round(n)) : fmtNumber(Math.round(n * 100) / 100));
+
+// Petunjuk KPI: dipakai HANYA untuk memilih field mana yang naik ke kartu KPI atas.
+// Kalau tidak ada yang cocok, slot diisi field angka yang paling sering terisi.
+// Regex sengaja KETAT: kalau tidak yakin, biarkan field jatuh ke judul generik "Total <label>"
+// supaya kartu KPI tidak pernah salah menamai isi field.
+const LAP_KPI_HINT = [
+  { uji: /\bgmv\b|omzet|omset/, judul: 'Total GMV', warna: '#2563EB', icon: TrendingUp },
+  { uji: /komisi/, judul: 'Total Komisi', warna: '#10B981', icon: Wallet },
+  { uji: /upload|unggah/, judul: 'Total Upload', warna: '#7C3AED', icon: Upload },
+  { uji: /take|shoot|syuting|rekam/, judul: 'Total Take Video', warna: '#F97316', icon: Clapperboard }
+];
+
+// Inti mesin: bongkar semua laporan → daftar field (digabung lintas template berdasarkan label),
+// klasifikasi jenis diagram, pasangkan target↔realisasi, dan pilih KPI.
+function analisaLaporan(reports) {
+  const peta = new Map();
+  const tanggalSet = new Set();
+  const anggotaSet = new Set();
+  reports.forEach(r => {
+    if (r.date) tanggalSet.add(r.date);
+    if (r.authorId) anggotaSet.add(r.authorId);
+    reportFieldsOf(r).forEach(f => {
+      if (!f || !f.label) return;
+      const key = String(f.label).toLowerCase().replace(/\s+/g, ' ').trim();
+      if (!key) return;
+      if (!peta.has(key)) peta.set(key, { key, label: f.label, type: f.type || 'text', urut: peta.size, isi: [] });
+      const slot = peta.get(key);
+      if (f.type === 'number' && slot.type !== 'number') slot.type = 'number'; // tipe paling spesifik menang
+      const v = f.value;
+      if (v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)) return;
+      slot.isi.push({ date: r.date, authorId: r.authorId, authorName: r.authorName, rid: r.id, value: v, submittedAt: r.submittedAt });
+    });
+  });
+
+  const fields = Array.from(peta.values()).map(f => {
+    const angka = [];
+    f.isi.forEach(x => { const n = parseAngkaID(x.value); if (n !== null) angka.push({ ...x, num: n }); });
+    let jenis;
+    if (f.type === 'number') jenis = 'angka';
+    else if (f.type === 'rating') jenis = 'rating';
+    else if (f.type === 'select' || f.type === 'radio' || f.type === 'checkbox') jenis = 'pilihan';
+    else if (f.type === 'date' || f.type === 'time' || f.type === 'url') jenis = 'lain';
+    else jenis = (f.isi.length >= 2 && angka.length / f.isi.length >= 0.7) ? 'angka' : 'teks'; // teks yang isinya angka → tetap dihitung
+    const total = angka.reduce((s, x) => s + x.num, 0);
+    return { ...f, jenis, angka, total, rata: angka.length ? total / angka.length : 0,
+      tokens: tokenLabelLaporan(f.label), target: lapIsTarget(f.label), uang: lapIsUang(f.label) };
+  });
+
+  const fAngka = fields.filter(f => f.jenis === 'angka' && f.angka.length > 0);
+  const fTeks = fields.filter(f => f.jenis === 'teks' && f.isi.length > 0);
+  const fPilihan = fields.filter(f => (f.jenis === 'pilihan' || f.jenis === 'rating') && f.isi.length > 0);
+
+  // Pasangkan "Target X" dengan realisasi X: irisan kata terbanyak setelah stopword dibuang.
+  const pasangan = [];
+  const sudah = new Set();
+  fAngka.filter(f => f.target).forEach(t => {
+    let best = null, skor = 0;
+    fAngka.forEach(c => {
+      if (c.target || sudah.has(c.key) || !t.tokens.length) return;
+      const sama = t.tokens.filter(w => c.tokens.includes(w)).length;
+      const s = sama / t.tokens.length;
+      if (s > skor) { skor = s; best = c; }
+    });
+    if (best && skor >= 0.5) { sudah.add(best.key); pasangan.push({ target: t, real: best }); }
+  });
+
+  // KPI: cocokkan petunjuk dulu, sisanya isi dengan field angka non-target terbanyak isinya.
+  const kandidat = fAngka.filter(f => !f.target);
+  const kpi = [];
+  LAP_KPI_HINT.forEach(h => {
+    const f = kandidat.find(x => h.uji.test(x.key) && !kpi.some(k => k.field.key === x.key));
+    if (f) kpi.push({ judul: h.judul, warna: h.warna, icon: h.icon, field: f });
+  });
+  kandidat.slice().sort((a, b) => b.angka.length - a.angka.length).forEach(f => {
+    if (kpi.length >= 4 || kpi.some(k => k.field.key === f.key)) return;
+    kpi.push({ judul: 'Total ' + f.label, warna: '#0EA5E9', icon: BarChart2, field: f });
+  });
+
+  return {
+    fields, fAngka, fTeks, fPilihan, pasangan, kpi,
+    tanggalList: Array.from(tanggalSet).sort(),
+    jumlahAnggota: anggotaSet.size,
+    jumlahLaporan: reports.length
+  };
+}
+
+// Ubah nilai angka sebuah field jadi deret per tanggal (dijumlah — 1 anggota bisa >1 laporan/hari).
+function lapSeriesTanggal(angka, tanggalList) {
+  const m = {};
+  angka.forEach(x => { m[x.date] = (m[x.date] || 0) + x.num; });
+  return tanggalList.map(d => ({ date: d, day: Number(String(d).slice(8, 10)) || 0, value: m[d] || 0 }));
+}
+// Total sebuah field per anggota (untuk leaderboard).
+function lapTotalPerAnggota(angka) {
+  const m = new Map();
+  angka.forEach(x => {
+    const c = m.get(x.authorId) || { authorId: x.authorId, name: x.authorName || '—', value: 0 };
+    c.value += x.num; m.set(x.authorId, c);
+  });
+  return Array.from(m.values()).sort((a, b) => b.value - a.value);
+}
+// Jumlah hari kalender pada rentang aktif (untuk kepatuhan lapor).
+function lapHitungHari(start, end) {
+  if (!start || !end) return 0;
+  const a = new Date(start + 'T00:00:00'), b = new Date(end + 'T00:00:00');
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+// ---- Komponen tampilan ringkasan ----
+function LapKartu({ judul, sub, aksi, children, className = '' }) {
+  return (
+    <div className={`bg-white rounded-2xl border border-slate-200/70 p-4 sm:p-5 shadow-sm shadow-slate-200/40 ${className}`}>
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <h3 className="font-display font-bold text-slate-800 text-sm leading-snug break-words">{judul}</h3>
+          {sub && <div className="text-[11px] text-slate-400 mt-0.5">{sub}</div>}
+        </div>
+        {aksi}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function LapKpiKartu({ label, nilai, sub, icon: Icon, warna, judulLengkap }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/70 p-3.5 shadow-sm shadow-slate-200/40" title={judulLengkap || label}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: warna + '18' }}>
+          <Icon className="w-4 h-4" style={{ color: warna }} />
+        </span>
+        <span className="text-[11px] font-semibold text-slate-500 leading-tight line-clamp-2">{label}</span>
+      </div>
+      <div className="font-display font-bold text-xl text-slate-900 tabular-nums break-words leading-tight">{nilai}</div>
+      {sub && <div className="text-[10px] text-slate-400 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+// Bar horizontal peringkat (dipakai untuk perbandingan antar anggota).
+function LapBarPeringkat({ data, warna, uang }) {
+  const f = lapFmt(uang);
+  if (!data.length) return <div className="text-sm text-slate-400 py-6 text-center">Belum ada angka pada filter ini.</div>;
+  const max = Math.max(...data.map(d => d.value), 1);
+  return (
+    <div className="space-y-2.5">
+      {data.map((d, i) => (
+        <div key={d.authorId || i}>
+          <div className="flex justify-between items-baseline gap-2 text-sm mb-1">
+            <span className="text-slate-600 truncate"><span className="text-slate-400 tabular-nums">{i + 1}.</span> {d.name}</span>
+            <span className="font-semibold text-slate-800 tabular-nums flex-shrink-0">{f(d.value)}</span>
+          </div>
+          <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+            <div className="h-full rounded-full transition-all" style={{ width: `${d.value > 0 ? Math.max((d.value / max) * 100, 3) : 0}%`, backgroundColor: warna }}></div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Bar ganda per tanggal: target (abu) vs realisasi (warna).
+function LapBarGanda({ data, uang, warnaReal = '#2563EB' }) {
+  if (!data.length) return null;
+  const f = lapFmt(uang);
+  const max = Math.max(...data.flatMap(d => [d.t, d.r]), 1);
+  const n = data.length, W = 600, H = 120, PADT = 6, PADB = 18;
+  const slot = W / n, bw = Math.max(Math.min(slot * 0.32, 18), 2), gap = Math.min(slot * 0.08, 4);
+  const yAt = v => H - PADB - (v / max) * (H - PADT - PADB);
+  const setiap = Math.ceil(n / 12);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full" style={{ height: 130 }}>
+      <line x1="0" y1={H - PADB} x2={W} y2={H - PADB} stroke="#E2E8F0" strokeWidth="1" />
+      {data.map((d, i) => {
+        const cx = slot * (i + 0.5);
+        return (
+          <g key={d.date || i}>
+            <rect x={cx - bw - gap / 2} y={yAt(d.t)} width={bw} height={Math.max(H - PADB - yAt(d.t), d.t > 0 ? 1.5 : 0)} rx="1.5" fill="#CBD5E1">
+              <title>{`${fmtDate(d.date)} · Target: ${f(d.t)}`}</title>
+            </rect>
+            <rect x={cx + gap / 2} y={yAt(d.r)} width={bw} height={Math.max(H - PADB - yAt(d.r), d.r > 0 ? 1.5 : 0)} rx="1.5" fill={warnaReal}>
+              <title>{`${fmtDate(d.date)} · Realisasi: ${f(d.r)}`}</title>
+            </rect>
+            {i % setiap === 0 && (
+              <text x={cx} y={H - 5} fontSize="9" textAnchor="middle" fill="#94A3B8" fontWeight="600">
+                {Number(String(d.date).slice(8, 10)) || i + 1}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// Kartu perbandingan Target vs Realisasi + persentase pencapaian.
+function LapTargetRealisasi({ pair, tanggalList }) {
+  const uang = pair.real.uang || pair.target.uang;
+  const f = lapFmt(uang);
+  const totT = pair.target.total, totR = pair.real.total;
+  const pct = totT > 0 ? Math.round((totR / totT) * 100) : null;
+  const warna = pct === null ? '#2563EB' : pct >= 100 ? '#10B981' : pct >= 70 ? '#F59E0B' : '#F43F5E';
+  const max = Math.max(totT, totR, 1);
+  const perTgl = useMemo(() => {
+    const mt = {}, mr = {};
+    pair.target.angka.forEach(x => { mt[x.date] = (mt[x.date] || 0) + x.num; });
+    pair.real.angka.forEach(x => { mr[x.date] = (mr[x.date] || 0) + x.num; });
+    return tanggalList.map(d => ({ date: d, t: mt[d] || 0, r: mr[d] || 0 })).filter(x => x.t > 0 || x.r > 0);
+  }, [pair, tanggalList]);
+
+  return (
+    <LapKartu judul={pair.real.label} sub={`Dibandingkan dengan: ${pair.target.label}`}
+      aksi={pct !== null && (
+        <span className="text-xs font-bold px-2.5 py-1 rounded-lg flex-shrink-0 tabular-nums"
+          style={{ backgroundColor: warna + '18', color: warna }}>{pct}%</span>
+      )}>
+      <div className="space-y-2.5 mb-4">
+        <div>
+          <div className="flex justify-between text-xs mb-1"><span className="text-slate-500 font-semibold">Target</span><span className="font-semibold text-slate-700 tabular-nums">{f(totT)}</span></div>
+          <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(totT / max) * 100}%`, backgroundColor: '#CBD5E1' }}></div></div>
+        </div>
+        <div>
+          <div className="flex justify-between text-xs mb-1"><span className="text-slate-500 font-semibold">Realisasi</span><span className="font-semibold text-slate-800 tabular-nums">{f(totR)}</span></div>
+          <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${totR > 0 ? Math.max((totR / max) * 100, 2) : 0}%`, backgroundColor: warna }}></div></div>
+        </div>
+      </div>
+      {perTgl.length > 1 && (
+        <>
+          <div className="flex items-center gap-3 text-[10px] font-semibold text-slate-500 mb-1">
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: '#CBD5E1' }}></span> Target</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: warna }}></span> Realisasi</span>
+            <span className="ml-auto text-slate-300 font-normal">per tanggal</span>
+          </div>
+          <LapBarGanda data={perTgl} uang={uang} warnaReal={warna} />
+        </>
+      )}
+    </LapKartu>
+  );
+}
+
+// Tren field angka (line chart) + total & rata-rata.
+function LapTrenAngka({ field, tanggalList, warna = '#2563EB' }) {
+  const series = useMemo(() => lapSeriesTanggal(field.angka, tanggalList), [field, tanggalList]);
+  const f = lapFmt(field.uang);
+  const isi = series.filter(s => s.value > 0);
+  return (
+    <LapKartu judul={field.label} sub={`${field.angka.length} jawaban terisi`}>
+      <div className="flex gap-4 mb-2">
+        <div><div className="text-[10px] font-semibold text-slate-400 uppercase">Total</div><div className="font-display font-bold text-lg text-slate-800 tabular-nums">{f(field.total)}</div></div>
+        <div><div className="text-[10px] font-semibold text-slate-400 uppercase">Rata-rata</div><div className="font-display font-bold text-lg text-slate-600 tabular-nums">{f(field.rata)}</div></div>
+      </div>
+      {series.length > 1 ? (
+        <InteractiveLineChart series={series} color={warna} height={140} format={f} />
+      ) : (
+        <div className="text-xs text-slate-400 py-4 text-center">Butuh minimal 2 tanggal untuk menggambar tren. {isi.length === 1 && `Nilai ${fmtDate(isi[0].date)}: ${f(isi[0].value)}`}</div>
+      )}
+    </LapKartu>
+  );
+}
+
+// Distribusi jawaban pilihan (select/radio/checkbox) & rating.
+function LapDistribusi({ field }) {
+  const data = useMemo(() => {
+    const m = new Map();
+    field.isi.forEach(x => {
+      const arr = Array.isArray(x.value) ? x.value : [x.value];
+      arr.forEach(v => { const k = String(v).trim(); if (!k) return; m.set(k, (m.get(k) || 0) + 1); });
+    });
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+  }, [field]);
+  const total = data.reduce((s, d) => s + d[1], 0) || 1;
+  const max = Math.max(...data.map(d => d[1]), 1);
+  const rata = field.jenis === 'rating' && field.angka.length ? field.rata : null;
+  return (
+    <LapKartu judul={field.label} sub={`${field.isi.length} jawaban`}
+      aksi={rata !== null && <span className="text-xs font-bold text-amber-600 flex-shrink-0">★ {rata.toFixed(1)}</span>}>
+      <div className="space-y-2.5">
+        {data.map(([k, v]) => (
+          <div key={k}>
+            <div className="flex justify-between text-sm mb-1 gap-2">
+              <span className="text-slate-600 truncate">{field.jenis === 'rating' ? '★'.repeat(Math.min(Number(k) || 0, 5)) || k : k}</span>
+              <span className="font-semibold text-slate-800 tabular-nums flex-shrink-0">{v} <span className="text-slate-400 text-xs font-normal">({Math.round(v / total * 100)}%)</span></span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(v / max) * 100}%`, backgroundColor: '#7C3AED' }}></div></div>
+          </div>
+        ))}
+      </div>
+    </LapKartu>
+  );
+}
+
+// Daftar jawaban teks terbaru (nama anggota + tanggal), area bisa di-scroll.
+function LapJawabanTeks({ field, batas = 80 }) {
+  const items = useMemo(() => field.isi.slice()
+    .sort((a, b) => String((b.date || '') + (b.submittedAt || '')).localeCompare(String((a.date || '') + (a.submittedAt || ''))))
+    .slice(0, batas), [field, batas]);
+  return (
+    <LapKartu judul={field.label} sub={`${field.isi.length} jawaban${field.isi.length > items.length ? ` · menampilkan ${items.length} terbaru` : ''}`}>
+      <div className="space-y-2 max-h-72 overflow-y-auto scroll-thin pr-1">
+        {items.map((x, i) => (
+          <div key={x.rid + '-' + i} className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2">
+            <div className="text-[10px] font-semibold text-slate-500 flex items-center gap-1.5 flex-wrap">
+              <span className="text-slate-700">{x.authorName || '—'}</span>
+              <span className="text-slate-300">•</span>
+              <span>{x.date ? fmtDate(x.date) : '—'}</span>
+            </div>
+            <div className="text-sm text-slate-700 whitespace-pre-wrap mt-0.5 break-words">{Array.isArray(x.value) ? x.value.join(', ') : String(x.value)}</div>
+          </div>
+        ))}
+      </div>
+    </LapKartu>
+  );
+}
+
+// ---- MODE 1: RINGKASAN ----
+function LapModeRingkasan({ reports, rentang }) {
+  const A = useMemo(() => analisaLaporan(reports), [reports]);
+  const WARNA_TREN = ['#2563EB', '#10B981', '#7C3AED', '#F97316', '#0EA5E9', '#F43F5E'];
+
+  // Perbandingan antar anggota: pakai 2 metrik KPI teratas yang terdeteksi.
+  const leaderboard = useMemo(() => A.kpi.slice(0, 2).map((k, i) => ({
+    judul: k.field.label, uang: k.field.uang, warna: k.warna || WARNA_TREN[i],
+    data: lapTotalPerAnggota(k.field.angka).slice(0, 12)
+  })).filter(l => l.data.length > 0), [A]);
+
+  // Tren: semua field angka non-target yang belum tampil sebagai pasangan target-realisasi.
+  const sudahDipasangkan = new Set(A.pasangan.flatMap(p => [p.target.key, p.real.key]));
+  const fieldTren = A.fAngka.filter(f => !sudahDipasangkan.has(f.key));
+
+  return (
+    <div className="space-y-6">
+      {/* 1. Kartu KPI */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {A.kpi.map(k => (
+          <LapKpiKartu key={k.field.key} label={k.judul} icon={k.icon} warna={k.warna}
+            judulLengkap={`${k.judul} — dari pertanyaan: ${k.field.label}`}
+            nilai={lapFmt(k.field.uang)(k.field.total)}
+            sub={`rata-rata ${lapFmt(k.field.uang)(k.field.rata)}/laporan`} />
+        ))}
+        <LapKpiKartu label="Laporan Masuk" icon={ClipboardList} warna="#64748B" nilai={fmtNumber(A.jumlahLaporan)}
+          sub={A.tanggalList.length ? `${A.tanggalList.length} tanggal` : ''} />
+        <LapKpiKartu label="Anggota Lapor" icon={Users} warna="#0F766E" nilai={fmtNumber(A.jumlahAnggota)}
+          sub={rentang.start ? `${lapHitungHari(rentang.start, rentang.end)} hari rentang` : 'semua tanggal'} />
+      </div>
+
+      {/* 2a. Target vs Realisasi */}
+      {A.pasangan.length > 0 && (
+        <div>
+          <h2 className="font-display font-bold text-slate-700 text-sm mb-2.5 flex items-center gap-2"><Target className="w-4 h-4 text-blue-600" /> Target vs Realisasi</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {A.pasangan.map(p => <LapTargetRealisasi key={p.target.key + '|' + p.real.key} pair={p} tanggalList={A.tanggalList} />)}
+          </div>
+        </div>
+      )}
+
+      {/* 2b. Tren field angka */}
+      {fieldTren.length > 0 && (
+        <div>
+          <h2 className="font-display font-bold text-slate-700 text-sm mb-2.5 flex items-center gap-2"><Activity className="w-4 h-4 text-blue-600" /> Tren Angka per Tanggal</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {fieldTren.map((f, i) => <LapTrenAngka key={f.key} field={f} tanggalList={A.tanggalList} warna={WARNA_TREN[i % WARNA_TREN.length]} />)}
+          </div>
+        </div>
+      )}
+
+      {/* 3. Perbandingan antar anggota */}
+      {leaderboard.length > 0 && (
+        <div>
+          <h2 className="font-display font-bold text-slate-700 text-sm mb-2.5 flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Perbandingan Antar Anggota</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {leaderboard.map(l => (
+              <LapKartu key={l.judul} judul={l.judul} sub="Total per anggota pada filter aktif">
+                <LapBarPeringkat data={l.data} warna={l.warna} uang={l.uang} />
+              </LapKartu>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 2c. Distribusi pilihan & rating */}
+      {A.fPilihan.length > 0 && (
+        <div>
+          <h2 className="font-display font-bold text-slate-700 text-sm mb-2.5 flex items-center gap-2"><PieChart className="w-4 h-4 text-violet-600" /> Distribusi Jawaban Pilihan</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {A.fPilihan.map(f => <LapDistribusi key={f.key} field={f} />)}
+          </div>
+        </div>
+      )}
+
+      {/* 2d. Jawaban teks */}
+      {A.fTeks.length > 0 && (
+        <div>
+          <h2 className="font-display font-bold text-slate-700 text-sm mb-2.5 flex items-center gap-2"><MessageSquare className="w-4 h-4 text-slate-500" /> Jawaban Teks Terbaru</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {A.fTeks.map(f => <LapJawabanTeks key={f.key} field={f} />)}
+          </div>
+        </div>
+      )}
+
+      {A.fAngka.length === 0 && A.fTeks.length === 0 && A.fPilihan.length === 0 && (
+        <EmptyState icon={BarChart2} text="Laporan pada filter ini belum punya field yang bisa dibuat diagram." />
+      )}
+    </div>
+  );
+}
+
+// Kerangka loading (dipakai saat data laporan belum selesai dimuat).
+function LapSkeleton({ mode }) {
+  const Kotak = ({ h }) => <div className="bg-white rounded-2xl border border-slate-200/70 animate-pulse" style={{ height: h }} />;
+  if (mode === 'tabel') return <div className="space-y-3"><Kotak h={44} /><Kotak h={280} /></div>;
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {Array.from({ length: 6 }, (_, i) => <Kotak key={i} h={96} />)}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4"><Kotak h={230} /><Kotak h={230} /></div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4"><Kotak h={230} /><Kotak h={230} /></div>
+    </div>
+  );
+}
+
+// Satu baris jawaban ala kartu Google Forms: label kecil di atas, nilai jelas di bawah.
+function LapBarisJawaban({ field }) {
+  const v = field.value;
+  const kosong = v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+  let isi;
+  if (kosong) isi = <span className="text-slate-300">–</span>;
+  else if (field.type === 'rating') {
+    const n = Math.max(0, Math.min(Number(v) || 0, 5));
+    isi = <span className="text-base"><span className="text-amber-400">{'★'.repeat(n)}</span><span className="text-slate-200">{'★'.repeat(5 - n)}</span></span>;
+  } else if (field.type === 'url' && typeof v === 'string' && v.startsWith('http')) {
+    isi = <a href={v} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline break-all inline-flex items-center gap-1">{v}<ExternalLink className="w-3 h-3 flex-shrink-0" /></a>;
+  } else if (field.type === 'date') isi = fmtDate(v);
+  else if (field.type === 'number') isi = <span className="tabular-nums">{fmtNumber(v)}</span>;
+  else if (Array.isArray(v)) isi = v.join(', ');
+  else isi = String(v);
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide leading-tight">{field.label}</div>
+      <div className="text-sm text-slate-800 whitespace-pre-wrap break-words mt-0.5">{isi}</div>
+    </div>
+  );
+}
+
+// Kartu satu laporan (jawaban) — aksi pin/edit/hapus tetap tersedia seperti kartu lama.
+function LapKartuJawaban({ r, canManage, currentUser, onTogglePin, onEdit, onDelete, onLightbox, nomor, total }) {
+  const fields = reportFieldsOf(r).filter(f => f && f.label);
+  return (
+    <div className={`bg-white rounded-2xl border ${r.pinToDashboard ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200/70'} p-4 sm:p-5 shadow-sm shadow-slate-200/40`}>
+      <div className="flex items-start justify-between gap-3 mb-3 pb-3 border-b border-slate-100">
+        <div className="min-w-0">
+          <div className="font-display font-bold text-slate-800 text-sm break-words">{r.templateName || 'Laporan Umum'}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">
+            {fmtDateTime(r.submittedAt)}
+            {total > 1 && <span> · laporan {nomor} dari {total} di tanggal ini</span>}
+            {r.pinToDashboard && <span className="text-blue-600 font-semibold"> · dipin ke dashboard</span>}
+          </div>
+        </div>
+        <div className="flex gap-1 flex-shrink-0">
+          {canManage && (
+            <button onClick={() => onTogglePin(r)} title={r.pinToDashboard ? 'Unpin dari dashboard' : 'Pin ke dashboard'}
+              className={`p-1.5 rounded-lg hover:bg-slate-100 ${r.pinToDashboard ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}><Pin className="w-4 h-4" /></button>
+          )}
+          {(canManage || r.authorId === currentUser.id) && (
+            <button onClick={() => onEdit(r)} title="Edit laporan" className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-slate-100"><Edit2 className="w-4 h-4" /></button>
+          )}
+          {canManage && (
+            <button onClick={() => onDelete(r)} title="Hapus laporan" className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-slate-100"><Trash2 className="w-4 h-4" /></button>
+          )}
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+        {fields.map((f, i) => <LapBarisJawaban key={(f.id || f.label) + '-' + i} field={f} />)}
+      </div>
+      {(r.attachments || []).length > 0 && (
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <div className="text-[10px] font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Paperclip className="w-3 h-3" /> Bukti ({r.attachments.length})</div>
+          <div className="flex gap-2 flex-wrap">
+            {r.attachments.map((img, i) => (
+              <AsyncImg key={i} refId={img} alt={`Bukti ${i + 1}`}
+                onClick={() => onLightbox({ src: img, title: `Bukti laporan ${r.authorName} · ${fmtDate(r.date)}` })}
+                className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition" />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- MODE 2: PER ANGGOTA (ala tab "Individu" Google Forms) ----
+function LapModePerAnggota({ reports, allUsers, currentUser, canManage, rentang, onTogglePin, onEdit, onDelete, onLightbox }) {
+  const daftar = useMemo(() => {
+    const m = new Map();
+    reports.forEach(r => {
+      if (!r.authorId) return;
+      const c = m.get(r.authorId) || { id: r.authorId, name: r.authorName || '—', jumlah: 0, tanggal: new Set() };
+      c.jumlah++; if (r.date) c.tanggal.add(r.date);
+      m.set(r.authorId, c);
+    });
+    return Array.from(m.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [reports]);
+
+  const [pilih, setPilih] = useState('');
+  const [idxTgl, setIdxTgl] = useState(0);
+  const [lihatSemua, setLihatSemua] = useState(false);
+
+  const aktifId = daftar.some(d => d.id === pilih) ? pilih : (daftar[0]?.id || '');
+  const posisi = daftar.findIndex(d => d.id === aktifId);
+  const anggota = daftar[posisi] || null;
+  const profil = allUsers.find(u => u.id === aktifId) || null;
+
+  const milik = useMemo(() => reports.filter(r => r.authorId === aktifId), [reports, aktifId]);
+  const A = useMemo(() => analisaLaporan(milik), [milik]);
+  const perTanggal = useMemo(() => {
+    const g = {};
+    milik.forEach(r => { const d = r.date || '—'; (g[d] = g[d] || []).push(r); });
+    return Object.entries(g).sort(([a], [b]) => b.localeCompare(a))
+      .map(([date, reps]) => [date, reps.slice().sort((x, y) => String(x.submittedAt || '').localeCompare(String(y.submittedAt || '')))]);
+  }, [milik]);
+
+  useEffect(() => { setIdxTgl(0); setLihatSemua(false); }, [aktifId]);
+  const idxAman = Math.min(idxTgl, Math.max(perTanggal.length - 1, 0));
+
+  // Kepatuhan lapor: hari yang dilaporkan ÷ hari pada rentang filter.
+  // Kalau filter = "Semua tanggal", pembagi = jumlah hari yang punya laporan (dari semua anggota).
+  const hariPembagi = rentang.start ? lapHitungHari(rentang.start, rentang.end) : new Set(reports.map(r => r.date).filter(Boolean)).size;
+  const hariLapor = anggota ? anggota.tanggal.size : 0;
+  const patuh = hariPembagi > 0 ? Math.round((hariLapor / hariPembagi) * 100) : 0;
+  const warnaPatuh = patuh >= 80 ? '#10B981' : patuh >= 50 ? '#F59E0B' : '#F43F5E';
+
+  const dipasangkan = new Set(A.pasangan.flatMap(p => [p.target.key, p.real.key]));
+  const trenPribadi = A.kpi.map(k => k.field).filter(f => !dipasangkan.has(f.key)).slice(0, 4);
+  const WARNA = ['#2563EB', '#10B981', '#7C3AED', '#F97316'];
+
+  if (!anggota) return <EmptyState icon={User} text="Belum ada anggota yang mengirim laporan pada filter ini." />;
+
+  const pindah = (arah) => {
+    const next = posisi + arah;
+    if (next < 0 || next >= daftar.length) return;
+    setPilih(daftar[next].id);
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Pemilih anggota */}
+      <div className="bg-white rounded-2xl border border-slate-200/70 p-3 flex items-center gap-2 shadow-sm shadow-slate-200/40">
+        <button onClick={() => pindah(-1)} disabled={posisi <= 0}
+          title="Anggota sebelumnya"
+          className="w-9 h-9 rounded-lg border border-slate-200 grid place-items-center text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white flex-shrink-0">
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <select value={aktifId} onChange={e => setPilih(e.target.value)}
+          className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white font-semibold text-slate-700">
+          {daftar.map(d => <option key={d.id} value={d.id}>{d.name} — {d.jumlah} laporan</option>)}
+        </select>
+        <button onClick={() => pindah(1)} disabled={posisi >= daftar.length - 1}
+          title="Anggota berikutnya"
+          className="w-9 h-9 rounded-lg border border-slate-200 grid place-items-center text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white flex-shrink-0">
+          <ChevronRight className="w-4 h-4" />
+        </button>
+        <span className="text-xs text-slate-400 tabular-nums flex-shrink-0 hidden sm:block">{posisi + 1} / {daftar.length}</span>
+      </div>
+
+      {/* Header profil */}
+      <div className="rounded-2xl p-4 sm:p-5 text-white" style={{ background: 'linear-gradient(135deg, #1D4ED8 0%, #0B1120 100%)' }}>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            {profil && <Avatar person={profil} size="lg" />}
+            <div className="min-w-0">
+              <div className="font-display font-bold text-lg sm:text-xl leading-tight break-words">{anggota.name}</div>
+              <div className="flex items-center gap-2 flex-wrap mt-1.5 text-[11px] font-semibold">
+                {profil?.role && <span className="px-2 py-0.5 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.16)' }}>{ROLES[profil.role]?.label || profil.role}</span>}
+                {profil?.jobTitle && <span className="px-2 py-0.5 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.16)' }}>{profil.jobTitle}</span>}
+                {profil?.division && <span className="px-2 py-0.5 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.16)' }}>{divLabel(profil.division)}</span>}
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3 flex-wrap flex-shrink-0">
+            <div className="rounded-xl px-3.5 py-2" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }}>
+              <div className="text-[10px] uppercase font-semibold" style={{ color: '#BFDBFE' }}>Laporan</div>
+              <div className="font-display font-bold text-2xl tabular-nums leading-tight">{anggota.jumlah}</div>
+            </div>
+            <div className="rounded-xl px-3.5 py-2" style={{ backgroundColor: 'rgba(255,255,255,0.12)' }}>
+              <div className="text-[10px] uppercase font-semibold" style={{ color: '#BFDBFE' }}>Kepatuhan Lapor</div>
+              <div className="font-display font-bold text-2xl tabular-nums leading-tight" style={{ color: warnaPatuh }}>{patuh}%</div>
+              <div className="text-[10px]" style={{ color: '#BFDBFE' }}>{hariLapor} dari {hariPembagi} hari</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Diagram pribadi */}
+      {(A.pasangan.length > 0 || trenPribadi.length > 0) && (
+        <div>
+          <h2 className="font-display font-bold text-slate-700 text-sm mb-2.5 flex items-center gap-2"><Activity className="w-4 h-4 text-blue-600" /> Diagram Pribadi</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {A.pasangan.map(p => <LapTargetRealisasi key={p.target.key + '|' + p.real.key} pair={p} tanggalList={A.tanggalList} />)}
+            {trenPribadi.map((f, i) => <LapTrenAngka key={f.key} field={f} tanggalList={A.tanggalList} warna={WARNA[i % WARNA.length]} />)}
+          </div>
+        </div>
+      )}
+
+      {/* Daftar laporan individual */}
+      <div>
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-2.5">
+          <h2 className="font-display font-bold text-slate-700 text-sm flex items-center gap-2"><ClipboardList className="w-4 h-4 text-blue-600" /> Laporan {anggota.name}</h2>
+          <div className="flex items-center gap-2">
+            {!lihatSemua && perTanggal.length > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => setIdxTgl(Math.max(idxAman - 1, 0))} disabled={idxAman <= 0} title="Tanggal lebih baru"
+                  className="w-8 h-8 rounded-lg border border-slate-200 bg-white grid place-items-center text-slate-500 hover:bg-slate-50 disabled:opacity-30"><ChevronLeft className="w-4 h-4" /></button>
+                <span className="text-xs font-semibold text-slate-500 tabular-nums px-1">{idxAman + 1} / {perTanggal.length}</span>
+                <button onClick={() => setIdxTgl(Math.min(idxAman + 1, perTanggal.length - 1))} disabled={idxAman >= perTanggal.length - 1} title="Tanggal lebih lama"
+                  className="w-8 h-8 rounded-lg border border-slate-200 bg-white grid place-items-center text-slate-500 hover:bg-slate-50 disabled:opacity-30"><ChevronRight className="w-4 h-4" /></button>
+              </div>
+            )}
+            <button onClick={() => setLihatSemua(v => !v)}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">
+              {lihatSemua ? 'Satu per satu' : `Lihat semua (${milik.length})`}
+            </button>
+          </div>
+        </div>
+        <div className="space-y-4">
+          {(lihatSemua ? perTanggal : perTanggal.slice(idxAman, idxAman + 1)).map(([date, reps]) => (
+            <div key={date}>
+              <div className="text-sm font-display font-bold text-slate-700 mb-2 px-1">
+                📅 {date === '—' ? 'Tanpa tanggal' : fmtDate(date)} <span className="text-xs text-slate-500 font-normal">({reps.length} laporan)</span>
+              </div>
+              <div className="space-y-3">
+                {reps.map((r, i) => (
+                  <LapKartuJawaban key={r.id} r={r} canManage={canManage} currentUser={currentUser}
+                    onTogglePin={onTogglePin} onEdit={onEdit} onDelete={onDelete} onLightbox={onLightbox}
+                    nomor={i + 1} total={reps.length} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============ DAILY REPORTS (dengan Template System) ============
 function DailyReportsView({ user, allUsers }) {
   const [reports, setReports] = useState([]);
@@ -10942,16 +11628,19 @@ function DailyReportsView({ user, allUsers }) {
   const [editing, setEditing] = useState(null);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
   const [lightbox, setLightbox] = useState(null);
-  const [filter, setFilter] = useState({
-    date: dayKey(),
-    author: 'all'
+  // Filter tanggal = RENTANG (start–end). String kosong = "Semua tanggal".
+  const [filter, setFilter] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 27);
+    return { id: 'custom', label: '28 Hari Terakhir', start: dayKey(d), end: dayKey(), author: 'all' };
   });
-  const [viewMode, setViewMode] = useState('kartu'); // 'kartu' | 'tabel'
+  const [viewMode, setViewMode] = useState('ringkasan'); // 'ringkasan' | 'anggota' | 'tabel'
   const [exporting, setExporting] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const load = async () => {
     setReports(await loadDailyReports());
     setTemplates(await storage.getList('daily-report-templates:all'));
+    setLoading(false);
   };
   useEffect(() => { load(); }, []);
 
@@ -11019,7 +11708,7 @@ function DailyReportsView({ user, allUsers }) {
   };
 
   // Visibility: Manajer all, Leader self+team, Operasional self
-  const visibleReports = reports.filter(r => {
+  const visibleReports = useMemo(() => reports.filter(r => {
     if ((user.role === 'manajer' || user.role === 'owner')) return true;
     if (r.authorId === user.id) return true;
     if (user.role === 'leader') {
@@ -11027,13 +11716,15 @@ function DailyReportsView({ user, allUsers }) {
       return author && author.leaderId === user.id;
     }
     return false;
-  });
+  }), [reports, user, allUsers]);
 
-  const filtered = visibleReports.filter(r => {
-    if (filter.date !== 'all' && r.date !== filter.date) return false;
+  // Identitas array dijaga stabil (useMemo) supaya mesin ringkasan tidak menghitung ulang tiap render.
+  const filtered = useMemo(() => visibleReports.filter(r => {
+    if (filter.start && (!r.date || r.date < filter.start)) return false;
+    if (filter.end && (!r.date || r.date > filter.end)) return false;
     if (filter.author !== 'all' && r.authorId !== filter.author) return false;
     return true;
-  });
+  }), [visibleReports, filter.start, filter.end, filter.author]);
 
   // Download weekly CSV (handles dynamic fields)
   const [showDownloadModal, setShowDownloadModal] = useState(false);
@@ -11089,12 +11780,6 @@ function DailyReportsView({ user, allUsers }) {
   const filterableAuthors = user.role === 'operasional' ? [user] :
     user.role === 'leader' ? allUsers.filter(u => u.id === user.id || u.leaderId === user.id) :
     allUsers;
-
-  const groupedByDate = useMemo(() => {
-    const g = {};
-    filtered.forEach(r => { if (!g[r.date]) g[r.date] = []; g[r.date].push(r); });
-    return Object.entries(g).sort(([a], [b]) => b.localeCompare(a));
-  }, [filtered]);
 
   // Susun laporan PER TEMPLATE/FORM jadi tabel (baris = laporan, kolom = pertanyaan form)
   const valStr = (v) => Array.isArray(v) ? v.join(', ') : (v ?? '');
@@ -11192,11 +11877,11 @@ function DailyReportsView({ user, allUsers }) {
         <div>
           <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Tanggal</label>
           <div className="flex gap-2">
-            <DateRangePopover tabs={['day']} defaultTab="day" compact allowClear clearLabel="Semua" placeholder="Semua tanggal"
-              value={{ id: 'day', label: 'Hari', start: filter.date === 'all' ? '' : filter.date, end: filter.date === 'all' ? '' : filter.date }}
-              onChange={p => setFilter({ ...filter, date: p.start || 'all' })} />
-            <button onClick={() => setFilter({ ...filter, date: 'all' })}
-              className={`text-xs px-3 py-1.5 rounded font-semibold ${filter.date === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+            <DateRangePopover compact allowClear clearLabel="Semua tanggal" placeholder="Semua tanggal"
+              value={{ id: filter.id, label: filter.label, start: filter.start, end: filter.end }}
+              onChange={p => setFilter({ ...filter, id: p.id, label: p.label, start: p.start, end: p.end })} />
+            <button onClick={() => setFilter({ ...filter, id: 'all', label: 'Semua tanggal', start: '', end: '' })}
+              className={`text-xs px-3 py-1.5 rounded font-semibold ${!filter.start ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
               Semua
             </button>
           </div>
@@ -11214,17 +11899,24 @@ function DailyReportsView({ user, allUsers }) {
         <div className="ml-auto">
           <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Tampilan</label>
           <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden">
-            <button onClick={() => setViewMode('kartu')}
-              className={`text-xs font-semibold px-3 py-1.5 ${viewMode === 'kartu' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Kartu</button>
-            <button onClick={() => setViewMode('tabel')}
-              className={`text-xs font-semibold px-3 py-1.5 ${viewMode === 'tabel' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Tabel</button>
+            {[['ringkasan', 'Ringkasan', BarChart2], ['anggota', 'Per Anggota', User], ['tabel', 'Tabel', FileSpreadsheet]].map(([k, lbl, Ico]) => (
+              <button key={k} onClick={() => setViewMode(k)}
+                className={`text-xs font-semibold px-2.5 sm:px-3 py-1.5 flex items-center gap-1.5 ${viewMode === k ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                <Ico className="w-3.5 h-3.5 hidden sm:block" /> {lbl}
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
       {/* List */}
-      {filtered.length === 0 ? (
-        <EmptyState icon={ClipboardList} text="Belum ada laporan harian pada filter ini." />
+      {loading ? (
+        <LapSkeleton mode={viewMode} />
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={ClipboardList}
+          text={filter.start
+            ? `Belum ada laporan harian pada ${fmtDate(filter.start)} – ${fmtDate(filter.end)}${filter.author !== 'all' ? ' untuk anggota ini' : ''}. Coba ubah rentang tanggal atau klik "Semua".`
+            : 'Belum ada laporan harian pada filter ini.'} />
       ) : viewMode === 'tabel' ? (
         <div className="space-y-6">
           {reportsByTemplate.map(({ name, reps, labels }) => (
@@ -11262,73 +11954,13 @@ function DailyReportsView({ user, allUsers }) {
             </div>
           ))}
         </div>
+      ) : viewMode === 'anggota' ? (
+        <LapModePerAnggota reports={filtered} allUsers={allUsers} currentUser={user} canManage={canManage}
+          rentang={{ start: filter.start, end: filter.end }}
+          onTogglePin={handleTogglePin} onEdit={r => { setEditing(r); setShowForm(true); }}
+          onDelete={handleDelete} onLightbox={setLightbox} />
       ) : (
-        <div className="space-y-5">
-          {groupedByDate.map(([date, reps]) => (
-            <div key={date}>
-              <div className="text-sm font-display font-bold text-slate-700 mb-2 px-1">
-                📅 {fmtDate(date)} <span className="text-xs text-slate-500 font-normal">({reps.length} laporan)</span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {reps.map(r => {
-                  const fields = getReportFields(r);
-                  return (
-                    <div key={r.id} className={`bg-white rounded-xl border ${r.pinToDashboard ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'} p-4`}>
-                      <div className="flex items-start justify-between mb-2 gap-3 flex-wrap">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-slate-900">{r.authorName}</span>
-                            <span className={`text-[10px] px-2 py-0.5 rounded ${ROLES[r.authorRole]?.color || ''}`}>{ROLES[r.authorRole]?.label}</span>
-                            {r.authorJobTitle && <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">{r.authorJobTitle}</span>}
-                          </div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            {fmtDateTime(r.submittedAt)}
-                            {r.templateName && <span> · Template: {r.templateName}</span>}
-                          </div>
-                        </div>
-                        <div className="flex gap-1">
-                          {canManage && (
-                            <button onClick={() => handleTogglePin(r)} title={r.pinToDashboard ? 'Unpin dari dashboard' : 'Pin ke dashboard'}
-                              className={`p-1 ${r.pinToDashboard ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}>
-                              <Pin className="w-4 h-4" />
-                            </button>
-                          )}
-                          {(canManage || r.authorId === user.id) && (
-                            <button onClick={() => { setEditing(r); setShowForm(true); }} className="text-slate-400 hover:text-blue-600 p-1">
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canManage && (
-                            <button onClick={() => handleDelete(r)} className="text-slate-400 hover:text-red-600 p-1">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        {fields.map(f => (
-                          <DynamicFieldDisplay key={f.id} field={f} />
-                        ))}
-                      </div>
-                      {(r.attachments || []).length > 0 && (
-                        <div className="mt-3 pt-2 border-t border-slate-100">
-                          <div className="text-[10px] font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Paperclip className="w-3 h-3" /> Bukti ({r.attachments.length})</div>
-                          <div className="flex gap-2 flex-wrap">
-                            {r.attachments.map((img, i) => (
-                              <AsyncImg key={i} refId={img} alt={`Bukti ${i + 1}`}
-                                onClick={() => setLightbox({ src: img, title: `Bukti laporan ${r.authorName} · ${fmtDate(r.date)}` })}
-                                className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition" />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
+        <LapModeRingkasan reports={filtered} rentang={{ start: filter.start, end: filter.end }} />
       )}
 
       {showForm && <DailyReportFormDynamic report={editing} user={user} templates={templates}
