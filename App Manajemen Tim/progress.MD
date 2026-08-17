@@ -314,6 +314,30 @@ Keputusan user: fitur-fitur ini belum pernah dipakai perusahaan (diverifikasi: `
 
 **Total perubahan 4 Agu belum di-deploy** (fitur Divisi + penghapusan 4 fitur sama-sama masih uncommitted; watcher auto-commit sedang tidak aktif).
 
+### 17 Agu 2026 — LAPORAN HARIAN ala "Jawaban" Google Forms (build lulus 2,73s)
+
+Halaman Laporan Harian dulunya cuma tumpukan kartu teks + mode Tabel — nol insight. Toggle tampilan `Kartu | Tabel` diganti **`Ringkasan | Per Anggota | Tabel`** (default **Ringkasan**). Mode Kartu lama DIHAPUS, perannya digantikan Per Anggota. Mode Tabel, Export Excel, Download CSV, Kelola Template Form, alur submit, dan schema data **tidak disentuh sama sekali**.
+
+**Filter tanggal naik kelas dari 1-hari → RENTANG.** `filter.date` (string/`'all'`) diganti `filter.start`/`filter.end` (string kosong = semua). `DateRangePopover` dilepas dari `tabs={['day']}` jadi tabs penuh (Hari/Pekan/Bulan/Custom + preset). Default halaman: **28 Hari Terakhir**. Alasan: grafik tren & "kepatuhan lapor" mustahil dihitung dari satu tanggal.
+
+**Mesin analitik (BEBAS HARDCODE nama field)** — semua di `App.jsx`, tepat sebelum `DailyReportsView`:
+
+- **`parseAngkaID(v)`** — angka bisa `Number` asli ATAU teks format Indonesia (`"2.200.000"`, `"Rp 205.400"`, `"1.234,5"`, `"35 video"`). Aturan: pemisah paling belakang = desimal; pola `^\d{1,3}(\.\d{3})+$` = ribuan (jadi `"2.200.000"`→2200000 tapi `"1.5"`→1.5). Non-angka → `null`. **JANGAN tulis parser angka baru** — pakai ini.
+- **`analisaLaporan(reports)`** — bongkar `reportFieldsOf()` semua laporan → gabung field lintas template **berdasarkan label ternormalisasi** → klasifikasi `jenis`: `angka` (type number, atau text/textarea yang ≥70% isinya keparse angka) · `rating` · `pilihan` (select/radio/checkbox) · `teks` · `lain` (date/time/url, tidak dibuat grafik). Balikan: `{fields, fAngka, fTeks, fPilihan, pasangan, kpi, tanggalList, jumlahAnggota, jumlahLaporan}`.
+- **Pasangan target↔realisasi otomatis:** label yang mengandung `target`/`goal` dicocokkan ke field non-target dengan **irisan token terbanyak** setelah stopword umum dibuang (`LAP_STOPWORD`: target/realisasi/tercapai/jumlah/berapa/hari/ini/kemarin/harian/…), ambang skor ≥0,5. Terbukti memasangkan "Target GMV Harian"↔"Tercapai GMV berapa? (kemarin)" dan "Target Jumlah Upload VT (hari ini)"↔"Realisasi Jumlah Upload VT (kemarin)" tanpa nama field ditulis di kode; template divisi lain ("Target Grup Hari Ini"↔"Jumlah Grup Dihandle") juga jalan.
+- **`LAP_KPI_HINT`** — regex **sengaja ketat** (`\bgmv\b|omzet|omset`, `komisi`, `upload|unggah`, `take|shoot|syuting|rekam`) hanya untuk memilih field mana yang naik ke kartu KPI. Tidak cocok → judul generik `"Total <label>"`, jadi kartu tidak pernah salah menamai isi field. Field bertanda `target` tidak pernah jadi KPI.
+
+**Komponen baru:** `LapModeRingkasan`, `LapModePerAnggota`, `LapKartu`, `LapKpiKartu`, `LapBarPeringkat`, `LapBarGanda`, `LapTargetRealisasi`, `LapTrenAngka`, `LapDistribusi`, `LapJawabanTeks`, `LapKartuJawaban`, `LapBarisJawaban`, `LapSkeleton`. Helper: `lapSeriesTanggal`, `lapTotalPerAnggota`, `lapHitungHari`, `lapFmt`, `tokenLabelLaporan`, `lapIsTarget`, `lapIsUang`.
+
+**Chart tanpa dependency baru.** package.json tidak punya library chart; dipakai ulang `InteractiveLineChart` yang sudah ada + bar SVG buatan sendiri. `InteractiveLineChart` ditambah prop opsional **`format`** (default tetap `fmtRupiah`) supaya angka non-rupiah tak tampil "Rp 8" — pemanggil lama (GMV, Keuangan, Akun Affiliator) tidak berubah.
+
+**Isi Ringkasan:** 6 kartu KPI (4 metrik terdeteksi + Laporan Masuk + Anggota Lapor) → Target vs Realisasi (bar target/realisasi + % pencapaian + bar ganda per tanggal) → Tren Angka per Tanggal (line + total & rata-rata) → Perbandingan Antar Anggota (leaderboard 2 metrik teratas) → Distribusi Jawaban Pilihan/rating → Jawaban Teks Terbaru (scrollable, nama + tanggal).
+**Isi Per Anggota:** pemilih anggota + navigasi ‹ › → header profil gradient (peran/posisi/divisi, jumlah laporan, **kepatuhan lapor** = hari lapor ÷ hari rentang) → diagram pribadi → daftar laporan dikelompokkan per tanggal dengan navigasi ‹ › + tombol "Lihat semua"; **aksi pin/edit/hapus + lampiran bukti tetap ada** seperti kartu lama.
+
+**Catatan data:** 1 anggota bisa >1 laporan/hari (1 laporan per akun) — semua agregasi harian MENJUMLAH, dan `Nama Akun` tampil sebagai pembeda di tampilan individual. `visibleReports`/`filtered` dibungkus `useMemo` supaya identitas array stabil (mesin ringkasan tidak recompute tiap render).
+
+**Verifikasi:** `npx vite build` lulus 2,73s. 40 uji unit mesin analitik lewat harness Node (parsing angka ID, pasangan target↔realisasi, KPI, klasifikasi field, template divisi lain, laporan legacy tanpa `fieldsSnapshot`, data kosong) — semua LULUS. Diuji visual di harness Vite terpisah (scratchpad) dengan 66 laporan tiruan × 3 anggota × 2 template: desktop 1280 & mobile 375 (bug nama anggota terpotong per huruf di header profil mobile ditemukan & diperbaiki: layout jadi `flex-col sm:flex-row`). App asli boot normal, console bersih.
+
 ---
 
 ## 4. Status Terkini (per 1 Jul 2026)
