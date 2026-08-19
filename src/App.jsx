@@ -37,6 +37,33 @@ const MyLearningView = React.lazy(() => import('./lms/MyLearning.jsx'));
 const TeamLearningView = React.lazy(() => import('./lms/TeamLearning.jsx'));
 const LearningAdminView = React.lazy(() => import('./lms/LearningAdmin.jsx'));
 
+// Penangkap error untuk halaman lazy. WAJIB ada: nama file chunk memakai hash, jadi
+// setelah deploy baru, tab yang masih terbuka akan meminta chunk lama yang sudah tidak
+// ada di server. Tanpa penangkap ini, promise import() yang ditolak akan menjalar ke
+// atas dan MELEPAS SELURUH pohon React — bukan cuma halaman LMS, tapi seluruh aplikasi
+// jadi layar putih. Ini komponen class karena hanya class yang bisa menangkap error render.
+class LazyBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { gagal: false }; }
+  static getDerivedStateFromError() { return { gagal: true }; }
+  componentDidCatch(e) { console.error('Halaman pembelajaran gagal dimuat:', e); }
+  render() {
+    if (!this.state.gagal) return this.props.children;
+    return (
+      <div className="max-w-md mx-auto mt-16 text-center">
+        <AlertCircle className="w-12 h-12 mx-auto text-amber-400 mb-3" />
+        <h3 className="font-display font-bold text-slate-700">Halaman gagal dimuat</h3>
+        <p className="text-sm text-slate-500 mt-1">
+          Aplikasi kemungkinan baru diperbarui. Muat ulang halaman untuk mengambil versi terbaru.
+        </p>
+        <button onClick={() => window.location.reload()}
+          className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">
+          Muat Ulang Halaman
+        </button>
+      </div>
+    );
+  }
+}
+
 // ============ ROLES & PERMISSIONS ============
 const ROLES = {
   owner:      { label: 'Owner',            color: 'bg-violet-100 text-violet-800 border-violet-300',   icon: Crown,     rank: 4 },
@@ -1333,11 +1360,13 @@ export default function App() {
             {view === 'settings' && <SettingsView user={currentUser} settings={settings} onSave={async s => { await storage.set('app:settings', s); await refreshAll(); }} />}
             {/* LMS — dimuat lazy, jadi perlu Suspense dengan penanda muat yang seragam */}
             {(view === 'my-learning' || view === 'team-learning' || view === 'learning-admin') && (
-              <Suspense fallback={<div className="text-slate-500 text-sm py-16 text-center">Memuat halaman pembelajaran...</div>}>
-                {view === 'my-learning' && <MyLearningView user={currentUser} allUsers={allUsers} />}
-                {view === 'team-learning' && <TeamLearningView user={currentUser} allUsers={allUsers} />}
-                {view === 'learning-admin' && <LearningAdminView user={currentUser} allUsers={allUsers} settings={settings} />}
-              </Suspense>
+              <LazyBoundary>
+                <Suspense fallback={<div className="text-slate-500 text-sm py-16 text-center">Memuat halaman pembelajaran...</div>}>
+                  {view === 'my-learning' && <MyLearningView user={currentUser} allUsers={allUsers} />}
+                  {view === 'team-learning' && <TeamLearningView user={currentUser} allUsers={allUsers} />}
+                  {view === 'learning-admin' && <LearningAdminView user={currentUser} allUsers={allUsers} settings={settings} />}
+                </Suspense>
+              </LazyBoundary>
             )}
           </div>
         </main>
@@ -4968,9 +4997,15 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
     ? allUsers.filter(u => u.division && !DIVISIONS[u.division])
     : [];
 
-  // Karyawan (role operasional) yang jabatannya masih kosong — dihitung dari daftar
-  // yang memang boleh dilihat user ini, supaya leader tidak melihat nama tim lain.
+  // Karyawan (role operasional) yang jabatannya bermasalah untuk penargetan jalur
+  // belajar: KOSONG, atau berisi jabatan lama yang sudah tidak ada di daftar Pengaturan.
+  // Keduanya sama-sama membuat auto-enrollment berbasis jabatan meleset — yang kedua
+  // justru lebih berbahaya karena tidak kelihatan salah di layar.
+  // Dihitung dari daftar yang boleh dilihat user ini, supaya leader tidak melihat nama tim lain.
+  const daftarJabatan = settings?.jobTitles || DEFAULT_JOB_TITLES;
   const noJobTitleMembers = visible.filter(u => u.role === 'operasional' && !(u.jobTitle || '').trim());
+  const staleJobTitleMembers = visible.filter(u =>
+    u.role === 'operasional' && (u.jobTitle || '').trim() && !daftarJabatan.includes(u.jobTitle.trim()));
 
   const handleSave = async (data) => {
     let list = await storage.getList('users:list');
@@ -5080,6 +5115,18 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
           <span>
             <b>{noJobTitleMembers.length} karyawan</b> belum punya Posisi / Jabatan ({noJobTitleMembers.map(u => u.name).join(', ')}).
             Mereka <b>tidak akan menerima jalur belajar otomatis</b> yang ditargetkan per jabatan — lengkapi lewat tombol Edit.
+          </span>
+        </div>
+      )}
+
+      {staleJobTitleMembers.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-2.5 mb-4 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            <b>{staleJobTitleMembers.length} karyawan</b> memakai jabatan yang sudah tidak ada di daftar Pengaturan
+            ({staleJobTitleMembers.map(u => `${u.name} — "${u.jobTitle}"`).join(', ')}).
+            Jalur belajar dicocokkan dengan <b>nama jabatan yang persis sama</b>, jadi mereka tidak akan terjangkau
+            penargetan per jabatan. Pilih ulang jabatannya lewat tombol Edit, atau tambahkan jabatan itu di Pengaturan App.
           </span>
         </div>
       )}
@@ -10386,7 +10433,21 @@ function SettingsView({ user, settings, onSave }) {
       if (!confirm(`⚠️ PERINGATAN: Ini akan MENIMPA SEMUA data sekarang dengan isi backup (${keys.length} bagian data, dibuat ${when}).\n\nData saat ini akan HILANG dan diganti dengan isi backup. Lanjutkan?`)) return;
       if (!confirm('Yakin 100%? Tindakan ini TIDAK BISA dibatalkan.')) return;
       setBackupBusy(true);
-      for (const k of keys) await storage.set(k, data[k]);
+      for (const k of keys) {
+        const bval = data[k];
+        if (PER_RECORD_LOADERS[k] && Array.isArray(bval)) {
+          // MODUL PER-RECORD: datanya tinggal di baris 'prefix<id>', bukan di key logis.
+          // Menulis array ke key logis (perilaku lama) menghasilkan baris yang TIDAK
+          // PERNAH DIBACA siapa pun. Untuk modul lama hal itu tertolong karena loader-nya
+          // menyerap array legacy, tetapi modul LMS tidak punya penyerap semacam itu —
+          // tanpa cabang ini, "Timpa Total" akan menghilangkan seluruh data pembelajaran.
+          const pfx = PER_RECORD_PREFIX[k];
+          await storage.deleteByPrefix(pfx); // mode TIMPA: bersihkan dulu, lalu tulis ulang
+          for (const it of bval) { if (it && it.id != null) await storage.set(pfx + it.id, it); }
+        } else {
+          await storage.set(k, bval);
+        }
+      }
       setBackupBusy(false);
       alert('✓ Data berhasil dipulihkan dari backup. Halaman akan dimuat ulang.');
       window.location.reload();

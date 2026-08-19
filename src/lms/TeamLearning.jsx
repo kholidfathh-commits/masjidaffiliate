@@ -340,7 +340,21 @@ function TeamLearningBody({ user, allUsers }) {
     setResetErr('');
     setResetBusy(row.lessonId);
     try {
-      const n = await resetQuizAttempts(resetFor.id, row.lessonId, attempts, user);
+      // Reset itu DESTRUKTIF, jadi jangan pernah bekerja dari state layar yang bisa
+      // basi (halaman ini hanya mem-poll submission, bukan attempt). Baca ulang dulu:
+      // kalau peserta sempat menambah percobaan setelah layar leader dimuat, percobaan
+      // itu akan ikut terhapus tanpa pernah terlihat leader.
+      const sebelum = await loadMyAttempts(resetFor.id);
+      const jumlahNyata = (sebelum || []).filter(a => a.lessonId === row.lessonId).length;
+      if (jumlahNyata !== row.count) {
+        setResetErr(
+          `Data di layar sudah tidak sesuai: sekarang ada ${jumlahNyata} percobaan, bukan ${row.count}. ` +
+          `Reset dibatalkan. Tekan "Muat Ulang" lalu periksa lagi.`
+        );
+        setAttempts(prev => prev.filter(a => a.userId !== resetFor.id).concat(sebelum || []));
+        return;
+      }
+      const n = await resetQuizAttempts(resetFor.id, row.lessonId, sebelum, user);
       await lmsLog(`mereset ${n} kesempatan kuis "${row.title}" milik ${resetFor.name}`, user.name);
       // Muat ulang hanya milik satu peserta — hemat egress.
       const fresh = await loadMyAttempts(resetFor.id);

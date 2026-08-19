@@ -21,7 +21,7 @@ import {
   COURSE_STATUS, LESSON_TYPES, QUESTION_TYPES,
   loadLmsPaths, loadLmsCourses, loadLmsEnrollments, loadLmsProgress,
   loadLmsAttempts, loadLmsSubmissions,
-  savePath, saveCourse, deleteCourse, deletePath,
+  savePath, saveCourse, getCourse, getPath, deleteCourse, deletePath,
   loadLessonBody, saveLessonBody, sealQuestion,
   allLessons, courseTotalMinutes, computePathProgress,
   autoEnrollUser, manualEnroll,
@@ -249,6 +249,14 @@ function LearningAdminBody({ user, allUsers, settings }) {
     () => people.filter(u => u.role === 'operasional' && !(u.jobTitle || '').trim()).length,
     [people]
   );
+  // Jabatan LAMA yang tidak ada lagi di daftar juga tidak akan pernah cocok, karena
+  // pencocokan target memakai nama jabatan yang persis sama. Ini lebih berbahaya
+  // daripada jabatan kosong: di layar kelihatan terisi, padahal tidak pernah terjangkau.
+  const staleJobTitles = useMemo(() => {
+    if (jobTitles.length === 0) return [];
+    return people.filter(u =>
+      u.role === 'operasional' && (u.jobTitle || '').trim() && !jobTitles.includes(u.jobTitle.trim()));
+  }, [people, jobTitles]);
 
   // --- Aksi kursus ------------------------------------------------------
   const flash = (msg) => { setBanner(msg); setActionErr(''); };
@@ -386,7 +394,7 @@ function LearningAdminBody({ user, allUsers, settings }) {
               rows={rows}
               enrollments={enrollments}
               publishedPaths={publishedPaths}
-              noJobTitleCount={noJobTitleCount}
+              noJobTitleCount={noJobTitleCount} staleJobTitles={staleJobTitles}
               onAssign={(p) => setAssignFor(p)}
               onDone={(msg) => { flash(msg); reloadEnrollments(); }}
               onError={(msg) => setActionErr(msg)}
@@ -670,6 +678,15 @@ function CourseBuilder({ initial, user, onClose, onSaved }) {
       updatedAt: new Date().toISOString(),
     };
     try {
+      // Status TIDAK diambil dari form. Form ini bisa dibuka berjam-jam sebelum disimpan
+      // (halaman admin sengaja tanpa polling), sementara status diubah lewat tombol
+      // Terbitkan/Jadikan Draft yang terpisah. Kalau status ikut ditulis dari form lama,
+      // kursus yang sudah terbit bisa diam-diam kembali jadi draft — dan kursus draft
+      // hilang dari layar semua peserta. Jadi status server yang menang.
+      if (initial?.id) {
+        const server = await getCourse(initial.id);
+        if (server?.status) rec.status = server.status;
+      }
       await saveCourse(rec);
     } catch (e) {
       setSaving(false);
@@ -1422,6 +1439,11 @@ function PathBuilder({ initial, user, courses, allCourses, jobTitles, onClose, o
       updatedAt: new Date().toISOString(),
     };
     try {
+      // Status server yang menang, dengan alasan sama seperti pada kursus di atas.
+      if (initial?.id) {
+        const server = await getPath(initial.id);
+        if (server?.status) rec.status = server.status;
+      }
       await savePath(rec);
       await lmsLog((initial ? 'memperbarui' : 'membuat') + ' jalur belajar "' + rec.title + '"', user.name);
       setSaving(false);
@@ -1558,7 +1580,7 @@ function PathBuilder({ initial, user, courses, allCourses, jobTitles, onClose, o
 // ============================================================================
 // TAB 4 — PESERTA
 // ============================================================================
-function PesertaTab({ user, people, rows, enrollments, publishedPaths, noJobTitleCount, onAssign, onDone, onError }) {
+function PesertaTab({ user, people, rows, enrollments, publishedPaths, noJobTitleCount, staleJobTitles = [], onAssign, onDone, onError }) {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null); // { created, skipped, failed }
   const [q, setQ] = useState('');
@@ -1609,6 +1631,15 @@ function PesertaTab({ user, people, rows, enrollments, publishedPaths, noJobTitl
       {noJobTitleCount > 0 && (
         <LmsNote tone="amber">
           {noJobTitleCount} karyawan belum punya jabatan sehingga tidak bisa dijangkau jalur belajar berbasis jabatan. Lengkapi di menu Anggota Tim.
+        </LmsNote>
+      )}
+
+      {staleJobTitles.length > 0 && (
+        <LmsNote tone="amber">
+          {staleJobTitles.length} karyawan memakai jabatan yang sudah tidak ada di daftar Pengaturan
+          ({staleJobTitles.map(u => `${u.name} — "${u.jobTitle}"`).join(', ')}).
+          Penargetan jalur belajar mencocokkan nama jabatan yang <b>persis sama</b>, jadi mereka tidak akan
+          terjangkau. Pilih ulang jabatannya di menu Anggota Tim, atau tambahkan jabatan itu di Pengaturan App.
         </LmsNote>
       )}
 

@@ -225,6 +225,12 @@ export const saveValidation = (rec) => putRec(LMS_VALIDATION_PREFIX, rec);
 export const deletePath = (id) => st().delete(LMS_PATH_PREFIX + id);
 export const deleteCourse = (id) => st().delete(LMS_COURSE_PREFIX + id);
 
+// Baca satu record dari server. Dipakai course/path builder untuk mengambil status
+// TERBARU sebelum menyimpan, supaya form yang sudah lama terbuka tidak mengembalikan
+// kursus/jalur yang sudah terbit menjadi draft.
+export const getCourse = (id) => st().get(LMS_COURSE_PREFIX + id);
+export const getPath = (id) => st().get(LMS_PATH_PREFIX + id);
+
 export async function lmsLog(text, userName) {
   try { await _dep.log(text, userName); } catch { /* log gagal tidak boleh menggagalkan aksi */ }
 }
@@ -325,12 +331,18 @@ export function lockedLessonIds(course, ctx) {
 }
 
 export function computePathProgress(path, coursesById, ctx) {
-  const entries = [...(path?.courses || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const semua = [...(path?.courses || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  // Hanya hitung kursus yang BENAR-BENAR ADA di peta. Kursus yang hilang (dihapus,
+  // atau dikembalikan ke draft oleh admin) harus keluar dari pembilang DAN penyebut.
+  // Kalau tidak, `percent` bisa 100% sementara `completed` selamanya false — peserta
+  // melihat "100%" tapi jalurnya tidak pernah dinyatakan selesai dan tidak pernah
+  // muncul di antrean validasi leader.
+  const entries = semua.filter(e => coursesById.has(e.courseId));
   const required = entries.filter(e => e.required !== false);
+  const dilewati = semua.length - entries.length;
   let doneCourses = 0, sumDone = 0, sumTotal = 0;
   for (const e of entries) {
     const c = coursesById.get(e.courseId);
-    if (!c) continue;
     const p = computeCourseProgress(c, ctx);
     // Persen dihitung dari kursus WAJIB saja supaya 100% selalu berarti sama dengan
     // "selesai". Kalau kursus opsional ikut dihitung, jalur bisa berstatus Selesai
@@ -346,6 +358,9 @@ export function computePathProgress(path, coursesById, ctx) {
     coursesDone: doneCourses,
     coursesTotal: required.length,
     completed: required.length > 0 && doneCourses === required.length,
+    // Jumlah kursus dalam jalur yang tidak bisa dihitung (belum terbit / sudah dihapus).
+    // Dipakai halaman untuk memberi tahu admin bahwa jalurnya perlu dirapikan.
+    dilewati,
   };
 }
 
@@ -573,10 +588,15 @@ export function emptySubmission(user, lesson, courseId) {
   };
 }
 
-/** Baca ulang satu record submission dari server (untuk menghindari lost update). */
+/**
+ * Baca ulang satu record submission dari server (untuk menghindari lost update).
+ * SENGAJA MELEMPAR saat gagal baca: `null` di sini berarti "record memang belum ada",
+ * dan itu harus dibedakan dari "koneksi gagal". Kalau keduanya disamakan, pemanggil
+ * akan menulis dari salinan layar yang basi dan menghapus entri pihak lain — persis
+ * lost update yang ingin dicegah fungsi ini.
+ */
 export async function getSubmission(id) {
-  try { return await st().get(LMS_SUBMISSION_PREFIX + id); }
-  catch { return null; } // gagal baca → pemanggil pakai salinan yang ada
+  return await st().get(LMS_SUBMISSION_PREFIX + id);
 }
 
 // CATATAN LOST UPDATE: kv_store tidak punya transaksi maupun compare-and-set.
@@ -586,7 +606,9 @@ export async function getSubmission(id) {
 // terbaru lebih dulu, lalu menambahkan entri di atasnya. Jendela balapannya
 // menyempit dari "selama modal terbuka" menjadi beberapa milidetik.
 export async function submitAssignment(current, { text, link, images }, user) {
-  const fresh = (await getSubmission(current.id)) || current;
+  let fresh;
+  try { fresh = (await getSubmission(current.id)) || current; }
+  catch { throw new Error('Tidak bisa memeriksa data terbaru di server. Pengiriman dibatalkan supaya riwayat yang sudah ada tidak tertimpa. Cek koneksi lalu coba lagi.'); }
   const entry = {
     at: new Date().toISOString(),
     text: (text || '').trim(),
@@ -605,7 +627,9 @@ export async function submitAssignment(current, { text, link, images }, user) {
 }
 
 export async function reviewAssignment(current, decision, note, reviewer) {
-  const fresh = (await getSubmission(current.id)) || current;
+  let fresh;
+  try { fresh = (await getSubmission(current.id)) || current; }
+  catch { throw new Error('Tidak bisa memeriksa data terbaru di server. Review dibatalkan supaya kiriman terbaru peserta tidak tertimpa. Cek koneksi lalu coba lagi.'); }
   const entry = {
     at: new Date().toISOString(),
     decision, // 'APPROVED' | 'REVISION_REQUIRED'

@@ -229,3 +229,16 @@ Tidak ada framework test di repo ini (dan sengaja tidak dibuat). Verifikasi mema
 
 **Yang wajib dicek juga:** leader tidak melihat anggota tim lain · karyawan tidak melihat
 menu Kelola Pembelajaran · kursus draft tidak terlihat karyawan · tampilan HP tidak meluber.
+
+---
+
+## 12. Uji logika otomatis (opsional)
+
+```bash
+node uji-lms.mjs
+```
+
+Satu file Node biasa, tanpa framework & tanpa dependency baru, memakai storage tiruan
+di memori (database production tidak disentuh). Menguji 32 hal: perhitungan progres,
+penargetan & idempotensi auto-enrollment, penilaian kuis, penomoran percobaan, dan
+batas wewenang leader. **Jalankan setiap kali `src/lms/data.js` diubah.**

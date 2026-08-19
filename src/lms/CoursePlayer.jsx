@@ -406,7 +406,13 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
         setQuizPhase('idle');
         return;
       }
-      const nomor = attemptsUsed(fresh, lesson.id, user.id) + 1;
+      // Nomor diambil dari nomor TERTINGGI yang ada, bukan dari JUMLAH record.
+      // Kalau deret percobaan punya lubang (mis. reset yang gagal separuh sehingga
+      // 002 tersisa tapi 001 & 003 terhapus), menghitung dari jumlah akan menghasilkan
+      // nomor yang sudah dipakai — dan karena attemptId() deterministik + putRec()
+      // memakai upsert, percobaan lama akan TERTIMPA diam-diam.
+      const punyaLesson = fresh.filter(a => a.lessonId === lesson.id && a.userId === user.id);
+      const nomor = punyaLesson.reduce((m, a) => Math.max(m, Number(a.attemptNo) || 0), 0) + 1;
       const now = new Date().toISOString();
       await saveAttempt({
         id: attemptId(user.id, lesson.id, nomor),
