@@ -90,14 +90,14 @@ const can = {
     if (viewer.role === 'leader' && target.leaderId === viewer.id) return true;
     return false;
   },
-  canSeeTask: (viewer, task, allUsers) => {
+  // Tiket bersifat TERTUTUP: hanya pemberi tugas, PIC, dan manajemen (Owner/Manajer).
+  // Leader TIDAK lagi otomatis melihat seluruh tiket bawahannya — ia melihat tiket yang
+  // ia BERIKAN sendiri (sebagai createdById) dan tiket yang ditujukan kepadanya.
+  // Konsekuensi yang disengaja: tiket yang diberikan Owner/Manajer LANGSUNG ke seorang
+  // staf tidak terlihat oleh leader staf tersebut.
+  canSeeTask: (viewer, task) => {
     if (viewer.role === 'owner' || viewer.role === 'manajer') return true;
-    if (task.assigneeId === viewer.id || task.createdById === viewer.id) return true;
-    if (viewer.role === 'leader') {
-      const assignee = allUsers.find(u => u.id === task.assigneeId);
-      return assignee && (assignee.leaderId === viewer.id || assignee.id === viewer.id);
-    }
-    return false;
+    return task.assigneeId === viewer.id || task.createdById === viewer.id;
   },
 };
 
@@ -983,8 +983,8 @@ const DIVISION_FEATURES = {
   manajemen: ['sellers', 'gmv', 'affiliate-accounts', 'tap-commission', 'finance'],
   keuangan:  ['gmv', 'finance'],
   mabit:     [],
-  mcn:       ['gmv'],
-  tap:       ['sellers', 'gmv', 'tap-commission'],
+  mcn:       ['gmv', 'partner-feedback'],
+  tap:       ['sellers', 'gmv', 'tap-commission', 'partner-feedback'],
   event:     [],
   internal:  ['gmv', 'affiliate-accounts']
 };
@@ -1959,7 +1959,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       items: [
         { id: 'sellers', label: 'Database Seller', icon: Briefcase, show: canAccessFeature(user, 'sellers') },
         { id: 'tap-commission', label: 'Kalkulator Komisi', icon: Calculator, show: canAccessFeature(user, 'tap-commission') },
-        { id: 'partner-feedback', label: 'Kepuasan Mitra', icon: Heart, show: true }
+        { id: 'partner-feedback', label: 'Kepuasan Mitra', icon: Heart, show: canAccessFeature(user, 'partner-feedback') }
       ]
     },
     {
@@ -2342,7 +2342,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
     (async () => {
       const tasks = await loadTasks();
       setSearchResults({
-        tasks: tasks.filter(t => can.canSeeTask(user, t, allUsers) &&
+        tasks: tasks.filter(t => can.canSeeTask(user, t) &&
           ((t.title || '').toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q))).slice(0, 5),
         users: allUsers.filter(u => (u.name || '').toLowerCase().includes(q) || (u.jobTitle || '').toLowerCase().includes(q)).slice(0, 5)
       });
@@ -2680,7 +2680,6 @@ function Dashboard({ user, allUsers, setView, settings }) {
     loadTargets();
   };
 
-  const visibleTasks = tasks.filter(t => can.canSeeTask(user, t, allUsers));
   const myTasks = tasks.filter(t => t.assigneeId === user.id && t.status !== 'done');
   const overdue = myTasks.filter(t => t.deadline && new Date(t.deadline) < new Date()).length;
   // GMV bulan berjalan dari data GMV divisi (menggantikan GMV agregat creator yang fiturnya sudah dihapus)
@@ -5389,11 +5388,36 @@ function TasksView({ user, allUsers }) {
 
   const handleSave = async (data) => {
     try {
+      // Penjagaan penugasan di sisi simpan, bukan cuma di dropdown. Tanpa ini, nilai
+      // assigneeId yang tertinggal di state form masih bisa lolos ke penyimpanan.
+      //
+      // PENTING: yang dijaga adalah PERUBAHAN PIC, bukan setiap penyimpanan. Aturan
+      // penugasan yang baru lebih sempit daripada aturan lama, jadi tiket lama bisa
+      // saja punya PIC di luar wewenang si pembuat sekarang. Kalau setiap simpan
+      // diperiksa, tiket lama itu jadi TIDAK BISA DIEDIT selamanya — bahkan cuma
+      // untuk menggeser deadline, dan bahkan oleh Owner. Mempertahankan PIC yang
+      // sudah ada selalu diizinkan; yang ditolak hanya MEMINDAHKAN ke orang baru
+      // di luar wewenang.
+      const picTetap = editing && data.assigneeId === editing.assigneeId;
+      if (!picTetap && !assignableUsers.some(u => u.id === data.assigneeId)) {
+        alert('Anda tidak berwenang menugaskan tiket ke orang tersebut.');
+        return;
+      }
+      const assignee = allUsers.find(u => u.id === data.assigneeId);
       let rec;
       if (editing) {
-        rec = { ...editing, ...data, updatedAt: new Date().toISOString() };
+        rec = {
+          ...editing, ...data,
+          // BUG LAMA: assigneeName tidak pernah dihitung ulang saat PIC diganti, jadi
+          // seluruh UI (tabel, kartu, notifikasi, modal) menampilkan nama PIC yang LAMA.
+          assigneeName: assignee?.name || editing.assigneeName || '-',
+          // Pemberi tugas TIDAK boleh berubah saat tiket diedit — ia jejak asal tiket
+          // dan dipakai alur QC (canQC) untuk menentukan siapa yang berhak menyetujui.
+          createdById: editing.createdById,
+          createdByName: editing.createdByName,
+          updatedAt: new Date().toISOString()
+        };
       } else {
-        const assignee = allUsers.find(u => u.id === data.assigneeId);
         rec = {
           id: uid(), ...data, assigneeName: assignee?.name || '-',
           createdById: user.id, createdByName: user.name, createdAt: new Date().toISOString(),
@@ -5402,7 +5426,10 @@ function TasksView({ user, allUsers }) {
       }
       const ok = await storage.set(TASK_REC_PREFIX + rec.id, rec);
       if (!ok) throw new Error('Gagal menyimpan ke server.');
-      if (!editing) await logActivity(`memberi tugas "${data.title}" ke ${rec.assigneeName}`, user.name);
+      // Judul tiket SENGAJA tidak ikut: feed aktivitas di Dashboard terbuka untuk
+      // semua orang dan record-nya tidak punya pemilik, jadi judul di sini akan
+      // membocorkan isi tiket ke orang yang tidak berhak melihatnya.
+      if (!editing) await logActivity(`memberi 1 tiket baru ke ${rec.assigneeName}`, user.name);
       setShowForm(false); setEditing(null); load();
     } catch (err) {
       alert('⚠️ Gagal menyimpan tugas: ' + (err?.message || err) + '\n\nCoba lagi saat koneksi stabil.');
@@ -5434,8 +5461,8 @@ function TasksView({ user, allUsers }) {
     else if (status === 'done') { patch.completedAt = now; patch.qcResult = 'approved'; patch.qcDecidedAt = now; patch.qcDecidedById = user.id; patch.qcDecidedByName = user.name; }
     else { patch.completedAt = null; }
     await patchTask(t.id, patch,
-      status === 'qc' ? `mengirim tugas "${t.title}" untuk QC` :
-      status === 'done' ? `menyelesaikan tugas "${t.title}"` : null);
+      status === 'qc' ? 'mengirim 1 tiket untuk QC' :
+      status === 'done' ? 'menyelesaikan 1 tiket' : null);
   };
   // QC oleh pemberi tugas: setujui → Selesai, atau minta revisi → balik Dikerjakan + catatan
   const qcApprove = (t) => updateStatus(t, 'done');
@@ -5445,7 +5472,7 @@ function TasksView({ user, allUsers }) {
     await patchTask(t.id, {
       status: 'in_progress', qcResult: 'revisi', qcNote: note.trim(),
       qcDecidedAt: new Date().toISOString(), qcDecidedById: user.id, qcDecidedByName: user.name, completedAt: null
-    }, `meminta revisi tugas "${t.title}"`);
+    }, 'meminta revisi 1 tiket');
   };
   // Opsi status sesuai peran: penerima TIDAK bisa langsung "Selesai" (harus lewat QC)
   const statusOptionsFor = (t) => {
@@ -5474,7 +5501,7 @@ function TasksView({ user, allUsers }) {
     if (!cur) return;
     const ok = await storage.set(TASK_REC_PREFIX + task.id, { ...cur, comments: [...(cur.comments || []), newComment] });
     if (!ok) { alert('Gagal menyimpan komentar. Coba lagi.'); return; }
-    await logActivity(`komen di tugas "${task.title}"`, user.name);
+    await logActivity('berkomentar di 1 tiket', user.name);
     load();
   };
 
@@ -5488,12 +5515,16 @@ function TasksView({ user, allUsers }) {
   };
 
   // Visibility
-  const visibleTasks = tasks.filter(t => can.canSeeTask(user, t, allUsers));
+  const visibleTasks = tasks.filter(t => can.canSeeTask(user, t));
   // Assignable users
   const assignableUsers = useMemo(() => {
+    // Owner & Manajer: ke siapa saja.
     if ((user.role === 'manajer' || user.role === 'owner')) return allUsers;
-    // Leader boleh menugaskan ke staff/Leader divisi mana pun (lintas divisi: TAP→MCN dst), termasuk dirinya.
-    if (user.role === 'leader') return allUsers.filter(u => u.id === user.id || u.role === 'operasional' || u.role === 'leader');
+    // Leader: HANYA ke bawahannya langsung (yang "Leader Pengawas"-nya dia) + dirinya.
+    // Dipakai relasi leaderId, bukan divisi — itu mekanisme yang dipakai seluruh app
+    // (absensi, KPI, laporan, cuti), dan leaderId tidak dijamin sedivisi dengan leader.
+    if (user.role === 'leader') return allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
+    // Karyawan: hanya untuk dirinya sendiri.
     return [user];
   }, [user, allUsers]);
 
@@ -5544,6 +5575,7 @@ function TasksView({ user, allUsers }) {
                 <tr>
                   <th className="text-left p-3 font-semibold">Status</th>
                   <th className="text-left p-3 font-semibold">Tugas</th>
+                  <th className="text-left p-3 font-semibold">Dari</th>
                   <th className="text-left p-3 font-semibold">PIC</th>
                   <th className="text-left p-3 font-semibold">Deadline</th>
                   <th className="text-left p-3 font-semibold">Prioritas</th>
@@ -5585,7 +5617,8 @@ function TasksView({ user, allUsers }) {
                           {t.description && <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">{t.description}</div>}
                         </button>
                       </td>
-                      <td className="p-3 text-sm text-slate-700">{t.assigneeName}</td>
+                      <td className="p-3 text-sm text-slate-500">{t.createdByName || '—'}</td>
+                      <td className="p-3 text-sm text-slate-700">{t.assigneeName || '—'}</td>
                       <td className="p-3 text-sm">
                         {t.deadline ? (
                           <div className={days < 0 && t.status !== 'done' ? 'text-red-600 font-semibold' : days <= 1 && t.status !== 'done' ? 'text-amber-700' : 'text-slate-700'}>
@@ -5651,7 +5684,14 @@ function TasksView({ user, allUsers }) {
                 </div>
 
                 <div className="flex items-center gap-2 text-xs text-slate-600 mb-3 flex-wrap">
-                  <span className="inline-flex items-center gap-1"><User className="w-3.5 h-3.5 text-slate-400" /> {t.assigneeName}</span>
+                  {/* Alur tiket dibaca sekali lihat: siapa yang memberi -> siapa yang mengerjakan.
+                      Tiket lama yang belum punya data pemberi tugas menampilkan "—". */}
+                  <span className="inline-flex items-center gap-1">
+                    <User className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="text-slate-500">Dari: {t.createdByName || '—'}</span>
+                    <ArrowRight className="w-3 h-3 text-slate-300" />
+                    <span className="font-semibold text-slate-700">PIC: {t.assigneeName || '—'}</span>
+                  </span>
                   {t.deadline && (
                     <span className={`inline-flex items-center gap-1 ${days < 0 && t.status !== 'done' ? 'text-red-600 font-semibold' : days <= 1 && t.status !== 'done' ? 'text-amber-700' : ''}`}>
                       <Clock className="w-3.5 h-3.5 text-slate-400" /> {fmtDate(t.deadline)}
@@ -5947,6 +5987,17 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Ketik untuk
 }
 
 function TaskForm({ task, user, assignableUsers, onSave, onClose }) {
+  // Saat mengedit tiket lama, PIC-nya bisa saja di luar wewenang penugasan sekarang
+  // (aturan diperketat setelah tiket itu dibuat). Kalau tidak dimasukkan ke daftar
+  // opsi, SearchableSelect menampilkan kolom KOSONG padahal PIC-nya ada — dan
+  // pengedit menyangka tiket ini belum punya PIC.
+  const opsiPic = useMemo(() => {
+    const dasar = assignableUsers;
+    if (task?.assigneeId && !dasar.some(u => u.id === task.assigneeId)) {
+      return [{ id: task.assigneeId, name: task.assigneeName || 'PIC saat ini', _luar: true }, ...dasar];
+    }
+    return dasar;
+  }, [assignableUsers, task]);
   const [form, setForm] = useState({
     title: task?.title || '',
     description: task?.description || '',
@@ -5972,7 +6023,12 @@ function TaskForm({ task, user, assignableUsers, onSave, onClose }) {
             <SearchableSelect
               value={form.assigneeId}
               onChange={(v) => setForm({ ...form, assigneeId: v })}
-              options={assignableUsers.map(m => ({ value: m.id, label: `${m.name}${DIVISIONS[m.division] ? ' · ' + DIVISIONS[m.division].label : ''} — ${displayJobTitle(m) || ROLES[m.role].label}` }))}
+              options={opsiPic.map(m => ({
+                value: m.id,
+                label: m._luar
+                  ? `${m.name} — PIC saat ini (di luar wewenang Anda)`
+                  : `${m.name}${DIVISIONS[m.division] ? ' · ' + DIVISIONS[m.division].label : ''} — ${displayJobTitle(m) || ROLES[m.role].label}`
+              }))}
               placeholder="Ketik nama / divisi untuk cari..." />
           </Field>
           <Field label="Deadline">
@@ -7984,6 +8040,16 @@ function SellersView({ user, allUsers }) {
 // ============ ABSENSI (Attendance + Lokasi GPS) ============
 // ============ KEPUASAN MITRA (seller & creator — prinsip customer satisfaction) ============
 function PartnerFeedbackView({ user }) {
+  // Gerbang akses: hanya divisi MCN & TAP, plus Owner/Manajer (canAccessFeature selalu
+  // true untuk keduanya). Ditaruh SEBELUM hook apa pun supaya non-pemilik akses tidak
+  // ikut menarik data 'partner-feedback:all' dari server.
+  if (!canAccessFeature(user, 'partner-feedback')) {
+    return <NoAccess text="Menu Kepuasan Mitra hanya untuk divisi MCN & TAP." />;
+  }
+  return <PartnerFeedbackBody user={user} />;
+}
+
+function PartnerFeedbackBody({ user }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ type: 'seller', name: '', rating: 0, note: '' });
@@ -10880,25 +10946,52 @@ function TodosView({ user, allUsers }) {
   const load = async () => setTodos(await storage.getList('todos:all'));
   useEffect(() => { load(); }, []);
 
-  // SEMUA TIM bisa lihat To-Do siapa saja (transparency). Edit permission tetap berbasis role.
-  const visibleOwners = allUsers;
+  // CAKUPAN To-Do (diperketat): To-Do itu catatan kerja pribadi, bukan papan terbuka.
+  //  - Owner & Manajer : melihat semua orang (tetap seperti sebelumnya)
+  //  - Leader          : HANYA miliknya sendiri — sengaja TIDAK melihat To-Do stafnya
+  //  - Karyawan        : HANYA miliknya sendiri
+  const isPengelola = user.role === 'owner' || user.role === 'manajer';
+  const visibleOwners = isPengelola ? allUsers : allUsers.filter(u => u.id === user.id);
+  const visibleOwnerIds = new Set(visibleOwners.map(u => u.id));
 
-  // Filter todos by owner
-  const visible = todos.filter(t => filter.owner === 'all'
+  // Dua lapis penyaringan. Lapis pertama (cakupan) TIDAK bisa dilewati lewat UI —
+  // termasuk oleh tombol "Semua Anggota" maupun nilai filter yang tertinggal di state.
+  // Catatan jujur: ini penyaringan di sisi klien; data mentah 'todos:all' tetap ikut
+  // terunduh ke browser. Untuk kerahasiaan sungguhan perlu RLS, dan itu di luar
+  // lingkup permintaan ini.
+  // Untuk pengelola: JANGAN pakai keanggotaan allUsers sebagai penyaring. To-do milik
+  // akun yang sudah dihapus (ownerId yatim) masih tersimpan dan sebelumnya tetap
+  // tampil — kalau disaring keras, data itu lenyap diam-diam dari pandangan manajemen.
+  const dalamCakupan = isPengelola ? todos : todos.filter(t => t.ownerId === user.id);
+  const visible = dalamCakupan.filter(t => filter.owner === 'all'
     ? true
     : t.ownerId === filter.owner);
 
+  // Satu sumber kebenaran izin ubah, dipakai UI DAN semua jalur tulis di bawah.
+  // Sebelumnya izin hanya dihitung di dalam render, jadi menyembunyikan tombol adalah
+  // satu-satunya penjagaan — sementara drag & drop mengirim id mentah lewat dataTransfer.
+  const bolehUbah = (todo) => !!todo && (todo.ownerId === user.id || isPengelola);
+
   const handleSave = async (data) => {
+    // Pemilik to-do dipaksa berada dalam cakupan. Tanpa ini, seorang karyawan masih
+    // bisa membuat to-do atas nama orang lain walaupun dropdown-nya sudah dipersempit.
+    const ownerId = visibleOwnerIds.has(data.ownerId) ? data.ownerId : user.id;
     let list = await storage.getList('todos:all');
     if (editing) {
-      list = list.map(t => t.id === editing.id ? { ...t, ...data, updatedAt: new Date().toISOString() } : t);
+      if (!bolehUbah(editing)) { alert('Anda tidak berwenang mengubah to-do ini.'); return; }
+      const owner = allUsers.find(u => u.id === ownerId);
+      list = list.map(t => t.id === editing.id
+        ? { ...t, ...data, ownerId, ownerName: owner?.name || t.ownerName, updatedAt: new Date().toISOString() }
+        : t);
     } else {
-      const owner = allUsers.find(u => u.id === (data.ownerId || user.id));
+      const owner = allUsers.find(u => u.id === ownerId);
       list.unshift({
         id: uid(), ...data,
-        ownerId: data.ownerId || user.id,
+        ownerId,
         ownerName: owner?.name || user.name,
         status: data.status || 'todo',
+        createdById: user.id,        // jejak pembuat (dulu tidak ada sama sekali)
+        createdByName: user.name,
         createdAt: new Date().toISOString()
       });
     }
@@ -10907,6 +11000,7 @@ function TodosView({ user, allUsers }) {
   };
 
   const handleDelete = async (todo) => {
+    if (!bolehUbah(todo)) { alert('Anda tidak berwenang menghapus to-do ini.'); return; }
     if (!confirm(`Hapus to-do "${todo.title}"?`)) return;
     const list = (await storage.getList('todos:all')).filter(t => t.id !== todo.id);
     await storage.set('todos:all', list);
@@ -10914,6 +11008,10 @@ function TodosView({ user, allUsers }) {
   };
 
   const handleStatusChange = async (todoId, newStatus) => {
+    // Dipicu juga oleh drag & drop, yang sumbernya id mentah dari dataTransfer —
+    // jadi izinnya HARUS diperiksa di sini, bukan cuma lewat atribut draggable.
+    const target = todos.find(t => t.id === todoId);
+    if (!bolehUbah(target)) return;
     const list = (await storage.getList('todos:all')).map(t =>
       t.id === todoId ? { ...t, status: newStatus, completedAt: newStatus === 'done' ? new Date().toISOString() : null } : t
     );
@@ -10947,7 +11045,7 @@ function TodosView({ user, allUsers }) {
 
   return (
     <div className="max-w-7xl">
-      <PageHeader title="To-Do Pribadi" subtitle="Catatan kerja pribadi tiap anggota — terbuka dilihat tim. Beda dengan Tiket: Tiket = penugasan resmi antar orang."
+      <PageHeader title="To-Do Pribadi" subtitle={isPengelola ? "Catatan kerja pribadi tiap anggota. Beda dengan Tiket: Tiket = penugasan resmi antar orang." : "Catatan kerja pribadi Anda — hanya Anda (dan manajemen) yang bisa melihatnya. Beda dengan Tiket: Tiket = penugasan resmi antar orang."}
         action={
           <button onClick={() => { setEditing(null); setShowForm(true); }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
@@ -10955,7 +11053,10 @@ function TodosView({ user, allUsers }) {
           </button>
         } />
 
-      {/* Owner filter */}
+      {/* Baris filter hanya ditampilkan bila memang ada orang lain yang boleh dilihat.
+          Untuk karyawan & leader, cakupannya cuma dirinya sendiri → filter tak berguna
+          dan tombol "Semua Anggota" justru menjanjikan akses yang tidak ada. */}
+      {visibleOwners.length > 1 && (
       <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4 flex items-center gap-3 flex-wrap">
         <span className="text-xs font-semibold text-slate-500 uppercase">Lihat To-Do:</span>
         <button onClick={() => setFilter({ owner: user.id })}
@@ -10987,6 +11088,7 @@ function TodosView({ user, allUsers }) {
           </span>
         )}
       </div>
+      )}
 
       {/* Kanban board */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -11011,7 +11113,7 @@ function TodosView({ user, allUsers }) {
                 grouped[key].map(todo => {
                   const days = daysUntil(todo.dueDate);
                   const isMine = todo.ownerId === user.id;
-                  const canEdit = isMine || (user.role === 'manajer' || user.role === 'owner') || (user.role === 'leader' && allUsers.find(u => u.id === todo.ownerId)?.leaderId === user.id);
+                  const canEdit = bolehUbah(todo);
                   const ownerUser = allUsers.find(u => u.id === todo.ownerId);
                   return (
                     <div key={todo.id}
@@ -13882,10 +13984,15 @@ function DivisionReviewView({ user, allUsers, setView }) {
   const inRange = (dk) => !!dk && dk >= period.start && dk <= period.end;
   const divLeaders = members.filter(m => m.role === 'leader');
 
-  // Tiket
-  const doneTasks = tasks.filter(t => t && memberIds.has(t.assigneeId) && t.status === 'done' && t.completedAt && inRange(wibDayKey(t.completedAt)))
+  // Tiket — WAJIB lewat can.canSeeTask. Tanpa ini, halaman Divisi membocorkan judul
+  // tiket seluruh anggota divisi kepada leader, padahal aturannya tiket hanya boleh
+  // dilihat pemberi tugas, PIC, dan manajemen. Bagi Owner/Manajer tidak ada yang
+  // berubah (canSeeTask selalu true untuk mereka).
+  const isPengelolaDiv = user.role === 'owner' || user.role === 'manajer';
+  const tasksTerlihat = tasks.filter(t => t && can.canSeeTask(user, t));
+  const doneTasks = tasksTerlihat.filter(t => memberIds.has(t.assigneeId) && t.status === 'done' && t.completedAt && inRange(wibDayKey(t.completedAt)))
     .sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''));
-  const activeTasks = tasks.filter(t => t && memberIds.has(t.assigneeId) && ['todo', 'in_progress', 'qc'].includes(t.status))
+  const activeTasks = tasksTerlihat.filter(t => memberIds.has(t.assigneeId) && ['todo', 'in_progress', 'qc'].includes(t.status))
     .sort((a, b) => (a.deadline || '9999').localeCompare(b.deadline || '9999'));
 
   // Laporan harian
@@ -14018,8 +14125,8 @@ function DivisionReviewView({ user, allUsers, setView }) {
       {/* Kartu ringkasan */}
       <div className={`grid grid-cols-2 sm:grid-cols-4 ${isGmvDiv ? 'lg:grid-cols-5' : ''} gap-3 mb-6`}>
         <div className="bg-white rounded-2xl border border-slate-200 p-3"><div className="text-xs font-semibold text-slate-500 uppercase">Anggota</div><div className="font-display font-bold text-3xl text-slate-800 mt-0.5">{members.length}</div></div>
-        <div className="bg-emerald-50 rounded-2xl border border-emerald-200 p-3"><div className="text-xs font-semibold text-emerald-600 uppercase">Tiket Selesai</div><div className="font-display font-bold text-3xl text-emerald-700 mt-0.5">{doneTasks.length}</div><div className="text-[10px] text-emerald-600">dalam periode</div></div>
-        <div className="bg-blue-50 rounded-2xl border border-blue-200 p-3"><div className="text-xs font-semibold text-blue-600 uppercase">Tiket Berjalan</div><div className="font-display font-bold text-3xl text-blue-700 mt-0.5">{activeTasks.length}</div><div className="text-[10px] text-blue-600">belum selesai</div></div>
+        <div className="bg-emerald-50 rounded-2xl border border-emerald-200 p-3"><div className="text-xs font-semibold text-emerald-600 uppercase">Tiket Selesai</div><div className="font-display font-bold text-3xl text-emerald-700 mt-0.5">{doneTasks.length}</div><div className="text-[10px] text-emerald-600">{isPengelolaDiv ? 'dalam periode' : 'yang boleh Anda lihat'}</div></div>
+        <div className="bg-blue-50 rounded-2xl border border-blue-200 p-3"><div className="text-xs font-semibold text-blue-600 uppercase">Tiket Berjalan</div><div className="font-display font-bold text-3xl text-blue-700 mt-0.5">{activeTasks.length}</div><div className="text-[10px] text-blue-600">{isPengelolaDiv ? 'belum selesai' : 'yang boleh Anda lihat'}</div></div>
         <div className="bg-white rounded-2xl border border-slate-200 p-3"><div className="text-xs font-semibold text-slate-500 uppercase">Laporan Harian</div><div className="font-display font-bold text-3xl text-slate-800 mt-0.5">{periodReports.length}</div><div className="text-[10px] text-slate-400">masuk dalam periode</div></div>
         {isGmvDiv && (
           <div className="col-span-2 sm:col-span-4 lg:col-span-1 bg-white rounded-2xl border border-slate-200 p-3"><div className="text-xs font-semibold text-slate-500 uppercase">GMV Periode</div><div className="font-display font-bold text-xl text-slate-800 mt-1.5">{fmtRupiah(gmvTotal)}</div></div>
@@ -14094,7 +14201,9 @@ function DivisionReviewView({ user, allUsers, setView }) {
         <SectionTitle>Sudah Dilakukan <span className="text-xs font-normal text-slate-400">({period.label || `${fmtDate(period.start)} – ${fmtDate(period.end)}`})</span></SectionTitle>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           <div className="bg-white rounded-2xl border border-slate-200 p-4">
-            <div className="text-xs font-bold text-emerald-600 uppercase tracking-wide mb-2">Tiket Selesai ({doneTasks.length})</div>
+            <div className="text-xs font-bold text-emerald-600 uppercase tracking-wide mb-2">
+              Tiket Selesai ({doneTasks.length}){!isPengelolaDiv && <span className="normal-case font-normal text-slate-400"> · hanya yang boleh Anda lihat</span>}
+            </div>
             {doneTasks.length === 0 ? <div className="text-sm text-slate-400">Belum ada tiket selesai.</div> : (
               <div className="space-y-2">
                 {doneTasks.slice(0, 8).map(t => (
@@ -14314,12 +14423,14 @@ function DivPlanFormModal({ divisionKey, members, editing, onSave, onClose }) {
   );
 }
 
-function NoAccess() {
+// `text` opsional — pemanggil lama tanpa prop tetap mendapat pesan aslinya, jadi
+// tidak ada halaman existing yang berubah pesannya.
+function NoAccess({ text = 'Halaman ini hanya untuk Manajer / Leader.' }) {
   return (
     <div className="max-w-md mx-auto mt-20 text-center">
       <Shield className="w-12 h-12 mx-auto text-slate-300 mb-3" />
       <h3 className="font-display font-bold text-slate-700">Akses Dibatasi</h3>
-      <p className="text-sm text-slate-500 mt-1">Halaman ini hanya untuk Manajer / Leader.</p>
+      <p className="text-sm text-slate-500 mt-1">{text}</p>
     </div>
   );
 }
