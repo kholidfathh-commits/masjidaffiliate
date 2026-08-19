@@ -13,7 +13,8 @@ Sistem manajemen tim internal **Al-Kahfi Corp (MCN TAP + Masjid Affiliate)**. Li
 - Repo: github.com/kholidfathh-commits/masjidaffiliate
 
 ## Stack
-- React 18 + Vite 5 + Tailwind 3, **single-file** di `src/App.jsx` (~14.400 baris — SEMUA komponen di sini) + `src/index.css`.
+- React 18 + Vite 5 + Tailwind 3. `src/App.jsx` (~14.900 baris — hampir semua komponen di sini) + `src/index.css`.
+- **Pengecualian: modul LMS ada di `src/lms/` (6 file), dimuat `React.lazy`.** App.jsx hanya menyimpan import + 3 baris rute + registry. Detail: `PANDUAN-LMS.md`. Modul di `src/lms/` TIDAK BOLEH meng-import App.jsx (circular import → layar putih); dependensi disuntik lewat `initLms()`.
 - Data: **Supabase** (tabel `kv_store`, key-value) dengan fallback localStorage. Region Tokyo. Password di-hash PBKDF2.
 - Deploy: push ke `main` → Vercel auto-deploy.
 - 4 role: owner / manajer / leader / operasional (+ flag `isSecretariat`). Divisi (struktur 2026-2029): manajemen, keuangan, mabit, mcn, tap, event (= MMC "Malam Mabit Cuan"), internal. Divisi `media` sudah dihapus — label key dinamis WAJIB via helper `divLabel()`.
@@ -24,7 +25,8 @@ Sistem manajemen tim internal **Al-Kahfi Corp (MCN TAP + Masjid Affiliate)**. Li
 3. **Setiap key data baru WAJIB masuk `BACKUP_KEYS`** (kalau tidak, data tak ikut backup).
 4. **Modul array baru per-record:** bikin loader + daftarkan di `PER_RECORD_LOADERS` & `PER_RECORD_PREFIX`.
 5. **Baca prefix per-record di kv_store WAJIB pakai `LIKE`, JANGAN range `gte/lt`.** (Collation Supabase locale-aware → baris tak ketemu di production.)
-6. **Urutan deklarasi const kritis** (single-file): `useMemo`/`const` yang mereferensikan const lain HARUS dideklarasikan SETELAHNYA. Salah urutan → TDZ → blank screen yang **tidak** ketangkap `vite build`.
+6. **Urutan deklarasi const kritis** (single-file): `useMemo`/`const` yang mereferensikan const lain HARUS dideklarasikan SETELAHNYA. Salah urutan → TDZ → blank screen yang **tidak** ketangkap `vite build`. (Catatan: `import` ES ter-hoist, jadi konstanta dari `src/lms/data.js` aman dipakai di registry baris ~470.)
+7. **File baru di `src/lms/` ditulis DULU, `App.jsx` PALING AKHIR.** Kalau App.jsx (yang sudah berisi import ke file baru) ter-commit lebih dulu, build Vercel gagal karena import menggantung.
 
 ## Verifikasi (WAJIB sebelum anggap selesai)
 - `npx vite build --outDir /tmp/dist-verif --emptyOutDir` harus lulus (rm di folder ini kadang ditolak, makanya build ke /tmp).

@@ -50,9 +50,11 @@ export function LmsStat({ label, value, sub, icon: Icon, tone = 'blue' }) {
     <LmsCard className="p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold truncate">{label}</div>
+          {/* Label dibiarkan membungkus (bukan truncate): di HP dengan grid 2 kolom,
+              "SEDANG BERJALAN" terpotong jadi "SEDANG BEL…" dan kehilangan makna. */}
+          <div className="text-[11px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">{label}</div>
           <div className="font-display font-bold text-2xl mt-1 text-slate-900">{value}</div>
-          {sub && <div className="text-[11px] text-slate-500 mt-0.5 truncate">{sub}</div>}
+          {sub && <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">{sub}</div>}
         </div>
         {Icon && (
           <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${tones[tone] || tones.blue}`}>

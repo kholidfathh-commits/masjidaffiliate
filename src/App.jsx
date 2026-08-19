@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import {
   LayoutDashboard, CheckSquare, Users, FileText, Calendar, UserCog,
@@ -12,9 +12,30 @@ import {
   Bell, Target, Award, Flame, Zap, TrendingDown, Briefcase, Sparkle,
   Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2,
   Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload, Wallet, Receipt, Scale, Building2,
-  ChevronLeft, ChevronRight, PieChart
+  ChevronLeft, ChevronRight, PieChart,
+  GraduationCap, BookOpen, ClipboardCheck // LMS (Pembelajaran)
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
+
+// ============ MODUL LMS (Pembelajaran) ============
+// data.js di-import STATIS karena loader & prefix-nya dibutuhkan saat modul ini
+// dievaluasi (didaftarkan ke PER_RECORD_LOADERS di bawah). File-nya ringan, tanpa JSX.
+// Import ES ter-hoist, jadi konstanta di bawah ini sudah siap sebelum baris registry
+// dijalankan — ini yang membuat kita TIDAK kena masalah TDZ (aturan wajib no.6).
+import {
+  initLms, LMS_BACKUP_KEYS,
+  LMS_PATH_PREFIX, LMS_COURSE_PREFIX, LMS_BODY_PREFIX, LMS_ENROLL_PREFIX,
+  LMS_PROGRESS_PREFIX, LMS_ATTEMPT_PREFIX, LMS_SUBMISSION_PREFIX,
+  LMS_VALIDATION_PREFIX, LMS_RESET_PREFIX,
+  loadLmsPaths, loadLmsCourses, loadLmsBodies, loadLmsEnrollments,
+  loadLmsProgress, loadLmsAttempts, loadLmsSubmissions, loadLmsValidations,
+  loadLmsQuizResets, autoEnrollUser, loadMyEnrollments,
+} from './lms/data.js';
+// Halaman LMS dimuat LAZY: anggota yang tidak pernah membuka menu Pembelajaran
+// tidak ikut mengunduh kodenya (bundle utama app sudah ~973 kB).
+const MyLearningView = React.lazy(() => import('./lms/MyLearning.jsx'));
+const TeamLearningView = React.lazy(() => import('./lms/TeamLearning.jsx'));
+const LearningAdminView = React.lazy(() => import('./lms/LearningAdmin.jsx'));
 
 // ============ ROLES & PERMISSIONS ============
 const ROLES = {
@@ -446,9 +467,33 @@ async function loadDivisionPlans() {
   return await storage.listByPrefix(DIVPLAN_REC_PREFIX); // throw saat koneksi gagal → pemanggil pertahankan state lama
 }
 
+// ====== LMS: suntik dependensi app ke modul pembelajaran ======
+// Dipanggil SEKALI di sini, tepat sebelum registry di bawah, karena loader LMS butuh
+// `storage`. Perhatikan `log`: logActivity adalah const yang baru dideklarasikan jauh
+// di bawah, jadi ia dibungkus arrow (dievaluasi saat dipanggil, bukan sekarang) —
+// kalau dioper langsung, hasilnya ReferenceError TDZ dan app blank.
+initLms({
+  storage,
+  putImage,
+  fetchImage,
+  log: (text, userName) => logActivity(text, userName),
+});
+
 // Daftar modul per-record (key backup logis → loader & prefix baris). Tambah modul baru di sini.
-const PER_RECORD_LOADERS = { 'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar, 'division-plans:all': loadDivisionPlans, 'img:store': loadImageStore };
-const PER_RECORD_PREFIX = { 'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX, 'division-plans:all': DIVPLAN_REC_PREFIX, 'img:store': IMG_PREFIX };
+const PER_RECORD_LOADERS = {
+  'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar, 'division-plans:all': loadDivisionPlans, 'img:store': loadImageStore,
+  // LMS (Pembelajaran)
+  'lms:paths:all': loadLmsPaths, 'lms:courses:all': loadLmsCourses, 'lms:lesson-bodies:all': loadLmsBodies,
+  'lms:enrollments:all': loadLmsEnrollments, 'lms:progress:all': loadLmsProgress, 'lms:attempts:all': loadLmsAttempts,
+  'lms:submissions:all': loadLmsSubmissions, 'lms:validations:all': loadLmsValidations, 'lms:quiz-resets:all': loadLmsQuizResets,
+};
+const PER_RECORD_PREFIX = {
+  'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX, 'division-plans:all': DIVPLAN_REC_PREFIX, 'img:store': IMG_PREFIX,
+  // LMS (Pembelajaran)
+  'lms:paths:all': LMS_PATH_PREFIX, 'lms:courses:all': LMS_COURSE_PREFIX, 'lms:lesson-bodies:all': LMS_BODY_PREFIX,
+  'lms:enrollments:all': LMS_ENROLL_PREFIX, 'lms:progress:all': LMS_PROGRESS_PREFIX, 'lms:attempts:all': LMS_ATTEMPT_PREFIX,
+  'lms:submissions:all': LMS_SUBMISSION_PREFIX, 'lms:validations:all': LMS_VALIDATION_PREFIX, 'lms:quiz-resets:all': LMS_RESET_PREFIX,
+};
 
 // ============ CRYPTO (PBKDF2 password hashing) ============
 async function hashPassword(password, salt) {
@@ -726,7 +771,8 @@ const BACKUP_KEYS = [
   'partner-feedback:all', 'swot:external', 'backup:last', 'leave-requests:all',
   'drive:auto-backup', 'backup:drive-last',
   'keuangan:cashflow', 'division-plans:all',
-  'img:store' // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
+  'img:store', // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
+  ...LMS_BACKUP_KEYS // LMS: jalur belajar, kursus, isi materi, enrollment, progres, kuis, tugas, validasi
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
@@ -737,7 +783,13 @@ const BACKUP_KEYS = [
 // statement timeout. Foto asli sudah aman & durable di Supabase Storage (CDN); yang tersisa di
 // brankas 'img:' umumnya blob lama/yatim. Backup MANUAL & Google Drive TETAP menyertakannya
 // (tak kena batas timeout DB) agar fidelitas penuh terjaga.
-const HEAVY_BACKUP_KEYS = ['img:store'];
+// 'lms:lesson-bodies:all' ikut dikecualikan dengan alasan yang sama: isi materi kursus
+// bisa membesar terus, dan auto-backup harian menulis SATU baris JSONB berisi seluruh
+// dump. Kalau baris itu melewati statement timeout, autoBackupIfDue gagal DIAM-DIAM
+// (catch di bawah) sehingga SELURUH app kehilangan snapshot harian, bukan cuma LMS.
+// Isi materi tetap ikut di backup MANUAL & Google Drive (tidak kena batas timeout DB),
+// dan data peserta yang tak tergantikan (progres, kuis, tugas) tetap masuk snapshot harian.
+const HEAVY_BACKUP_KEYS = ['img:store', 'lms:lesson-bodies:all'];
 async function buildBackupDump(byName = 'auto', { excludeHeavy = false } = {}) {
   const dump = { _meta: { app: 'Al-Kahfi Corp Team App', exportedAt: new Date().toISOString(), by: byName, version: 1 }, data: {} };
   for (const k of BACKUP_KEYS) {
@@ -1279,6 +1331,14 @@ export default function App() {
             {view === 'feedback' && <FeedbackView user={currentUser} allUsers={allUsers} />}
             {view === 'users' && <UsersView user={currentUser} allUsers={allUsers} settings={settings} onRefresh={refreshAll} />}
             {view === 'settings' && <SettingsView user={currentUser} settings={settings} onSave={async s => { await storage.set('app:settings', s); await refreshAll(); }} />}
+            {/* LMS — dimuat lazy, jadi perlu Suspense dengan penanda muat yang seragam */}
+            {(view === 'my-learning' || view === 'team-learning' || view === 'learning-admin') && (
+              <Suspense fallback={<div className="text-slate-500 text-sm py-16 text-center">Memuat halaman pembelajaran...</div>}>
+                {view === 'my-learning' && <MyLearningView user={currentUser} allUsers={allUsers} />}
+                {view === 'team-learning' && <TeamLearningView user={currentUser} allUsers={allUsers} />}
+                {view === 'learning-admin' && <LearningAdminView user={currentUser} allUsers={allUsers} settings={settings} />}
+              </Suspense>
+            )}
           </div>
         </main>
       </div>
@@ -1887,6 +1947,17 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       label: 'Keuangan',
       items: [
         { id: 'keuangan', label: 'Keuangan', icon: Wallet, show: canAccessFeature(user, 'finance') }
+      ]
+    },
+    {
+      // LMS. Sengaja TIDAK memakai canAccessFeature: DIVISION_FEATURES untuk divisi
+      // 'mabit' dan 'event' masih kosong, jadi leader kedua divisi itu tidak akan
+      // pernah melihat menunya. Gating cukup pakai role, seperti menu Anggota Tim.
+      label: 'Pembelajaran',
+      items: [
+        { id: 'my-learning', label: 'Pembelajaran Saya', icon: GraduationCap, show: true },
+        { id: 'team-learning', label: 'Pembelajaran Tim', icon: ClipboardCheck, show: user.role !== 'operasional' },
+        { id: 'learning-admin', label: 'Kelola Pembelajaran', icon: BookOpen, show: can.editAppSettings(user) }
       ]
     },
     {
@@ -4897,10 +4968,28 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
     ? allUsers.filter(u => u.division && !DIVISIONS[u.division])
     : [];
 
+  // Karyawan (role operasional) yang jabatannya masih kosong — dihitung dari daftar
+  // yang memang boleh dilihat user ini, supaya leader tidak melihat nama tim lain.
+  const noJobTitleMembers = visible.filter(u => u.role === 'operasional' && !(u.jobTitle || '').trim());
+
   const handleSave = async (data) => {
     let list = await storage.getList('users:list');
+    let subjek = null; // anggota yang baru dibuat/diubah → dipakai auto-enroll di bawah
     if (editing) {
-      list = list.map(u => u.id === editing.id ? { ...u, ...data } : u);
+      // PERBAIKAN: dulu baris ini menyebar seluruh objek form mentah ({ ...u, ...data }),
+      // sehingga (a) field password & confirmPassword yang kosong ikut tertulis ke record
+      // user setiap kali diedit, dan (b) leaderId TIDAK di-null-kan saat peran berubah
+      // dari operasional ke leader/manajer — akibatnya orang itu masih ikut terhitung
+      // sebagai anggota tim leader lamanya oleh filter `u.leaderId === user.id`.
+      const patch = {
+        name: data.name, username: data.username.toLowerCase(),
+        role: data.role, leaderId: data.role === 'operasional' ? data.leaderId : null,
+        jobTitle: data.jobTitle?.trim() || '',
+        division: data.division || 'internal',
+        phone: data.phone || '', gmail: data.gmail || '', isSecretariat: !!data.isSecretariat
+      };
+      list = list.map(u => u.id === editing.id ? { ...u, ...patch } : u);
+      subjek = list.find(u => u.id === editing.id) || null;
       await logActivity(`mengupdate data ${data.name}`, user.name);
     } else {
       const salt = genSalt();
@@ -4914,11 +5003,33 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
         joinedAt: new Date().toISOString(), createdById: user.id
       };
       list.push(newUser);
+      subjek = newUser;
       const jtLabel = data.jobTitle ? ` (${data.jobTitle})` : '';
       await logActivity(`menambah ${ROLES[data.role].label}${jtLabel} baru: ${data.name}`, user.name);
     }
     await storage.set('users:list', list);
     setShowForm(false); setEditing(null);
+    // ====== AUTO-ENROLLMENT PEMBELAJARAN ======
+    // Dijalankan SETELAH data anggota tersimpan, dan sengaja TIDAK memblokir alur ini:
+    // kalau gagal, penyimpanan anggota tetap sah dan enrollment bisa dilengkapi kapan
+    // saja lewat tombol "Jalankan Auto-Enroll Sekarang" di menu Kelola Pembelajaran.
+    // Operasinya idempoten (key enrollment = '<userId>:<pathId>'), jadi aman diulang
+    // berapa kali pun dan tidak pernah membuat enrollment ganda. Perubahan posisi hanya
+    // MENAMBAH jalur baru — enrollment lama tidak pernah dihapus agar riwayat belajar utuh.
+    if (subjek) {
+      try {
+        const [paths, sudahAda] = await Promise.all([
+          loadLmsPaths(),
+          loadMyEnrollments(subjek.id)
+        ]);
+        const hasil = await autoEnrollUser(subjek, paths, sudahAda, user);
+        if (hasil.created.length) {
+          await logActivity(`memberikan ${hasil.created.length} jalur belajar otomatis ke ${subjek.name}`, user.name);
+        }
+      } catch (e) {
+        console.warn('Auto-enroll pembelajaran ditunda:', e?.message || e);
+      }
+    }
     onRefresh();
   };
 
@@ -4957,6 +5068,19 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-2.5 mb-4 flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           <span><b>{staleDivMembers.length} anggota</b> masih di divisi lama ({staleDivMembers.map(u => u.name).join(', ')}) — ubah divisinya lewat tombol Edit.</span>
+        </div>
+      )}
+
+      {/* Jabatan kini dipakai untuk memberikan jalur belajar otomatis. Anggota lama
+          yang jabatannya masih kosong tidak akan terjangkau, jadi ditandai di sini —
+          tanpa mengubah datanya diam-diam (perubahan tetap lewat tombol Edit). */}
+      {noJobTitleMembers.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-2.5 mb-4 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            <b>{noJobTitleMembers.length} karyawan</b> belum punya Posisi / Jabatan ({noJobTitleMembers.map(u => u.name).join(', ')}).
+            Mereka <b>tidak akan menerima jalur belajar otomatis</b> yang ditargetkan per jabatan — lengkapi lewat tombol Edit.
+          </span>
         </div>
       )}
 
@@ -5055,6 +5179,9 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
       }
     }
     if (form.role === 'operasional' && !form.leaderId) return setError('Karyawan harus punya Leader.');
+    // Jabatan wajib untuk role 'operasional' saja. Owner/Manajer memang tidak memakai
+    // jabatan (jabatannya = perannya), dan Leader jabatannya diturunkan dari divisi.
+    if (form.role === 'operasional' && !form.jobTitle) return setError('Posisi / Jabatan wajib dipilih untuk karyawan.');
     onSave(form);
   };
 
@@ -5095,14 +5222,25 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
           </select>
           <div className="text-[11px] text-slate-500 mt-1">💡 Menu yang muncul untuk anggota ini menyesuaikan divisinya. Mis. hanya TAP & Manajemen yang melihat menu Seller.</div>
         </Field>
-        <Field label="Posisi / Jabatan">
-          <input type="text" value={form.jobTitle} onChange={e => setForm({ ...form, jobTitle: e.target.value })}
-            list="user-job-titles" placeholder="Pilih dari daftar atau ketik sendiri (mis. Creator Manager, Tim Ads)"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          <datalist id="user-job-titles">
-            {jobTitleOptions.map(jt => <option key={jt} value={jt} />)}
-          </datalist>
-          <div className="text-[11px] text-slate-500 mt-1">💡 Daftar posisi bisa dikelola di menu Pengaturan App. Ketik bebas kalau perlu posisi yang belum ada.</div>
+        <Field label={form.role === 'operasional' ? 'Posisi / Jabatan *' : 'Posisi / Jabatan'}>
+          {/* Diubah dari input bebas menjadi pilihan tertutup: jabatan sekarang dipakai
+              untuk menargetkan jalur belajar otomatis di modul Pembelajaran. Kalau tetap
+              ketik bebas, "Affiliator" / "affiliator" / "Afiliator" jadi tiga kelompok
+              berbeda dan auto-enrollment akan meleset diam-diam. */}
+          <select value={form.jobTitle} onChange={e => setForm({ ...form, jobTitle: e.target.value })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+            <option value="">- Pilih Posisi / Jabatan -</option>
+            {/* Jabatan lama yang sudah tidak ada di daftar tetap ditampilkan supaya
+                data anggota lama tidak diam-diam berubah saat form dibuka & disimpan. */}
+            {form.jobTitle && !jobTitleOptions.includes(form.jobTitle) && (
+              <option value={form.jobTitle}>{form.jobTitle} (tidak ada di daftar)</option>
+            )}
+            {jobTitleOptions.map(jt => <option key={jt} value={jt}>{jt}</option>)}
+          </select>
+          <div className="text-[11px] text-slate-500 mt-1">
+            💡 Daftar posisi dikelola di <b>Pengaturan App</b>. Posisi dipakai untuk memberikan
+            jalur belajar otomatis di menu <b>Pembelajaran</b>, jadi pilih yang sesuai.
+          </div>
         </Field>
         <Field label="No. WhatsApp (opsional)">
           <input type="text" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
@@ -10214,11 +10352,14 @@ function SettingsView({ user, settings, onSave }) {
   const doExport = async () => {
     setBackupBusy(true);
     try {
-      const dump = { _meta: { app: 'Al-Kahfi Corp Team App', exportedAt: new Date().toISOString(), by: user.name, version: 1 }, data: {} };
-      for (const k of BACKUP_KEYS) {
-        const v = await storage.get(k);
-        if (v !== null && v !== undefined) dump.data[k] = v;
-      }
+      // PERBAIKAN BUG: dulu blok ini membaca BACKUP_KEYS satu per satu dengan
+      // storage.get(). Untuk modul PER-RECORD (tiket, absensi, laporan harian, GMV,
+      // izin, kalender, rencana divisi, brankas foto) key logisnya sudah TIDAK ADA
+      // lagi di kv_store — sudah dihapus oleh loader migrasi — sehingga get()
+      // mengembalikan null dan modul-modul itu DIAM-DIAM tidak ikut file backup.
+      // buildBackupDump() memakai PER_RECORD_LOADERS, jadi isinya lengkap. Ini juga
+      // syarat supaya data LMS benar-benar ikut ter-backup.
+      const dump = await buildBackupDump(user.name);
       const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
