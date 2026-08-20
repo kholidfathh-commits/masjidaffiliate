@@ -14,19 +14,36 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   GraduationCap, BookOpen, PlayCircle, CheckCircle2, Clock, Award, ArrowRight, RefreshCw,
+  Library, Search, ArrowLeft, FileText, ExternalLink,
 } from 'lucide-react';
 import {
   loadLmsPaths, loadLmsCourses, loadMyEnrollments, loadMyProgress, loadMyAttempts,
-  loadMySubmissions, loadMyValidations,
+  loadMySubmissions, loadMyValidations, loadLmsLibrary, loadLibraryBody,
   buildCtx, computeCourseProgress, computePathProgress, nextLessonOf,
-  allLessons, courseTotalMinutes, syncEnrollmentStatus,
+  allLessons, courseTotalMinutes, syncEnrollmentStatus, coursePriority,
   ENROLL_STATUS, VALIDATION_STATUS,
 } from './data.js';
 import {
   LmsCard, LmsBadge, LmsStat, LmsProgressBar, LmsRing, LmsAccordion, LmsEmpty,
-  LmsSkeleton, LmsError, LmsNote, LmsPrimaryBtn, LmsGhostBtn,
+  LmsSkeleton, LmsLoading, LmsError, LmsNote, LmsPrimaryBtn, LmsGhostBtn,
+  inputCls, fmtBytes,
 } from './ui.jsx';
 import CoursePlayer from './CoursePlayer.jsx';
+import PdfReader from './PdfReader.jsx';
+
+// Halaman terakhir modul bacaan diingat di localStorage — SENGAJA tidak masuk
+// database: ini kenyamanan pribadi, bukan progres belajar, dan modul bacaan
+// memang tidak boleh punya record progress apa pun.
+const LIB_PAGE_KEY = (id) => 'lms-lib-lastpage:' + id;
+function bacaHalamanTerakhir(id) {
+  try {
+    const v = Number(window.localStorage.getItem(LIB_PAGE_KEY(id)));
+    return Number.isFinite(v) && v > 0 ? v : 1;
+  } catch { return 1; } // mode privat / storage diblokir → mulai dari halaman 1
+}
+function simpanHalamanTerakhir(id, halaman) {
+  try { window.localStorage.setItem(LIB_PAGE_KEY(id), String(halaman)); } catch { /* abaikan */ }
+}
 
 // ---------------------------------------------------------------- helper kecil
 function fmtMinutes(m) {
@@ -51,6 +68,7 @@ export default function MyLearningView({ user, allUsers }) {
   const [attempts, setAttempts] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [validations, setValidations] = useState([]);
+  const [library, setLibrary] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -58,6 +76,7 @@ export default function MyLearningView({ user, allUsers }) {
 
   const [openCourse, setOpenCourse] = useState(null);
   const [startLessonId, setStartLessonId] = useState(null);
+  const [openLibrary, setOpenLibrary] = useState(null);
 
   // Ref dipakai supaya reload() tidak perlu bergantung pada state terbaru
   // (reload dikirim ke CoursePlayer, harus stabil dan tidak basi).
@@ -96,8 +115,9 @@ export default function MyLearningView({ user, allUsers }) {
     if (isFirst) setLoading(true); else setRefreshing(true);
     setErr('');
     try {
-      // Promise.all supaya 7 pembacaan berjalan paralel, bukan berantai.
-      const [p, c, e, pr, at, sb, vl] = await Promise.all([
+      // Promise.all supaya 8 pembacaan berjalan paralel, bukan berantai.
+      // Modul bacaan: hanya METADATA-nya (isi teks & PDF dimuat on-demand per modul).
+      const [p, c, e, pr, at, sb, vl, lb] = await Promise.all([
         loadLmsPaths(),
         loadLmsCourses(),
         loadMyEnrollments(user.id),
@@ -105,12 +125,14 @@ export default function MyLearningView({ user, allUsers }) {
         loadMyAttempts(user.id),
         loadMySubmissions(user.id),
         loadMyValidations(user.id),
+        loadLmsLibrary(),
       ]);
       if (!alive.current) return;
       const P = p || [], C = c || [], E = e || [];
       setPaths(P); setCourses(C); setEnrollments(E);
       setProgress(pr || []); setAttempts(at || []);
       setSubmissions(sb || []); setValidations(vl || []);
+      setLibrary(lb || []);
       cacheRef.current = { paths: P, courses: C, enrollments: E };
       await syncStatuses(E, P, C, buildCtx({ progress: pr || [], attempts: at || [], submissions: sb || [] }, user.id));
     } catch (ex) {
@@ -234,6 +256,14 @@ export default function MyLearningView({ user, allUsers }) {
     );
   }
 
+  // Pembaca modul bacaan juga menggantikan seluruh isi halaman (bukan modal) —
+  // alasan yang sama seperti pemutar kursus: enak dibaca di layar HP.
+  if (openLibrary) {
+    // key = id modul: pembaca dipasang ulang tiap ganti modul, supaya halaman terakhir
+    // dan isi bacaannya tidak terbawa dari modul sebelumnya.
+    return <LibraryReader key={openLibrary.id} item={openLibrary} onBack={() => setOpenLibrary(null)} />;
+  }
+
   return (
     <div className="max-w-5xl">
       {/* Kepala halaman (meniru PageHeader app induk, tanpa mengimpor App.jsx) */}
@@ -281,8 +311,195 @@ export default function MyLearningView({ user, allUsers }) {
               ))}
             </div>
           )}
+
+          {/* Perpustakaan internal — di BAWAH jalur belajar karena sifatnya sunnah. */}
+          <LibrarySection modules={library} onOpen={(m) => {
+            setOpenLibrary(m);
+            if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+          }} />
         </>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// MODUL BACAAN — daftar (sifatnya SUNNAH)
+// ----------------------------------------------------------------------------
+// TANPA enrollment, TANPA progress, dan tidak pernah mempengaruhi persen jalur
+// belajar mana pun. Datanya ikut dimuat sekali bersama halaman + tombol Muat Ulang
+// yang sudah ada — tidak ada polling baru.
+// ============================================================================
+function LibrarySection({ modules, onOpen }) {
+  const [cari, setCari] = useState('');
+
+  const terbit = useMemo(
+    () => (modules || [])
+      .filter(m => m && m.status === 'published')
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [modules]
+  );
+
+  // Penyaringan di sisi KLIEN (judul + kategori) — tidak menambah pembacaan server.
+  const hasil = useMemo(() => {
+    const q = cari.trim().toLowerCase();
+    if (!q) return terbit;
+    return terbit.filter(m =>
+      String(m.title || '').toLowerCase().includes(q)
+      || String(m.category || '').toLowerCase().includes(q));
+  }, [terbit, cari]);
+
+  if (terbit.length === 0) return null;
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-end justify-between gap-3 flex-wrap mb-3 pb-3 border-b border-slate-200/60">
+        <div className="min-w-0">
+          <h2 className="font-display text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <Library className="w-5 h-5 text-slate-400" /> Modul Bacaan
+          </h2>
+          <p className="text-[13px] text-slate-500 mt-1">
+            <b>Sunnah</b> — bacaan bebas, tidak mempengaruhi progres belajar Anda.
+          </p>
+        </div>
+        <div className="relative w-full sm:w-64">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            className={inputCls + ' pl-9'}
+            value={cari}
+            onChange={e => setCari(e.target.value)}
+            placeholder="Cari judul atau kategori..."
+          />
+        </div>
+      </div>
+
+      {hasil.length === 0 ? (
+        <LmsNote tone="slate">Tidak ada modul bacaan yang cocok dengan pencarian "{cari}".</LmsNote>
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-3">
+          {hasil.map(m => (
+            <button key={m.id} type="button" onClick={() => onOpen(m)}
+              className="text-left bg-white rounded-2xl border border-slate-200/70 shadow-sm shadow-slate-200/40 p-4 hover:bg-slate-50/70 transition">
+              <div className="flex items-start gap-3">
+                <span className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                  {m.type === 'text' ? <FileText className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-slate-800 text-sm">{m.title || '(Tanpa judul)'}</span>
+                    {m.category && <LmsBadge color="bg-blue-100 text-blue-800">{m.category}</LmsBadge>}
+                  </div>
+                  {m.description && (
+                    <p className="text-[12px] text-slate-500 mt-1 leading-relaxed line-clamp-2">{m.description}</p>
+                  )}
+                  <div className="text-[11px] text-slate-400 mt-1.5">
+                    {m.type === 'text' ? 'Bacaan teks' : 'Berkas PDF'}
+                    {m.type !== 'text' && Number(m.pdfSize) > 0 ? ' · ' + fmtBytes(m.pdfSize) : ''}
+                  </div>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// MODUL BACAAN — pembaca
+// ----------------------------------------------------------------------------
+// TIDAK menulis progres apa pun ke database. Yang diingat cuma halaman terakhir,
+// dan itu pun hanya di localStorage perangkat peserta.
+// ============================================================================
+function LibraryReader({ item, onBack }) {
+  const [body, setBody] = useState('');
+  const [loading, setLoading] = useState(item.type === 'text');
+  const [errBody, setErrBody] = useState('');
+  const [nonce, setNonce] = useState(0);
+  const [halaman, setHalaman] = useState(() => bacaHalamanTerakhir(item.id));
+
+  useEffect(() => {
+    if (item.type !== 'text') return;
+    let alive = true;
+    setLoading(true); setErrBody('');
+    (async () => {
+      try {
+        const b = await loadLibraryBody(item.id, nonce > 0);
+        if (alive) setBody(b || '');
+      } catch {
+        // Gagal baca != isi kosong — pembaca harus tahu bedanya.
+        if (alive) { setBody(''); setErrBody('Isi bacaan gagal dimuat. Coba tekan "Muat Ulang Isi".'); }
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [item.id, item.type, nonce]);
+
+  const catatHalaman = (n) => {
+    setHalaman(n);
+    simpanHalamanTerakhir(item.id, n);
+  };
+
+  return (
+    <div className="max-w-4xl">
+      <div className="flex items-start gap-3 mb-5 pb-4 border-b border-slate-200/60">
+        <button type="button" onClick={onBack}
+          className="mt-1 p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition flex-shrink-0"
+          title="Kembali ke daftar bacaan">
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">{item.title}</h1>
+            {item.category && <LmsBadge color="bg-blue-100 text-blue-800">{item.category}</LmsBadge>}
+            <LmsBadge color="bg-emerald-100 text-emerald-800">Sunnah</LmsBadge>
+          </div>
+          {item.description && <p className="text-sm text-slate-500 mt-1.5">{item.description}</p>}
+        </div>
+      </div>
+
+      <LmsCard className="p-5 space-y-4">
+        {item.type === 'text' ? (
+          loading ? (
+            <LmsLoading text="Memuat isi bacaan..." />
+          ) : errBody ? (
+            <>
+              <LmsError>{errBody}</LmsError>
+              <LmsGhostBtn onClick={() => setNonce(n => n + 1)}>Muat Ulang Isi</LmsGhostBtn>
+            </>
+          ) : body ? (
+            <>
+              <div className="whitespace-pre-wrap text-slate-700 leading-relaxed">{body}</div>
+              <LmsGhostBtn onClick={() => setNonce(n => n + 1)}>Muat Ulang Isi</LmsGhostBtn>
+            </>
+          ) : (
+            <LmsNote tone="slate">Isi bacaan masih kosong. Hubungi pengelola pembelajaran.</LmsNote>
+          )
+        ) : item.pdfUrl ? (
+          <>
+            {/* Komponen yang sama dengan materi PDF di kursus — bedanya di sini
+                TIDAK ada satu pun penulisan progres. */}
+            <PdfReader url={item.pdfUrl} initialPage={halaman} onPageView={catatHalaman} />
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-[11px] text-slate-500 truncate">{item.pdfName || 'Berkas PDF'}</span>
+              <a href={item.pdfUrl} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 hover:underline">
+                <ExternalLink className="w-4 h-4" /> Buka di tab baru
+              </a>
+            </div>
+            <LmsNote tone="slate">
+              Halaman terakhir yang Anda buka diingat di perangkat ini, jadi enak dibuka bolak-balik.
+              Bacaan ini tidak dinilai dan tidak mempengaruhi progres belajar Anda.
+            </LmsNote>
+          </>
+        ) : (
+          <LmsNote tone="amber">Berkas bacaan belum tersedia. Hubungi pengelola pembelajaran.</LmsNote>
+        )}
+
+        <LmsGhostBtn icon={ArrowLeft} onClick={onBack}>Kembali ke Daftar Bacaan</LmsGhostBtn>
+      </LmsCard>
     </div>
   );
 }
@@ -427,6 +644,8 @@ function CourseRow({ course, prog, required, onOpen }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-semibold text-slate-800 text-sm">{course.title}</span>
+          {/* Kursus lama tanpa field priority otomatis tampil sebagai "Wajib". */}
+          <LmsBadge color={coursePriority(course).color}>{coursePriority(course).label}</LmsBadge>
           {course.status === 'archived' && <LmsBadge color="bg-amber-100 text-amber-800">Diarsipkan</LmsBadge>}
           {!required && <LmsBadge color="bg-slate-100 text-slate-600">Opsional</LmsBadge>}
           {prog.completed && <LmsBadge color="bg-emerald-100 text-emerald-800">Selesai</LmsBadge>}
