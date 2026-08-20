@@ -18,6 +18,9 @@ const _dep = {
   storage: null,
   putImage: async (v) => v,
   fetchImage: async (v) => v,
+  // Upload BERKAS (PDF) ke Supabase Storage. Sengaja melempar sebagai bawaan:
+  // berkas besar TIDAK BOLEH diam-diam mendarat di kv_store (kuota egress).
+  putFile: async () => { throw new Error('Upload berkas belum tersedia (initLms belum menyuntikkan putFile).'); },
   log: async () => {},
 };
 
@@ -49,6 +52,12 @@ export const LMS_VALIDATION_PREFIX = 'lms:validation:rec:';
 // Arsip riwayat kuis yang di-reset leader. Prefix TERPISAH supaya tidak pernah
 // terhitung sebagai percobaan aktif, tapi tetap ikut backup (bukan data yatim).
 export const LMS_RESET_PREFIX = 'lms:attempt-reset:rec:';
+// MODUL BACAAN (perpustakaan internal). Sifatnya SUNNAH: tanpa enrollment, tanpa
+// progress, dan tidak pernah ikut menghitung persen jalur belajar mana pun.
+// Isi teksnya dipisah ke prefix sendiri — sama alasannya dengan lms:lesson:body:,
+// supaya memuat DAFTAR modul tidak ikut menarik seluruh isinya.
+export const LMS_LIBRARY_PREFIX = 'lms:library:rec:';
+export const LMS_LIBRARY_BODY_PREFIX = 'lms:library:body:';
 
 // Key logis untuk mesin backup/restore app (dipetakan ke prefix di App.jsx).
 export const LMS_BACKUP_KEYS = [
@@ -61,6 +70,8 @@ export const LMS_BACKUP_KEYS = [
   'lms:submissions:all',
   'lms:validations:all',
   'lms:quiz-resets:all',
+  'lms:library:all',
+  'lms:library-bodies:all',
 ];
 
 // ---------- ID ----------
@@ -76,6 +87,27 @@ export const COURSE_STATUS = {
   published: { label: 'Terbit', color: 'bg-emerald-100 text-emerald-800' },
   archived: { label: 'Diarsipkan', color: 'bg-amber-100 text-amber-800' },
 };
+
+// ---------- PRIORITAS KURSUS (Wajib / Sunnah / Mubah) ----------
+// Ini METADATA TAMPILAN + nilai bawaan saja. Mesin progress TIDAK melihatnya:
+// yang menentukan persen tetap field `required` pada materi & entry jalur belajar.
+export const COURSE_PRIORITY = {
+  wajib:  { label: 'Wajib',  color: 'bg-blue-100 text-blue-800',       desc: 'Harus diselesaikan (onboarding)' },
+  sunnah: { label: 'Sunnah', color: 'bg-emerald-100 text-emerald-800', desc: 'Sangat dianjurkan' },
+  mubah:  { label: 'Mubah',  color: 'bg-slate-100 text-slate-700',     desc: 'Boleh dipelajari bila perlu' },
+};
+
+/**
+ * Prioritas satu kursus, dengan KOMPATIBILITAS MUNDUR:
+ * kursus lama yang belum punya field `priority` dianggap 'wajib' di semua tampilan.
+ * Sengaja TANPA migrasi data — cukup fallback saat membaca.
+ * @returns {{key: string, label: string, color: string, desc: string}}
+ */
+export function coursePriority(course) {
+  const key = (course && COURSE_PRIORITY[course.priority]) ? course.priority : 'wajib';
+  return { key, ...COURSE_PRIORITY[key] };
+}
+
 export const ENROLL_STATUS = {
   NOT_STARTED: { label: 'Belum Mulai', color: 'bg-slate-100 text-slate-700' },
   IN_PROGRESS: { label: 'Sedang Belajar', color: 'bg-blue-100 text-blue-800' },
@@ -95,6 +127,7 @@ export const VALIDATION_STATUS = {
 };
 export const LESSON_TYPES = {
   text: { label: 'Materi Teks', icon: 'FileText' },
+  pdf: { label: 'Bacaan PDF', icon: 'FileText' },
   video: { label: 'Video', icon: 'PlayCircle' },
   document: { label: 'Dokumen / Link', icon: 'Link2' },
   quiz: { label: 'Kuis', icon: 'ListChecks' },
@@ -159,6 +192,8 @@ export async function loadLmsAttempts() { return await st().listByPrefix(LMS_ATT
 export async function loadLmsSubmissions() { return await st().listByPrefix(LMS_SUBMISSION_PREFIX); }
 export async function loadLmsValidations() { return await st().listByPrefix(LMS_VALIDATION_PREFIX); }
 export async function loadLmsQuizResets() { return await st().listByPrefix(LMS_RESET_PREFIX); }
+export async function loadLmsLibrary() { return await st().listByPrefix(LMS_LIBRARY_PREFIX); }
+export async function loadLmsLibraryBodies() { return await st().listByPrefix(LMS_LIBRARY_BODY_PREFIX); }
 
 // --- Pembacaan HEMAT EGRESS: hanya milik satu peserta ---
 // Karena key progres/enrollment berbentuk '<prefix><userId>:<...>', peserta cukup
@@ -170,38 +205,55 @@ export async function loadMyAttempts(userId) { return await st().listByPrefix(LM
 export async function loadMySubmissions(userId) { return await st().listByPrefix(LMS_SUBMISSION_PREFIX + userId + ':'); }
 export async function loadMyValidations(userId) { return await st().listByPrefix(LMS_VALIDATION_PREFIX + userId + ':'); }
 
-// --- Isi materi dimuat ON-DEMAND + cache per sesi (meniru brankas gambar app) ---
-const _bodyCache = new Map();
-const _bodyPending = new Map();
+// --- "Isi panjang" dimuat ON-DEMAND + cache per sesi (meniru brankas gambar app) ---
 /**
- * PENTING: fungsi ini MELEMPAR error saat pembacaan gagal (tidak mengembalikan '').
+ * Pabrik penyimpan isi panjang. Dipakai dua kali: isi materi kursus
+ * (lms:lesson:body:) dan isi modul bacaan (lms:library:body:). Keduanya ditaruh di
+ * record terpisah supaya memuat DAFTAR tidak ikut menarik seluruh isinya.
+ *
+ * PENTING: pembacanya MELEMPAR error saat gagal (tidak mengembalikan '').
  * Kalau kegagalan koneksi ditelan jadi string kosong, dua hal buruk terjadi:
- *  - peserta melihat "materi kosong" padahal materinya ada (pesan menyesatkan);
- *  - editor kursus memuat kosong lalu MENIMPA materi asli dengan kosong saat disimpan.
- * @param {boolean} force - abaikan cache (dipakai tombol "Muat Ulang Materi")
+ *  - pembaca melihat "materi kosong" padahal materinya ada (pesan menyesatkan);
+ *  - editor memuat kosong lalu MENIMPA isi asli dengan kosong saat disimpan.
  */
-export async function loadLessonBody(lessonId, force = false) {
-  if (!lessonId) return '';
-  if (force) { _bodyCache.delete(lessonId); _bodyPending.delete(lessonId); }
-  if (_bodyCache.has(lessonId)) return _bodyCache.get(lessonId);
-  if (_bodyPending.has(lessonId)) return _bodyPending.get(lessonId);
-  const p = st().get(LMS_BODY_PREFIX + lessonId)
-    .then(v => {
-      const s = (v && typeof v === 'object') ? (v.body || '') : (typeof v === 'string' ? v : '');
-      _bodyCache.set(lessonId, s);
-      _bodyPending.delete(lessonId);
-      return s;
-    })
-    .catch(err => { _bodyPending.delete(lessonId); throw err; });
-  _bodyPending.set(lessonId, p);
-  return p;
+function makeBodyStore(prefix, pesanGagalSimpan) {
+  const cache = new Map();
+  const pending = new Map();
+  return {
+    /** @param {boolean} force - abaikan cache (dipakai tombol "Muat Ulang Materi") */
+    async load(id, force = false) {
+      if (!id) return '';
+      if (force) { cache.delete(id); pending.delete(id); }
+      if (cache.has(id)) return cache.get(id);
+      if (pending.has(id)) return pending.get(id);
+      const p = st().get(prefix + id)
+        .then(v => {
+          const s = (v && typeof v === 'object') ? (v.body || '') : (typeof v === 'string' ? v : '');
+          cache.set(id, s);
+          pending.delete(id);
+          return s;
+        })
+        .catch(err => { pending.delete(id); throw err; });
+      pending.set(id, p);
+      return p;
+    },
+    async save(id, body) {
+      const ok = await st().set(prefix + id, { id, body: body || '' });
+      if (!ok) throw new Error(pesanGagalSimpan);
+      cache.set(id, body || '');
+      return true;
+    },
+    forget(id) { cache.delete(id); pending.delete(id); },
+  };
 }
-export async function saveLessonBody(lessonId, body) {
-  const ok = await st().set(LMS_BODY_PREFIX + lessonId, { id: lessonId, body: body || '' });
-  if (!ok) throw new Error('Gagal menyimpan isi materi ke server.');
-  _bodyCache.set(lessonId, body || '');
-  return true;
-}
+
+const _lessonBodies = makeBodyStore(LMS_BODY_PREFIX, 'Gagal menyimpan isi materi ke server.');
+export const loadLessonBody = (lessonId, force = false) => _lessonBodies.load(lessonId, force);
+export const saveLessonBody = (lessonId, body) => _lessonBodies.save(lessonId, body);
+
+const _libraryBodies = makeBodyStore(LMS_LIBRARY_BODY_PREFIX, 'Gagal menyimpan isi modul bacaan ke server.');
+export const loadLibraryBody = (id, force = false) => _libraryBodies.load(id, force);
+export const saveLibraryBody = (id, body) => _libraryBodies.save(id, body);
 
 // ============================================================================
 // TULIS (1 record = 1 baris). Selalu periksa nilai balik set() — storage.set
@@ -224,6 +276,15 @@ export const saveValidation = (rec) => putRec(LMS_VALIDATION_PREFIX, rec);
 
 export const deletePath = (id) => st().delete(LMS_PATH_PREFIX + id);
 export const deleteCourse = (id) => st().delete(LMS_COURSE_PREFIX + id);
+// Modul bacaan: record & isinya dihapus TERPISAH (dua baris kv_store).
+export const saveLibrary = (rec) => putRec(LMS_LIBRARY_PREFIX, rec);
+export const getLibrary = (id) => st().get(LMS_LIBRARY_PREFIX + id);
+export const deleteLibrary = (id) => st().delete(LMS_LIBRARY_PREFIX + id);
+export async function deleteLibraryBody(id) {
+  const ok = await st().delete(LMS_LIBRARY_BODY_PREFIX + id);
+  _libraryBodies.forget(id);
+  return ok;
+}
 
 // Baca satu record dari server. Dipakai course/path builder untuk mengambil status
 // TERBARU sebelum menyimpan, supaya form yang sudah lama terbuka tidak mengembalikan
@@ -236,6 +297,12 @@ export async function lmsLog(text, userName) {
 }
 export const lmsPutImage = (b64) => _dep.putImage(b64);
 export const lmsFetchImage = (ref) => _dep.fetchImage(ref);
+/**
+ * Unggah satu Blob/File (dipakai materi PDF & modul bacaan) → URL publik Storage.
+ * TIDAK punya fallback ke database: PDF terlalu besar untuk kv_store, dan menyimpannya
+ * di sana persis cara project ini dulu kena batas kuota egress.
+ */
+export const lmsPutFile = (blob, opts) => _dep.putFile(blob, opts);
 
 // ============================================================================
 // KUNCI KOMPOSIT DETERMINISTIK
@@ -247,6 +314,49 @@ export const progressId = (userId, lessonId) => `${userId}:${lessonId}`;
 export const submissionId = (userId, lessonId) => `${userId}:${lessonId}`;
 export const validationId = (userId, pathId) => `${userId}:${pathId}`;
 export const attemptId = (userId, lessonId, n) => `${userId}:${lessonId}:${String(n).padStart(3, '0')}`;
+
+// ============================================================================
+// LINK VIDEO — apakah ini YouTube?
+// ----------------------------------------------------------------------------
+// Kalau YA, materi video diputar DI DALAM aplikasi (IFrame API) supaya persen
+// tontonan bisa dicatat. Kalau BUKAN (mis. Google Drive), perilaku lama tetap:
+// tombol yang membuka tab baru, tanpa pelacakan. Logika murni ditaruh di sini
+// supaya ikut terjaga uji-lms.mjs.
+// ============================================================================
+const _ytClean = (id) => (/^[A-Za-z0-9_-]{6,}$/.test(id || '') ? id : '');
+
+/**
+ * Normalkan link yang ditempel admin jadi URL absolut.
+ * Tanpa ini, link tanpa skema ('youtu.be/xxxx') bukan cuma gagal dikenali —
+ * href-nya juga jadi tautan RELATIF yang menyesatkan di dalam app.
+ * @returns {string} URL absolut, atau '' kalau memang bukan link.
+ */
+export function normalizeUrl(url) {
+  const s = String(url || '').trim();
+  if (!s) return '';
+  try { return new URL(s).href; } catch { /* coba lagi dengan skema */ }
+  if (/^[\w.-]+\.[a-z]{2,}(\/|$|\?)/i.test(s)) {
+    try { return new URL('https://' + s).href; } catch { return ''; }
+  }
+  return '';
+}
+
+/** @returns {string} id video YouTube, atau '' bila bukan link YouTube. */
+export function youtubeId(url) {
+  const s = normalizeUrl(url);
+  if (!s) return '';
+  let u;
+  try { u = new URL(s); } catch { return ''; }
+  const host = u.hostname.replace(/^www\./, '').toLowerCase();
+  const isYt = host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com'
+    || host === 'youtube-nocookie.com' || host === 'youtu.be';
+  if (!isYt) return '';
+  if (host === 'youtu.be') return _ytClean(u.pathname.slice(1).split('/')[0]);
+  const v = u.searchParams.get('v');
+  if (v) return _ytClean(v);                                          // /watch?v=ID
+  const m = u.pathname.match(/^\/(embed|shorts|v|live)\/([^/?#]+)/);   // /embed/ /shorts/ /v/ /live/
+  return m ? _ytClean(m[2]) : '';
+}
 
 // ============================================================================
 // HELPER STRUKTUR KURSUS
@@ -281,12 +391,40 @@ export function courseTotalMinutes(course) {
 // Lesson opsional TIDAK menghambat penyelesaian.
 //
 // Sebuah lesson dianggap selesai bila:
-//   text/video/document → ada record progress
-//   quiz               → ada attempt yang LULUS
-//   assignment         → submission berstatus APPROVED
+//   text/pdf/video/document → ada record progress yang berstatus SELESAI
+//   quiz                    → ada attempt yang LULUS
+//   assignment              → submission berstatus APPROVED
 // Tidak ada nilai progress yang disimpan ganda: semuanya dihitung dari
 // sumber kebenaran (progress / attempts / submissions).
 // ============================================================================
+
+/**
+ * KONTRAK "SELESAI" PADA RECORD PROGRESS — jantung kompatibilitas mundur.
+ *
+ * Dulu artinya sederhana: "ada record progress" = materi SELESAI. Sejak materi PDF
+ * dan video YouTube bisa menyimpan progres PARSIAL (mis. baru dibaca 40%), satu record
+ * yang sama dipakai untuk dua arti. Aturan yang dipegang:
+ *   - Record LAMA (tidak punya field `done` sama sekali) → tetap dianggap SELESAI.
+ *     Progres peserta yang sudah ada TIDAK BOLEH rusak hanya karena formatnya berkembang.
+ *   - Record BARU → selesai HANYA bila done === true.
+ * isLessonDone() tidak perlu tahu bedanya: penyaringan terjadi saat progressSet dibangun
+ * di buildCtx(). Halaman yang menyusun progressSet sendiri WAJIB memakai fungsi ini juga.
+ */
+export function isProgressDone(rec) {
+  if (!rec || typeof rec !== 'object') return false;
+  return rec.done === undefined ? true : rec.done === true;
+}
+
+/**
+ * Persen baca/tonton yang tersimpan (0–100).
+ * Record lama tidak punya field `percent` → 100 bila selesai, 0 bila tidak.
+ */
+export function progressPercent(rec) {
+  if (!rec) return 0;
+  const p = Number(rec.percent);
+  if (Number.isFinite(p)) return Math.max(0, Math.min(100, Math.round(p)));
+  return isProgressDone(rec) ? 100 : 0;
+}
 export function isLessonDone(lesson, ctx) {
   if (!lesson) return false;
   const { progressSet, attemptsByLesson, submissionsByLesson } = ctx;
@@ -369,7 +507,9 @@ export function buildCtx({ progress = [], attempts = [], submissions = [] }, use
   const pr = userId ? progress.filter(p => p.userId === userId) : progress;
   const at = userId ? attempts.filter(a => a.userId === userId) : attempts;
   const sb = userId ? submissions.filter(s => s.userId === userId) : submissions;
-  const progressSet = new Set(pr.map(p => p.lessonId));
+  // Hanya record yang BENAR-BENAR selesai yang masuk progressSet — record parsial
+  // (PDF baru dibaca separuh / video baru ditonton 40%) tidak boleh dihitung selesai.
+  const progressSet = new Set(pr.filter(p => isProgressDone(p)).map(p => p.lessonId));
   const attemptsByLesson = new Map();
   at.forEach(a => {
     if (!attemptsByLesson.has(a.lessonId)) attemptsByLesson.set(a.lessonId, []);
