@@ -11,26 +11,36 @@
 //    untuk diedit, bukan ikut record kursus.
 // ============================================================================
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   BookOpen, Route, Users, BarChart3, Plus, Edit2, Trash2, ArrowUp, ArrowDown,
-  Send, Archive, AlertCircle, CheckCircle2, Sparkles,
+  Send, Archive, AlertCircle, CheckCircle2, Sparkles, Upload, FileText, Library,
 } from 'lucide-react';
 import {
   isLmsAdmin, lmsUid, lmsLog,
-  COURSE_STATUS, LESSON_TYPES, QUESTION_TYPES,
+  COURSE_STATUS, COURSE_PRIORITY, coursePriority, LESSON_TYPES, QUESTION_TYPES,
   loadLmsPaths, loadLmsCourses, loadLmsEnrollments, loadLmsProgress,
-  loadLmsAttempts, loadLmsSubmissions,
+  loadLmsAttempts, loadLmsSubmissions, loadLmsLibrary,
   savePath, saveCourse, getCourse, getPath, deleteCourse, deletePath,
-  loadLessonBody, saveLessonBody, sealQuestion,
+  saveLibrary, getLibrary, deleteLibrary, deleteLibraryBody,
+  loadLibraryBody, saveLibraryBody,
+  loadLessonBody, saveLessonBody, sealQuestion, lmsPutFile, isProgressDone,
   allLessons, courseTotalMinutes, computePathProgress,
   autoEnrollUser, manualEnroll,
 } from './data.js';
 import {
   LmsCard, LmsBadge, LmsStat, LmsProgressBar, LmsRing, LmsTabs, LmsEmpty,
   LmsNoAccess, LmsLoading, LmsSkeleton, LmsModal, LmsField, LmsActions,
-  LmsError, LmsNote, LmsPrimaryBtn, LmsGhostBtn, inputCls, selectCls,
+  LmsError, LmsNote, LmsPrimaryBtn, LmsGhostBtn, inputCls, selectCls, fmtBytes,
 } from './ui.jsx';
+
+// Batas ukuran PDF (materi kursus & modul bacaan). Storage Supabase punya batasnya
+// sendiri; angka ini supaya peserta tidak dipaksa mengunduh berkas raksasa lewat HP.
+const MAX_PDF_MB = 20;
+
+// Tipe materi yang punya "isi materi"/catatan pendamping di record terpisah
+// (lms:lesson:body:<lessonId>). Kuis & tugas praktik tidak punya.
+const BODY_TYPES = ['text', 'pdf', 'video', 'document'];
 
 // ---------------------------------------------------------------- Konstanta
 const DIVISION_OPTIONS = [
@@ -94,9 +104,11 @@ function LearningAdminBody({ user, allUsers, settings }) {
   const [progress, setProgress] = useState([]);
   const [attempts, setAttempts] = useState([]);
   const [submissions, setSubmissions] = useState([]);
+  const [library, setLibrary] = useState([]);
 
   const [courseModal, setCourseModal] = useState(null);   // { initial } | null
   const [pathModal, setPathModal] = useState(null);       // { initial } | null
+  const [libraryModal, setLibraryModal] = useState(null); // { initial } | null
   const [assignFor, setAssignFor] = useState(null);       // karyawan
   const [banner, setBanner] = useState('');               // pesan sukses ringkas
   const [actionErr, setActionErr] = useState('');
@@ -111,9 +123,11 @@ function LearningAdminBody({ user, allUsers, settings }) {
     setLoading(true);
     setLoadErr('');
     try {
-      const [p, c, e, pr, at, sb] = await Promise.all([
+      // Modul bacaan ikut di sini: metadata-nya ringan (isi teks & PDF-nya TIDAK
+      // ikut tertarik — masing-masing di record/Storage terpisah, dimuat on-demand).
+      const [p, c, e, pr, at, sb, lb] = await Promise.all([
         loadLmsPaths(), loadLmsCourses(), loadLmsEnrollments(),
-        loadLmsProgress(), loadLmsAttempts(), loadLmsSubmissions(),
+        loadLmsProgress(), loadLmsAttempts(), loadLmsSubmissions(), loadLmsLibrary(),
       ]);
       setPaths(Array.isArray(p) ? p : []);
       setCourses(Array.isArray(c) ? c : []);
@@ -121,6 +135,7 @@ function LearningAdminBody({ user, allUsers, settings }) {
       setProgress(Array.isArray(pr) ? pr : []);
       setAttempts(Array.isArray(at) ? at : []);
       setSubmissions(Array.isArray(sb) ? sb : []);
+      setLibrary(Array.isArray(lb) ? lb : []);
     } catch (err) {
       setLoadErr('Gagal memuat data pembelajaran: ' + (err?.message || err) + '. Coba muat ulang saat koneksi stabil.');
     } finally {
@@ -145,6 +160,10 @@ function LearningAdminBody({ user, allUsers, settings }) {
     try { setEnrollments(await loadLmsEnrollments() || []); }
     catch (e) { setActionErr('Gagal menyegarkan daftar peserta: ' + (e?.message || e)); }
   }, []);
+  const reloadLibrary = useCallback(async () => {
+    try { setLibrary(await loadLmsLibrary() || []); }
+    catch (e) { setActionErr('Gagal menyegarkan daftar modul bacaan: ' + (e?.message || e)); }
+  }, []);
 
   // --- Turunan data -----------------------------------------------------
   const coursesById = useMemo(() => new Map(courses.map(c => [c.id, c])), [courses]);
@@ -164,7 +183,10 @@ function LearningAdminBody({ user, allUsers, settings }) {
       if (!map.has(id)) map.set(id, { progressSet: new Set(), attemptsByLesson: new Map(), submissionsByLesson: new Map() });
       return map.get(id);
     };
-    progress.forEach(p => { if (p?.userId) ensure(p.userId).progressSet.add(p.lessonId); });
+    // Hanya record yang SELESAI yang masuk progressSet — sejak materi PDF/video bisa
+    // menyimpan progres parsial, "ada record" tidak lagi otomatis berarti "selesai".
+    // Aturannya SATU sumber: isProgressDone() di data.js (record lama tanpa `done` = selesai).
+    progress.forEach(p => { if (p?.userId && isProgressDone(p)) ensure(p.userId).progressSet.add(p.lessonId); });
     attempts.forEach(a => {
       if (!a?.userId) return;
       const c = ensure(a.userId);
@@ -312,11 +334,77 @@ function LearningAdminBody({ user, allUsers, settings }) {
     }
   };
 
+  // --- Aksi modul bacaan ------------------------------------------------
+  const setLibraryStatus = async (item, status, logText) => {
+    try {
+      await saveLibrary({ ...item, status, updatedAt: new Date().toISOString() });
+      await lmsLog(logText, user.name);
+      flash('Perubahan tersimpan.');
+      reloadLibrary();
+    } catch (err) {
+      setActionErr('Gagal mengubah status modul bacaan: ' + (err?.message || err) + '. Data lama tidak berubah.');
+    }
+  };
+
+  const removeLibrary = async (item) => {
+    if (!window.confirm('Hapus modul bacaan "' + (item.title || 'tanpa judul') + '" beserta isinya? Tindakan ini tidak bisa dibatalkan.')) return;
+    try {
+      const ok = await deleteLibrary(item.id);
+      if (ok === false) throw new Error('server menolak permintaan hapus');
+    } catch (err) {
+      setActionErr('Gagal menghapus modul bacaan: ' + (err?.message || err) + '. Data lama tidak berubah.');
+      return;
+    }
+    // Isi teksnya baris terpisah. SELALU dicoba hapus — bukan hanya untuk tipe 'text' —
+    // karena modul yang pernah bertipe teks lalu diubah jadi PDF tetap meninggalkan
+    // barisnya, dan baris yatim itu ikut terbawa backup selamanya.
+    let sisaIsi = false;
+    try { sisaIsi = (await deleteLibraryBody(item.id)) === false; }
+    catch { sisaIsi = true; }
+    try { await lmsLog('menghapus modul bacaan "' + item.title + '"', user.name); } catch { /* abaikan */ }
+    if (sisaIsi) {
+      setActionErr('Modul bacaan "' + item.title + '" SUDAH dihapus, tetapi baris isinya gagal dihapus. Coba hapus ulang saat koneksi stabil supaya tidak ada sisa data.');
+    } else {
+      flash('Modul bacaan dihapus.');
+    }
+    reloadLibrary();
+  };
+
+  /**
+   * Tukar urutan dua modul yang bersebelahan.
+   * Yang ditulis adalah POSISI BARU hasil penukaran, bukan indeks mentah ke record
+   * lama: menulis indeks apa adanya bisa bertabrakan dengan nilai `order` milik modul
+   * lain (mis. setelah modul pertama dihapus, order tersisa 1,2,3) sehingga muncul
+   * order kembar dan urutannya jadi tak menentu. Hanya record yang nilainya BERUBAH
+   * yang ditulis, jadi biasanya tetap 2 penulisan — sekaligus merapikan order kembar
+   * yang mungkin sudah terlanjur ada.
+   */
+  const moveLibrary = async (item, dir) => {
+    const urut = [...library].sort((a, b) => (num(a.order, 0) - num(b.order, 0)));
+    const i = urut.findIndex(x => x.id === item.id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= urut.length) return;
+    const baru = [...urut];
+    baru[i] = urut[j];
+    baru[j] = urut[i];
+    const now = new Date().toISOString();
+    try {
+      for (let k = 0; k < baru.length; k++) {
+        if (num(baru[k].order, -1) === k) continue;      // sudah benar → tidak perlu ditulis
+        await saveLibrary({ ...baru[k], order: k, updatedAt: now });
+      }
+      reloadLibrary();
+    } catch (err) {
+      setActionErr('Gagal mengubah urutan modul bacaan: ' + (err?.message || err) + '. Coba muat ulang data.');
+    }
+  };
+
   const tabs = [
     { id: 'ringkasan', label: 'Ringkasan', icon: BarChart3 },
     { id: 'kursus', label: 'Kursus', icon: BookOpen, count: courses.length },
     { id: 'jalur', label: 'Jalur Belajar', icon: Route, count: paths.length },
     { id: 'peserta', label: 'Peserta', icon: Users, count: people.length },
+    { id: 'bacaan', label: 'Modul Bacaan', icon: Library, count: library.length },
   ];
 
   return (
@@ -400,6 +488,19 @@ function LearningAdminBody({ user, allUsers, settings }) {
               onError={(msg) => setActionErr(msg)}
             />
           )}
+
+          {tab === 'bacaan' && (
+            <BacaanTab
+              modules={library}
+              onNew={() => setLibraryModal({ initial: null })}
+              onEdit={(m) => setLibraryModal({ initial: m })}
+              onToggleStatus={(m) => m.status === 'published'
+                ? setLibraryStatus(m, 'draft', 'menjadikan modul bacaan "' + m.title + '" draft')
+                : setLibraryStatus(m, 'published', 'menerbitkan modul bacaan "' + m.title + '"')}
+              onMove={moveLibrary}
+              onDelete={removeLibrary}
+            />
+          )}
         </>
       )}
 
@@ -421,6 +522,16 @@ function LearningAdminBody({ user, allUsers, settings }) {
           jobTitles={jobTitles}
           onClose={() => setPathModal(null)}
           onSaved={(msg) => { setPathModal(null); flash(msg); reloadPaths(); }}
+        />
+      )}
+
+      {libraryModal && (
+        <LibraryBuilder
+          initial={libraryModal.initial}
+          user={user}
+          nextOrder={library.reduce((m, x) => Math.max(m, num(x.order, 0) + 1), 0)}
+          onClose={() => setLibraryModal(null)}
+          onSaved={(msg) => { setLibraryModal(null); flash(msg); reloadLibrary(); }}
         />
       )}
 
@@ -532,6 +643,8 @@ function KursusTab({ courses, usedCourseIds, onNew, onEdit, onToggleStatus, onAr
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-display font-bold text-slate-900 truncate">{c.title || '(Tanpa judul)'}</h3>
                       <LmsBadge color={st.color}>{st.label}</LmsBadge>
+                      {/* Kursus lama tanpa field priority otomatis tampil sebagai "Wajib". */}
+                      <LmsBadge color={coursePriority(c).color}>{coursePriority(c).label}</LmsBadge>
                     </div>
                     {c.description && <p className="text-[12px] text-slate-500 mt-1 line-clamp-2">{c.description}</p>}
                     <div className="text-[11px] text-slate-500 mt-2 flex items-center gap-3 flex-wrap">
@@ -587,6 +700,7 @@ function newCourse() {
     title: '',
     description: '',
     status: 'draft',
+    priority: 'wajib',
     estimatedMinutes: 0,
     passingScore: 70,
     modules: [],
@@ -658,7 +772,7 @@ function CourseBuilder({ initial, user, onClose, onSaved }) {
     }));
     // Kalau isi materi tadi GAGAL dimuat, JANGAN ikut disimpan — biarkan materi lama
     // di server apa adanya daripada menimpanya dengan kosong.
-    if ((lesson.type === 'text' || lesson.type === 'video' || lesson.type === 'document') && !editor?.bodyFailed) {
+    if (BODY_TYPES.includes(lesson.type) && !editor?.bodyFailed) {
       setPendingBodies(p => ({ ...p, [lesson.id]: body || '' }));
     }
     setEditor(null);
@@ -672,6 +786,8 @@ function CourseBuilder({ initial, user, onClose, onSaved }) {
       ...form,
       title: form.title.trim(),
       description: (form.description || '').trim(),
+      // Nilai asing/kosong dinormalkan ke 'wajib' supaya tampilan tidak pernah kosong.
+      priority: coursePriority(form).key,
       estimatedMinutes: num(form.estimatedMinutes),
       passingScore: Math.max(0, Math.min(100, num(form.passingScore, 70))),
       modules: renumber(form.modules || []).map(m => ({ ...m, lessons: renumber(m.lessons || []) })),
@@ -744,6 +860,37 @@ function CourseBuilder({ initial, user, onClose, onSaved }) {
                 <textarea className={inputCls} rows={2} value={form.description || ''}
                   onChange={e => setForm({ ...form, description: e.target.value })}
                   placeholder="Jelaskan singkat apa yang dipelajari di kursus ini" />
+              </LmsField>
+            </div>
+            <div className="sm:col-span-2">
+              <LmsField
+                label="Prioritas Kursus"
+                hint="Label ini menentukan nilai bawaan kotak 'Wajib' saat kursus dimasukkan ke jalur belajar. Perhitungan progres TIDAK berubah — tetap dari materi wajib."
+              >
+                <div className="grid sm:grid-cols-3 gap-2">
+                  {Object.entries(COURSE_PRIORITY).map(([k, v]) => {
+                    const on = coursePriority(form).key === k;
+                    return (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setForm({ ...form, priority: k })}
+                        className={`text-left rounded-xl border px-3 py-2.5 transition ${
+                          on ? 'border-blue-300 bg-blue-50/70' : 'border-slate-200 bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="w-3.5 h-3.5 rounded-full flex-shrink-0 border-2"
+                            style={on
+                              ? { backgroundColor: '#2563EB', borderColor: '#2563EB', boxShadow: 'inset 0 0 0 2px #ffffff' }
+                              : { borderColor: '#CBD5E1' }} />
+                          <LmsBadge color={v.color}>{v.label}</LmsBadge>
+                        </span>
+                        <span className="block text-[11px] text-slate-500 mt-1.5 leading-snug">{v.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </LmsField>
             </div>
             <LmsField label="Estimasi Menit" hint="Boleh dikosongkan (0) — sistem juga menghitung dari total materi.">
@@ -852,9 +999,36 @@ function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onC
   const [lesson, setLesson] = useState(() => deepCopy(initialLesson));
   const [body, setBody] = useState(initialBody || '');
   const [err, setErr] = useState('');
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfErr, setPdfErr] = useState('');
+  const pdfRef = useRef(null);
 
   // Isi materi baru selesai dimuat setelah editor dibuka → sinkronkan sekali.
   useEffect(() => { setBody(initialBody || ''); }, [initialBody]);
+
+  /**
+   * Unggah PDF. Berkas langsung naik ke Storage saat dipilih (bukan saat Simpan),
+   * supaya admin bisa melihat hasilnya. Konsekuensi jujurnya: kalau modal ditutup
+   * tanpa menyimpan, berkas tadi jadi objek yatim di Storage — sama seperti lampiran
+   * gambar pada tugas praktik, dan jauh lebih murah daripada menahan 20 MB di memori.
+   */
+  const pilihPdf = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (pdfRef.current) pdfRef.current.value = '';
+    if (!file) return;
+    setPdfErr('');
+    if (file.type !== 'application/pdf') { setPdfErr('Berkas harus PDF.'); return; }
+    if (file.size > MAX_PDF_MB * 1024 * 1024) { setPdfErr('Ukuran PDF maksimal ' + MAX_PDF_MB + ' MB.'); return; }
+    setPdfBusy(true);
+    try {
+      const url = await lmsPutFile(file, { folder: 'lms-pdf/', contentType: 'application/pdf' });
+      setLesson(l => ({ ...l, pdfUrl: url, pdfName: file.name, pdfSize: file.size }));
+    } catch (ex) {
+      setPdfErr('Gagal mengunggah PDF: ' + (ex?.message || ex));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
 
   const setType = (type) => {
     const next = { ...lesson, type };
@@ -866,6 +1040,7 @@ function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onC
   const save = () => {
     if (!lesson.title.trim()) { setErr('Judul materi wajib diisi.'); return; }
     if (lesson.type === 'video' && !(lesson.videoUrl || '').trim()) { setErr('Link video wajib diisi.'); return; }
+    if (lesson.type === 'pdf' && !(lesson.pdfUrl || '').trim()) { setErr('Berkas PDF wajib diunggah.'); return; }
     if (lesson.type === 'document' && !(lesson.docUrl || '').trim()) { setErr('Link dokumen wajib diisi.'); return; }
     if (lesson.type === 'quiz' && (lesson.quiz?.questions || []).length === 0) { setErr('Kuis harus punya minimal satu soal.'); return; }
     if (lesson.type === 'assignment' && !(lesson.assignment?.instructions || '').trim()) { setErr('Instruksi tugas wajib diisi.'); return; }
@@ -880,6 +1055,11 @@ function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onC
     };
     if (lesson.type === 'video') clean.videoUrl = (lesson.videoUrl || '').trim();
     if (lesson.type === 'document') clean.docUrl = (lesson.docUrl || '').trim();
+    if (lesson.type === 'pdf') {
+      clean.pdfUrl = (lesson.pdfUrl || '').trim();
+      clean.pdfName = (lesson.pdfName || '').trim();
+      clean.pdfSize = num(lesson.pdfSize, 0);
+    }
     if (lesson.type === 'quiz') {
       clean.quiz = {
         passingScore: Math.max(0, Math.min(100, num(lesson.quiz?.passingScore, 70))),
@@ -944,9 +1124,45 @@ function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onC
         </LmsField>
       )}
 
+      {lesson.type === 'pdf' && (
+        <div className="space-y-3">
+          <LmsField
+            label="Berkas PDF"
+            hint={'Maksimal ' + MAX_PDF_MB + ' MB. Berkas disimpan di penyimpanan file (CDN), BUKAN di database — supaya kuota data aman. Peserta membacanya langsung di dalam aplikasi dan persen dibacanya tercatat otomatis.'}
+          >
+            {lesson.pdfUrl ? (
+              <div className="flex items-center gap-2 flex-wrap border border-slate-200 rounded-xl p-3 bg-slate-50">
+                <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-800 truncate">{lesson.pdfName || 'Berkas PDF'}</div>
+                  <div className="text-[11px] text-slate-500">{fmtBytes(lesson.pdfSize)}</div>
+                </div>
+                <a href={lesson.pdfUrl} target="_blank" rel="noopener noreferrer"
+                  className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50">
+                  Lihat
+                </a>
+                <LmsGhostBtn icon={Upload} onClick={() => pdfRef.current?.click()} disabled={pdfBusy}>
+                  {pdfBusy ? 'Mengunggah...' : 'Ganti File'}
+                </LmsGhostBtn>
+              </div>
+            ) : (
+              <LmsGhostBtn icon={Upload} onClick={() => pdfRef.current?.click()} disabled={pdfBusy}>
+                {pdfBusy ? 'Mengunggah...' : 'Pilih Berkas PDF'}
+              </LmsGhostBtn>
+            )}
+            <input ref={pdfRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={pilihPdf} />
+          </LmsField>
+          {pdfErr && <LmsError>{pdfErr}</LmsError>}
+          <LmsField label="Catatan Pendamping">
+            <textarea className={inputCls} rows={5} value={body} onChange={e => setBody(e.target.value)} disabled={bodyFailed || loadingBody}
+              placeholder="Bagian mana yang harus dibaca lebih dulu (opsional)" />
+          </LmsField>
+        </div>
+      )}
+
       {lesson.type === 'video' && (
         <div className="space-y-3">
-          <LmsField label="Link Video" hint="Tempel link YouTube atau Google Drive.">
+          <LmsField label="Link Video" hint="Link YouTube diputar langsung di dalam aplikasi dan persen tontonannya tercatat. Link lain (mis. Google Drive) tetap terbuka di tab baru tanpa pelacakan.">
             <input className={inputCls} value={lesson.videoUrl || ''}
               onChange={e => setLesson({ ...lesson, videoUrl: e.target.value })}
               placeholder="https://..." />
@@ -999,7 +1215,10 @@ function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onC
         </div>
       )}
 
-      <LmsActions onCancel={onCancel} onSave={save} saveLabel="Simpan Materi" cancelLabel="Kembali" />
+      {/* Tombol dikunci selama PDF diunggah: kalau tidak, admin bisa menekan Simpan
+          sebelum pdfUrl terisi dan berkasnya diam-diam tidak ikut tersimpan. */}
+      <LmsActions onCancel={onCancel} onSave={save} disabled={pdfBusy}
+        saveLabel={pdfBusy ? 'Menunggu unggahan...' : 'Simpan Materi'} cancelLabel="Kembali" />
     </div>
   );
 }
@@ -1406,10 +1625,15 @@ function PathBuilder({ initial, user, courses, allCourses, jobTitles, onClose, o
   const toggleCourse = (courseId) => {
     setForm(f => {
       const list = f.courses || [];
-      const next = list.some(c => c.courseId === courseId)
-        ? list.filter(c => c.courseId !== courseId)
-        : [...list, { courseId, order: list.length, required: true }];
-      return { ...f, courses: renumber(next) };
+      if (list.some(c => c.courseId === courseId)) {
+        return { ...f, courses: renumber(list.filter(c => c.courseId !== courseId)) };
+      }
+      // Nilai bawaan "Wajib" mengikuti PRIORITAS kursus: wajib → true, sunnah/mubah → false.
+      // Admin tetap bisa mengubahnya manual lewat kotak centang di daftar Urutan Kursus.
+      const course = (allCourses || []).find(c => c.id === courseId)
+        || (courses || []).find(c => c.id === courseId);
+      const required = coursePriority(course).key === 'wajib';
+      return { ...f, courses: renumber([...list, { courseId, order: list.length, required }]) };
     });
   };
   const moveCourse = (idx, dir) => setForm(f => ({ ...f, courses: moveItem(f.courses || [], idx, dir) }));
@@ -1493,6 +1717,7 @@ function PathBuilder({ initial, user, courses, allCourses, jobTitles, onClose, o
                   <input type="checkbox" className="w-4 h-4 flex-shrink-0"
                     checked={selectedIds.has(c.id)} onChange={() => toggleCourse(c.id)} />
                   <span className="truncate flex-1">{c.title || '(Tanpa judul)'}</span>
+                  <LmsBadge color={coursePriority(c).color}>{coursePriority(c).label}</LmsBadge>
                   {c.status !== 'published' && <LmsBadge color="bg-amber-100 text-amber-800">Belum terbit</LmsBadge>}
                 </label>
               ))}
@@ -1792,6 +2017,328 @@ function AssignModal({ actor, person, paths, enrollments, onClose, onSaved }) {
           disabled={saving || options.length === 0}
           saveLabel={saving ? 'Menyimpan...' : 'Tugaskan'}
         />
+      </div>
+    </LmsModal>
+  );
+}
+
+// ============================================================================
+// TAB 5 — MODUL BACAAN (perpustakaan internal, sifatnya SUNNAH)
+// ----------------------------------------------------------------------------
+// Bacaan bebas yang boleh dibuka karyawan bolak-balik kapan saja (Buku Hook,
+// Sejarah Al-Kahfi Corp, panduan kerja). SENGAJA:
+//  - TANPA enrollment & TANPA progress → tidak pernah menyentuh persen jalur mana pun,
+//  - isi teks di record TERPISAH (lms:library:body:) supaya memuat daftar tetap ringan,
+//  - PDF di Supabase Storage, bukan di database.
+// ============================================================================
+function BacaanTab({ modules, onNew, onEdit, onToggleStatus, onMove, onDelete }) {
+  const sorted = useMemo(
+    () => [...modules].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [modules]
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-sm text-slate-500">
+          Perpustakaan internal untuk dibaca kapan saja. <b>Sunnah</b> — tidak wajib, tidak dinilai,
+          dan tidak mempengaruhi progres belajar siapa pun. Hanya modul berstatus Terbit yang terlihat karyawan.
+        </p>
+        <LmsPrimaryBtn icon={Plus} onClick={onNew}>Modul Baru</LmsPrimaryBtn>
+      </div>
+
+      {sorted.length === 0 ? (
+        <LmsEmpty
+          icon={Library}
+          title="Belum ada modul bacaan"
+          text="Tambahkan bacaan seperti Buku Hook, Sejarah Al-Kahfi Corp, atau panduan kerja — dalam bentuk PDF atau teks."
+          action={<div className="flex justify-center"><LmsPrimaryBtn icon={Plus} onClick={onNew}>Modul Baru</LmsPrimaryBtn></div>}
+        />
+      ) : (
+        <div className="space-y-3">
+          {sorted.map((m, i) => {
+            const terbit = m.status === 'published';
+            return (
+              <LmsCard key={m.id} className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex flex-col gap-1 pt-0.5">
+                    <button onClick={() => onMove(m, -1)} disabled={i === 0}
+                      className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30"
+                      title="Naikkan urutan">
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => onMove(m, 1)} disabled={i === sorted.length - 1}
+                      className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30"
+                      title="Turunkan urutan">
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-display font-bold text-slate-900 truncate">{m.title || '(Tanpa judul)'}</h3>
+                      <LmsBadge color={terbit ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}>
+                        {terbit ? 'Terbit' : 'Draft'}
+                      </LmsBadge>
+                      {m.category && <LmsBadge color="bg-blue-100 text-blue-800">{m.category}</LmsBadge>}
+                      <LmsBadge>{m.type === 'text' ? 'Teks' : 'PDF'}</LmsBadge>
+                    </div>
+                    {m.description && <p className="text-[12px] text-slate-500 mt-1 line-clamp-2">{m.description}</p>}
+                    <div className="text-[11px] text-slate-500 mt-2 flex items-center gap-3 flex-wrap">
+                      {m.type === 'pdf' && <span className="truncate max-w-[220px]">{m.pdfName || 'Berkas PDF'}</span>}
+                      {m.type === 'pdf' && num(m.pdfSize) > 0 && <span>{fmtBytes(m.pdfSize)}</span>}
+                      {m.createdByName && <span>Dibuat oleh {m.createdByName}</span>}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 mt-3 flex-wrap">
+                  <LmsGhostBtn icon={Edit2} onClick={() => onEdit(m)}>Edit</LmsGhostBtn>
+                  {terbit ? (
+                    <LmsGhostBtn icon={Edit2} onClick={() => onToggleStatus(m)}>Jadikan Draft</LmsGhostBtn>
+                  ) : (
+                    <LmsPrimaryBtn icon={Send} onClick={() => onToggleStatus(m)}>Terbitkan</LmsPrimaryBtn>
+                  )}
+                  {m.type === 'pdf' && m.pdfUrl && (
+                    <a href={m.pdfUrl} target="_blank" rel="noopener noreferrer"
+                      className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50">
+                      Lihat PDF
+                    </a>
+                  )}
+                  <button onClick={() => onDelete(m)}
+                    className="px-3 py-2 rounded-lg font-semibold text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 border border-red-200">
+                    <Trash2 className="w-4 h-4" /> Hapus
+                  </button>
+                </div>
+              </LmsCard>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------- Pembuat modul bacaan
+function newLibraryModule(order) {
+  return {
+    id: lmsUid(),
+    title: '',
+    description: '',
+    category: '',
+    type: 'pdf',
+    pdfUrl: '',
+    pdfName: '',
+    pdfSize: 0,
+    status: 'draft',
+    order: num(order, 0),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function LibraryBuilder({ initial, user, nextOrder, onClose, onSaved }) {
+  const [form, setForm] = useState(() => (initial ? deepCopy(initial) : newLibraryModule(nextOrder)));
+  const [body, setBody] = useState('');
+  // Isi teks dimuat ON-DEMAND untuk modul yang SUDAH ADA — apa pun tipenya. Membatasi
+  // pemuatan ke tipe 'text' saja terlihat lebih hemat, tapi berakibat fatal: modul yang
+  // pernah teks lalu diubah jadi PDF, ketika dikembalikan ke teks akan disimpan dengan
+  // isi KOSONG dan tulisan lamanya hilang.
+  const [bodyLoading, setBodyLoading] = useState(!!initial);
+  const [bodyFailed, setBodyFailed] = useState(false);
+  const [err, setErr] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfErr, setPdfErr] = useState('');
+  const pdfRef = useRef(null);
+
+  useEffect(() => {
+    if (!initial) return;
+    let alive = true;
+    (async () => {
+      try {
+        const b = await loadLibraryBody(initial.id);
+        if (alive) { setBody(b || ''); setBodyLoading(false); }
+      } catch {
+        // Pemuatan GAGAL != isi kosong. Kalau disamakan, tekan Simpan sekali saja
+        // sudah cukup untuk menimpa isi asli dengan kosong.
+        if (alive) { setBody(''); setBodyLoading(false); setBodyFailed(true); }
+      }
+    })();
+    return () => { alive = false; };
+  }, [initial]);
+
+  const pilihPdf = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (pdfRef.current) pdfRef.current.value = '';
+    if (!file) return;
+    setPdfErr('');
+    if (file.type !== 'application/pdf') { setPdfErr('Berkas harus PDF.'); return; }
+    if (file.size > MAX_PDF_MB * 1024 * 1024) { setPdfErr('Ukuran PDF maksimal ' + MAX_PDF_MB + ' MB.'); return; }
+    setPdfBusy(true);
+    try {
+      const url = await lmsPutFile(file, { folder: 'lms-pdf/', contentType: 'application/pdf' });
+      setForm(f => ({ ...f, pdfUrl: url, pdfName: file.name, pdfSize: file.size }));
+    } catch (ex) {
+      setPdfErr('Gagal mengunggah PDF: ' + (ex?.message || ex));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setErr('');
+    if (!form.title.trim()) { setErr('Judul modul wajib diisi.'); return; }
+    if (form.type === 'pdf' && !(form.pdfUrl || '').trim()) { setErr('Berkas PDF wajib diunggah.'); return; }
+    if (form.type === 'text' && !bodyFailed && !body.trim()) { setErr('Isi teks wajib diisi.'); return; }
+    setSaving(true);
+    const teks = form.type === 'text';
+    const rec = {
+      id: form.id,
+      title: form.title.trim(),
+      description: (form.description || '').trim(),
+      category: (form.category || '').trim(),
+      type: teks ? 'text' : 'pdf',
+      pdfUrl: teks ? '' : (form.pdfUrl || '').trim(),
+      pdfName: teks ? '' : (form.pdfName || '').trim(),
+      pdfSize: teks ? 0 : num(form.pdfSize, 0),
+      status: form.status === 'published' ? 'published' : 'draft',
+      order: num(form.order, 0),
+      createdAt: form.createdAt || new Date().toISOString(),
+      createdById: form.createdById || user.id,
+      createdByName: form.createdByName || user.name,
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      // Status server yang menang — alasannya sama seperti kursus & jalur: modal bisa
+      // terbuka lama, sementara Terbitkan/Jadikan Draft ada di tombol terpisah.
+      if (initial?.id) {
+        const server = await getLibrary(initial.id);
+        if (server?.status) rec.status = server.status;
+      }
+      await saveLibrary(rec);
+    } catch (e) {
+      setSaving(false);
+      setErr('Gagal menyimpan modul bacaan: ' + (e?.message || e) + '. Data lama tidak berubah.');
+      return;
+    }
+    if (teks && !bodyFailed) {
+      try { await saveLibraryBody(rec.id, body); }
+      catch {
+        setSaving(false);
+        setErr('Modul tersimpan, tetapi isi teksnya GAGAL disimpan. Buka lagi modul ini dan simpan ulang.');
+        return;
+      }
+    }
+    try { await lmsLog((initial ? 'memperbarui' : 'membuat') + ' modul bacaan "' + rec.title + '"', user.name); } catch { /* abaikan */ }
+    setSaving(false);
+    onSaved(initial ? 'Modul bacaan "' + rec.title + '" diperbarui.' : 'Modul bacaan "' + rec.title + '" dibuat.');
+  };
+
+  return (
+    <LmsModal
+      size="lg"
+      onClose={onClose}
+      title={initial ? 'Edit Modul Bacaan' : 'Modul Bacaan Baru'}
+      subtitle="Bacaan bebas untuk karyawan. Tidak wajib, tanpa penilaian, dan tidak mempengaruhi progres jalur belajar."
+    >
+      <div className="space-y-4">
+        {err && <LmsError>{err}</LmsError>}
+
+        <LmsField label="Judul Modul">
+          <input className={inputCls} value={form.title}
+            onChange={e => setForm({ ...form, title: e.target.value })}
+            placeholder="Contoh: Buku Hook — Panduan Membuat Pembuka Konten" />
+        </LmsField>
+
+        <LmsField label="Deskripsi Singkat">
+          <textarea className={inputCls} rows={2} value={form.description || ''}
+            onChange={e => setForm({ ...form, description: e.target.value })}
+            placeholder="Satu-dua kalimat tentang isi bacaan ini" />
+        </LmsField>
+
+        <LmsField label="Kategori" hint="Teks bebas, dipakai sebagai label dan kata kunci pencarian. Contoh: Panduan Hook, Sejarah, SOP.">
+          <input className={inputCls} value={form.category || ''}
+            onChange={e => setForm({ ...form, category: e.target.value })}
+            placeholder="Contoh: Panduan Hook" />
+        </LmsField>
+
+        <LmsField label="Jenis Isi">
+          <div className="grid sm:grid-cols-2 gap-2">
+            {[
+              { id: 'pdf', label: 'Berkas PDF', desc: 'Diunggah sekali, dibaca di dalam aplikasi.' },
+              { id: 'text', label: 'Teks Panjang', desc: 'Ditulis langsung di sini.' },
+            ].map(o => {
+              const on = (form.type === 'text' ? 'text' : 'pdf') === o.id;
+              return (
+                <button key={o.id} type="button" onClick={() => setForm({ ...form, type: o.id })}
+                  className={`text-left rounded-xl border px-3 py-2.5 transition ${
+                    on ? 'border-blue-300 bg-blue-50/70' : 'border-slate-200 bg-white hover:bg-slate-50'
+                  }`}>
+                  <span className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded-full flex-shrink-0 border-2"
+                      style={on
+                        ? { backgroundColor: '#2563EB', borderColor: '#2563EB', boxShadow: 'inset 0 0 0 2px #ffffff' }
+                        : { borderColor: '#CBD5E1' }} />
+                    <span className="text-sm font-semibold text-slate-800">{o.label}</span>
+                  </span>
+                  <span className="block text-[11px] text-slate-500 mt-1.5 leading-snug">{o.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </LmsField>
+
+        {form.type !== 'text' && (
+          <div className="space-y-3">
+            <LmsField label="Berkas PDF" hint={'Maksimal ' + MAX_PDF_MB + ' MB. Disimpan di penyimpanan file (CDN), bukan di database.'}>
+              {form.pdfUrl ? (
+                <div className="flex items-center gap-2 flex-wrap border border-slate-200 rounded-xl p-3 bg-slate-50">
+                  <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-slate-800 truncate">{form.pdfName || 'Berkas PDF'}</div>
+                    <div className="text-[11px] text-slate-500">{fmtBytes(form.pdfSize)}</div>
+                  </div>
+                  <a href={form.pdfUrl} target="_blank" rel="noopener noreferrer"
+                    className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50">
+                    Lihat
+                  </a>
+                  <LmsGhostBtn icon={Upload} onClick={() => pdfRef.current?.click()} disabled={pdfBusy}>
+                    {pdfBusy ? 'Mengunggah...' : 'Ganti File'}
+                  </LmsGhostBtn>
+                </div>
+              ) : (
+                <LmsGhostBtn icon={Upload} onClick={() => pdfRef.current?.click()} disabled={pdfBusy}>
+                  {pdfBusy ? 'Mengunggah...' : 'Pilih Berkas PDF'}
+                </LmsGhostBtn>
+              )}
+              <input ref={pdfRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={pilihPdf} />
+            </LmsField>
+            {pdfErr && <LmsError>{pdfErr}</LmsError>}
+          </div>
+        )}
+
+        {form.type === 'text' && (
+          <>
+            {bodyLoading && <LmsNote tone="slate">Memuat isi modul...</LmsNote>}
+            {bodyFailed && (
+              <LmsNote tone="amber">
+                Isi modul gagal dimuat dari server (koneksi bermasalah). Perubahan lain tetap bisa
+                disimpan, tetapi <b>isi teksnya tidak akan ikut ditimpa</b> supaya tulisan lama tidak hilang.
+              </LmsNote>
+            )}
+            <LmsField label="Isi Teks" hint="Disimpan di record terpisah supaya daftar modul tetap ringan dibuka.">
+              <textarea className={inputCls} rows={12} value={body} onChange={e => setBody(e.target.value)}
+                disabled={bodyLoading || bodyFailed}
+                placeholder={bodyFailed ? 'Isi tidak bisa diubah karena gagal dimuat.' : 'Tulis isi bacaan di sini...'} />
+            </LmsField>
+          </>
+        )}
+
+        <LmsNote tone="slate">
+          Modul baru tersimpan sebagai <b>Draft</b> dan belum terlihat karyawan. Tekan <b>Terbitkan</b> di daftar modul saat sudah siap.
+        </LmsNote>
+
+        <LmsActions onCancel={onClose} onSave={handleSave} disabled={saving || pdfBusy}
+          saveLabel={saving ? 'Menyimpan...' : 'Simpan Modul'} />
       </div>
     </LmsModal>
   );
