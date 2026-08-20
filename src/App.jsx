@@ -27,9 +27,11 @@ import {
   LMS_PATH_PREFIX, LMS_COURSE_PREFIX, LMS_BODY_PREFIX, LMS_ENROLL_PREFIX,
   LMS_PROGRESS_PREFIX, LMS_ATTEMPT_PREFIX, LMS_SUBMISSION_PREFIX,
   LMS_VALIDATION_PREFIX, LMS_RESET_PREFIX,
+  LMS_LIBRARY_PREFIX, LMS_LIBRARY_BODY_PREFIX,
   loadLmsPaths, loadLmsCourses, loadLmsBodies, loadLmsEnrollments,
   loadLmsProgress, loadLmsAttempts, loadLmsSubmissions, loadLmsValidations,
-  loadLmsQuizResets, autoEnrollUser, loadMyEnrollments,
+  loadLmsQuizResets, loadLmsLibrary, loadLmsLibraryBodies,
+  autoEnrollUser, loadMyEnrollments,
 } from './lms/data.js';
 // Halaman LMS dimuat LAZY: anggota yang tidak pernah membuka menu Pembelajaran
 // tidak ikut mengunduh kodenya (bundle utama app sudah ~973 kB).
@@ -313,6 +315,26 @@ async function removeStorageImage(path) {
   try { await supabase.storage.from(STORAGE_BUCKET).remove([path]); }
   catch (e) { console.warn('Hapus objek Storage gagal:', e?.message || e); }
 }
+// ===== BERKAS (PDF materi LMS & modul bacaan) → Storage. Blob di-upload APA ADANYA (bukan base64). =====
+// Beda penting dari putImage: TIDAK ADA fallback ke brankas DB. Satu PDF bisa berukuran megabyte,
+// dan menaruhnya di kv_store persis cara project ini dulu kena batas kuota egress. Jadi kalau bucket
+// belum siap, lebih baik GAGAL dengan pesan jelas daripada diam-diam menggemukkan database.
+async function putFile(blob, { folder = 'lms-pdf/', contentType = 'application/pdf' } = {}) {
+  if (!blob) throw new Error('Berkas kosong.');
+  const PESAN_BUCKET = 'Bucket Storage belum siap — jalankan supabase-storage-setup.sql';
+  if (_storageProbe === false) throw new Error(PESAN_BUCKET); // sudah ketahuan belum siap sesi ini
+  const path = folder + _newImgId() + '.pdf';
+  const { error } = await supabase.storage.from(STORAGE_BUCKET)
+    .upload(path, blob, { contentType, cacheControl: '31536000', upsert: false });
+  if (error) {
+    if (_isStorageConfigError(error.message)) { _storageProbe = false; throw new Error(PESAN_BUCKET); }
+    throw new Error('Upload berkas gagal: ' + error.message);
+  }
+  _storageProbe = true;
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+  if (!data?.publicUrl) throw new Error('Berkas terunggah tetapi URL publiknya tidak didapat.');
+  return data.publicUrl;
+}
 // ===== SELFIE ABSEN → Storage (fallback base64 di DB). Simpan {url,path} agar objek bisa dihapus saat prune 60 hari. =====
 async function putSelfie(b64) {
   const up = await uploadImageToStorage(b64);
@@ -503,6 +525,7 @@ initLms({
   storage,
   putImage,
   fetchImage,
+  putFile,
   log: (text, userName) => logActivity(text, userName),
 });
 
@@ -513,6 +536,7 @@ const PER_RECORD_LOADERS = {
   'lms:paths:all': loadLmsPaths, 'lms:courses:all': loadLmsCourses, 'lms:lesson-bodies:all': loadLmsBodies,
   'lms:enrollments:all': loadLmsEnrollments, 'lms:progress:all': loadLmsProgress, 'lms:attempts:all': loadLmsAttempts,
   'lms:submissions:all': loadLmsSubmissions, 'lms:validations:all': loadLmsValidations, 'lms:quiz-resets:all': loadLmsQuizResets,
+  'lms:library:all': loadLmsLibrary, 'lms:library-bodies:all': loadLmsLibraryBodies,
 };
 const PER_RECORD_PREFIX = {
   'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX, 'division-plans:all': DIVPLAN_REC_PREFIX, 'img:store': IMG_PREFIX,
@@ -520,6 +544,7 @@ const PER_RECORD_PREFIX = {
   'lms:paths:all': LMS_PATH_PREFIX, 'lms:courses:all': LMS_COURSE_PREFIX, 'lms:lesson-bodies:all': LMS_BODY_PREFIX,
   'lms:enrollments:all': LMS_ENROLL_PREFIX, 'lms:progress:all': LMS_PROGRESS_PREFIX, 'lms:attempts:all': LMS_ATTEMPT_PREFIX,
   'lms:submissions:all': LMS_SUBMISSION_PREFIX, 'lms:validations:all': LMS_VALIDATION_PREFIX, 'lms:quiz-resets:all': LMS_RESET_PREFIX,
+  'lms:library:all': LMS_LIBRARY_PREFIX, 'lms:library-bodies:all': LMS_LIBRARY_BODY_PREFIX,
 };
 
 // ============ CRYPTO (PBKDF2 password hashing) ============
@@ -799,7 +824,7 @@ const BACKUP_KEYS = [
   'drive:auto-backup', 'backup:drive-last',
   'keuangan:cashflow', 'division-plans:all',
   'img:store', // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
-  ...LMS_BACKUP_KEYS // LMS: jalur belajar, kursus, isi materi, enrollment, progres, kuis, tugas, validasi
+  ...LMS_BACKUP_KEYS // LMS: jalur, kursus, isi materi, enrollment, progres, kuis, tugas, validasi, modul bacaan
 ];
 // Catatan: foto selfie absen (key `selfie:<id>`) sengaja TIDAK ikut backup karena ukurannya besar
 // dan otomatis dihapus setelah 60 hari. Data absensinya sendiri tetap ter-backup.
@@ -816,7 +841,8 @@ const BACKUP_KEYS = [
 // (catch di bawah) sehingga SELURUH app kehilangan snapshot harian, bukan cuma LMS.
 // Isi materi tetap ikut di backup MANUAL & Google Drive (tidak kena batas timeout DB),
 // dan data peserta yang tak tergantikan (progres, kuis, tugas) tetap masuk snapshot harian.
-const HEAVY_BACKUP_KEYS = ['img:store', 'lms:lesson-bodies:all'];
+// 'lms:library-bodies:all' (isi modul bacaan) dikecualikan dengan alasan PERSIS SAMA.
+const HEAVY_BACKUP_KEYS = ['img:store', 'lms:lesson-bodies:all', 'lms:library-bodies:all'];
 async function buildBackupDump(byName = 'auto', { excludeHeavy = false } = {}) {
   const dump = { _meta: { app: 'Al-Kahfi Corp Team App', exportedAt: new Date().toISOString(), by: byName, version: 1 }, data: {} };
   for (const k of BACKUP_KEYS) {
