@@ -66,6 +66,15 @@ export function LmsStat({ label, value, sub, icon: Icon, tone = 'blue' }) {
   );
 }
 
+/** Ukuran berkas yang enak dibaca orang (dipakai materi PDF & modul bacaan). */
+export function fmtBytes(n) {
+  const b = Number(n) || 0;
+  if (b <= 0) return '-';
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB';
+  return (b / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
 // ------------------------------------------------------------------- Progress
 export function LmsProgressBar({ percent = 0, tone = 'blue', className = '', showLabel = false, height = 8 }) {
   const p = Math.max(0, Math.min(100, Math.round(percent)));
