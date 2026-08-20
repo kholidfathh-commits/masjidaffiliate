@@ -13,17 +13,19 @@
 //  4. Warna gelap/gradient pakai inline style, bukan kelas bg-[#hex].
 // ============================================================================
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   CheckCircle2, Lock, PlayCircle, FileText, Link2, ListChecks, ClipboardList,
-  ArrowLeft, ArrowRight, Send, Upload, X, AlertCircle, Award, ChevronDown,
+  ArrowLeft, ArrowRight, Send, Upload, X, AlertCircle, Award, ChevronDown, ExternalLink,
 } from 'lucide-react';
+import PdfReader from './PdfReader.jsx';
 import {
   allLessons, findLesson, buildCtx, isLessonDone, computeCourseProgress,
-  lockedLessonIds, nextLessonOf, loadLessonBody,
+  lockedLessonIds, nextLessonOf, loadLessonBody, progressPercent, youtubeId, normalizeUrl,
   saveProgress, progressId,
   gradeQuiz, saveAttempt, attemptId, attemptsUsed, attemptsLeft, bestAttempt,
   emptySubmission, submitAssignment, lmsPutImage, lmsFetchImage, loadMyAttempts,
+  coursePriority,
   SUBMISSION_STATUS, LESSON_TYPES,
 } from './data.js';
 import {
@@ -33,13 +35,148 @@ import {
 
 const TYPE_ICON = {
   text: FileText,
+  pdf: FileText,
   video: PlayCircle,
   document: Link2,
   quiz: ListChecks,
   assignment: ClipboardList,
 };
 
-const CONTENT_TYPES = ['text', 'video', 'document'];
+// Tipe "konten": selesai ditentukan oleh record progress (bukan nilai kuis /
+// persetujuan tugas), dan semuanya punya tombol "Tandai Selesai" manual.
+const CONTENT_TYPES = ['text', 'pdf', 'video', 'document'];
+
+// Ambang penulisan progres parsial (poin persen). Lihat komentar `lacakMedia`.
+const AMBANG_SIMPAN = 10;
+// Video dianggap tuntas di 90% — 10% terakhir biasanya cuma penutup/credit.
+const AMBANG_TONTON = 90;
+
+// ---------------------------------------------------------------- YOUTUBE
+// Materi video LAMA cuma tombol "Buka Video" tanpa pelacakan. Sekarang: kalau
+// linknya YouTube, videonya diputar DI DALAM aplikasi memakai IFrame API supaya
+// persen tontonan bisa dicatat. Kalau BUKAN YouTube (mis. Google Drive), perilaku
+// lama dipertahankan persis — tidak ada yang rusak untuk materi yang sudah ada.
+// (Pembacaan link-nya sendiri ada di data.js: logika murni, ikut diuji uji-lms.mjs.)
+
+// Script IFrame API dimuat SEKALI per sesi, dan hanya saat ada video YouTube dibuka.
+let _ytApi = null;
+function loadYouTubeApi() {
+  if (_ytApi) return _ytApi;
+  _ytApi = new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      reject(new Error('Pemutar video hanya jalan di browser.'));
+      return;
+    }
+    if (window.YT && window.YT.Player) { resolve(window.YT); return; }
+    const sebelumnya = window.onYouTubeIframeAPIReady;
+    // Batas waktu: tanpa ini, satu kegagalan senyap membuat pemutar menggantung
+    // SELAMANYA tanpa pesan apa pun (peserta cuma melihat kotak hitam).
+    const batas = setTimeout(() => {
+      bersihkan();
+      reject(new Error('Pemutar YouTube tidak merespons. Pakai tombol "Buka di YouTube".'));
+    }, 15000);
+    // Elemen script yang MATI wajib dibuang. Kalau ditinggal, percobaan berikutnya
+    // melihat id-nya masih ada, menganggap "sedang dimuat", lalu menunggu callback
+    // yang tidak akan pernah datang.
+    const bersihkan = () => {
+      clearTimeout(batas);
+      const el = document.getElementById('yt-iframe-api');
+      if (el) el.remove();
+    };
+    const lama = document.getElementById('yt-iframe-api');
+    if (lama) lama.remove();
+    window.onYouTubeIframeAPIReady = () => {
+      clearTimeout(batas);
+      try { if (typeof sebelumnya === 'function') sebelumnya(); } catch { /* abaikan */ }
+      resolve(window.YT);
+    };
+    const s = document.createElement('script');
+    s.id = 'yt-iframe-api';
+    s.src = 'https://www.youtube.com/iframe_api';
+    s.async = true;
+    s.onerror = () => {
+      bersihkan();
+      reject(new Error('Gagal memuat pemutar YouTube (koneksi atau pemblokir iklan?).'));
+    };
+    document.head.appendChild(s);
+  }).catch(err => { _ytApi = null; throw err; });
+  return _ytApi;
+}
+
+/**
+ * Pemutar YouTube + pelacak tontonan.
+ * `onWatch(detikSekarang, durasi)` dipanggil setiap detik SELAMA memutar saja —
+ * ini timer di browser, BUKAN polling ke server. Yang mengatur kapan progres
+ * benar-benar ditulis ke database adalah `lacakMedia` di komponen induk.
+ */
+function YouTubeLesson({ videoId, onWatch }) {
+  const holderRef = useRef(null);
+  const playerRef = useRef(null);
+  const timerRef = useRef(null);
+  const [err, setErr] = useState('');
+  const onWatchRef = useRef(onWatch);
+  useEffect(() => { onWatchRef.current = onWatch; }, [onWatch]);
+
+  useEffect(() => {
+    let alive = true;
+    const baca = () => {
+      const p = playerRef.current;
+      if (!p || typeof p.getCurrentTime !== 'function') return;
+      const cur = Number(p.getCurrentTime()) || 0;
+      const dur = Number(typeof p.getDuration === 'function' ? p.getDuration() : 0) || 0;
+      if (dur > 0) onWatchRef.current?.(cur, dur);
+    };
+    const stop = () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+    const start = () => { stop(); timerRef.current = setInterval(baca, 1000); };
+
+    (async () => {
+      try {
+        const YT = await loadYouTubeApi();
+        if (!alive || !holderRef.current) return;
+        // Player dipasang di div BUATAN SENDIRI, bukan div milik React: YT mengganti
+        // elemen itu dengan iframe, dan kalau React ikut mengurusnya, unmount bisa
+        // gagal ("removeChild") dan halaman jadi blank.
+        const mount = document.createElement('div');
+        holderRef.current.appendChild(mount);
+        playerRef.current = new YT.Player(mount, {
+          width: '100%',
+          height: '100%',
+          videoId,
+          playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
+          events: {
+            onStateChange: (e) => {
+              if (e.data === YT.PlayerState.PLAYING) start();
+              else stop();
+              if (e.data === YT.PlayerState.ENDED || e.data === YT.PlayerState.PAUSED) baca();
+            },
+            onError: () => {
+              if (alive) setErr('Video ini tidak bisa diputar di dalam aplikasi (mungkin dibatasi pemiliknya). Pakai tombol "Buka di YouTube".');
+            },
+          },
+        });
+      } catch (e) {
+        if (alive) setErr(e?.message || 'Pemutar YouTube gagal dimuat.');
+      }
+    })();
+
+    return () => {
+      alive = false;
+      stop();
+      try { playerRef.current?.destroy?.(); } catch { /* abaikan */ }
+      playerRef.current = null;
+      if (holderRef.current) holderRef.current.innerHTML = '';
+    };
+  }, [videoId]);
+
+  return (
+    <div>
+      <div className="w-full rounded-xl overflow-hidden" style={{ position: 'relative', paddingTop: '56.25%', backgroundColor: '#0B1120' }}>
+        <div ref={holderRef} style={{ position: 'absolute', inset: 0 }} />
+      </div>
+      {err && <div className="mt-2"><LmsNote tone="amber">{err}</LmsNote></div>}
+    </div>
+  );
+}
 
 function fmtDateTime(iso) {
   if (!iso) return '-';
@@ -83,7 +220,7 @@ function compressToJpeg(file, { maxDim = 1000, quality = 0.7 } = {}) {
 }
 
 // ---------------------------------------------------------------- OUTLINE
-function CourseOutline({ course, ctx, locked, activeId, onPick }) {
+function CourseOutline({ course, ctx, locked, activeId, percents, onPick }) {
   const modules = [...(course.modules || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   if (modules.length === 0) {
     return <div className="text-xs text-slate-500 px-1 py-3">Kursus ini belum punya modul.</div>;
@@ -103,6 +240,8 @@ function CourseOutline({ course, ctx, locked, activeId, onPick }) {
             <div className="space-y-1.5">
               {lessons.map(l => {
                 const done = isLessonDone(l, ctx);
+                // Persen baca/tonton materi yang BARU JALAN (PDF & video YouTube).
+                const persen = percents ? (percents.get(l.id) || 0) : 0;
                 const isLocked = locked.has(l.id);
                 const on = l.id === activeId;
                 const Icon = TYPE_ICON[l.type] || FileText;
@@ -143,6 +282,9 @@ function CourseOutline({ course, ctx, locked, activeId, onPick }) {
                         </span>
                         {Number(l.estimatedMinutes) > 0 && (
                           <span className="text-[10px] text-slate-400">· {l.estimatedMinutes} menit</span>
+                        )}
+                        {!done && persen > 0 && persen < 100 && (
+                          <span className="text-[10px] font-bold text-amber-600">· {persen}%</span>
                         )}
                         {l.required === false && <LmsBadge>Opsional</LmsBadge>}
                       </span>
@@ -296,6 +438,194 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
     [mySubmissions, activeId]
   );
 
+  // ==========================================================================
+  // PELACAKAN BACA (PDF) & TONTON (YouTube)
+  // --------------------------------------------------------------------------
+  // Semua disimpan di record progress yang SUDAH ADA (lms:progress:rec:<user>:<lesson>,
+  // key deterministik) dengan tambahan field percent/done/detail. TIDAK ada prefix baru.
+  //
+  // HEMAT EGRESS — record parsial hanya ditulis saat:
+  //   (a) pertama kali persennya > 0,
+  //   (b) persen naik >= AMBANG_SIMPAN poin sejak simpanan terakhir,
+  //   (c) materi selesai,
+  //   (d) peserta meninggalkan materi sementara masih ada perubahan belum tersimpan.
+  // TIDAK PERNAH menulis per detik, dan tidak ada polling baca yang ditambahkan.
+  // ==========================================================================
+
+  // Persen yang sudah tersimpan di server (dari record progress milik peserta).
+  const serverPercent = useMemo(() => {
+    const m = new Map();
+    myProgress.forEach(p => { if (p?.lessonId) m.set(p.lessonId, progressPercent(p)); });
+    return m;
+  }, [myProgress]);
+  const serverPercentRef = useRef(serverPercent);
+  useEffect(() => { serverPercentRef.current = serverPercent; }, [serverPercent]);
+
+  // Persen yang baru tersimpan dalam sesi ini. Simpanan PARSIAL sengaja TIDAK
+  // memanggil reload() (itu 4 pembacaan tabel), jadi angkanya dipegang lokal
+  // supaya tampilan tetap benar saat berpindah-pindah materi.
+  const [localPercent, setLocalPercent] = useState({});
+  const percentByLesson = useMemo(() => {
+    const m = new Map(serverPercent);
+    Object.entries(localPercent).forEach(([id, v]) => m.set(id, Math.max(m.get(id) || 0, v)));
+    return m;
+  }, [serverPercent, localPercent]);
+
+  // Persen materi yang SEDANG dibuka (untuk badge "Dibaca X%" / "Ditonton X%").
+  const [mediaPercent, setMediaPercent] = useState(0);
+  // Keadaan baca/tonton materi aktif. Ref (bukan state) supaya pembaruan tiap
+  // halaman/detik tidak memicu render ulang canvas PDF atau pemutar video.
+  const mediaRef = useRef({ lessonId: null, pagesViewed: new Set(), lastPage: 1, maxSeconds: 0, duration: 0 });
+  // Ingatan SESI per materi. Simpanan parsial sengaja tidak memanggil reload(), jadi
+  // `my.progress` tetap basi selama sesi. Tanpa ingatan ini, peserta yang membaca
+  // 2 halaman PDF lalu pindah materi lalu kembali akan kehilangan jejak halaman tadi —
+  // PDF-nya tidak akan pernah mencapai 100% walau semua halaman sudah dibuka.
+  const sesiRef = useRef(new Map()); // lessonId -> { pagesViewed:Set, lastPage, maxSeconds, duration }
+  // Persen yang BENAR-BENAR sudah tersimpan ke server, per materi.
+  const savedPercentRef = useRef(new Map());
+  // Persen yang sudah DIKIRIM tapi belum dipastikan tersimpan. Ikut jadi ambang,
+  // supaya selama satu simpanan masih di jalan, detik-detik berikutnya tidak
+  // memicu penulisan baru (aturan hemat egress).
+  const sentPercentRef = useRef(new Map());
+  // Perubahan yang belum tersimpan (dipakai aturan (d)).
+  const pendingRef = useRef(null);
+  // Rantai penulisan. Key record progress DETERMINISTIK (<userId>:<lessonId>), jadi dua
+  // penulisan yang tumpang tindih menulis ke baris yang SAMA — yang selesai belakangan
+  // menang, walau isinya lebih basi. Semua penulisan progres lewat rantai ini supaya
+  // urutannya pasti.
+  const rantaiRef = useRef(Promise.resolve());
+  // Cermin `lessonDone` untuk dibaca di dalam callback pemutar tanpa ikut jadi dependensi.
+  const lessonDoneRef = useRef(false);
+  useEffect(() => { lessonDoneRef.current = lessonDone; }, [lessonDone]);
+  // Halaman terakhir per materi SELAMA sesi ini — supaya bolak-balik antar materi
+  // tetap melanjutkan dari halaman terakhir walau simpanan parsial tidak me-reload data.
+  const lastPageRef = useRef(new Map());
+
+  /** Ambang pembanding: yang sudah tersimpan ATAU yang sedang dalam perjalanan. */
+  const ambangTersimpan = useCallback((lessonId) => {
+    const disimpan = savedPercentRef.current.get(lessonId);
+    const dikirim = sentPercentRef.current.get(lessonId) || 0;
+    const server = serverPercentRef.current.get(lessonId) || 0;
+    return Math.max(disimpan === undefined ? server : disimpan, dikirim);
+  }, []);
+
+  /** Antrean sudah tidak relevan (tersalip simpanan lain, mis. "Tandai Selesai"). */
+  const usang = useCallback((item) => (
+    !item.done && (savedPercentRef.current.get(item.lessonId) || 0) >= (item.percent || 0)
+  ), []);
+
+  const simpanMedia = useCallback(async (item) => {
+    const now = new Date().toISOString();
+    const rec = {
+      id: progressId(user.id, item.lessonId),
+      userId: user.id,
+      lessonId: item.lessonId,
+      courseId: course.id,
+      percent: item.done ? 100 : item.percent,
+      done: !!item.done,           // WAJIB eksplisit: record tanpa `done` = record LAMA = selesai
+      detail: item.detail || null,
+      updatedAt: now,
+    };
+    if (item.done) rec.completedAt = now;
+    await saveProgress(rec);
+    savedPercentRef.current.set(item.lessonId, rec.percent);
+    setLocalPercent(m => ({ ...m, [item.lessonId]: rec.percent }));
+  }, [user.id, course.id]);
+
+  /** Tandai persen ini "sudah dikirim" supaya tidak dikirim ulang tiap detik. */
+  const tandaiTerkirim = useCallback((lessonId, percent) => {
+    const lama = sentPercentRef.current.get(lessonId) || 0;
+    if (percent > lama) sentPercentRef.current.set(lessonId, percent);
+  }, []);
+
+  const flushMedia = useCallback(() => {
+    const item = pendingRef.current;
+    if (!item) return rantaiRef.current;
+    pendingRef.current = null;
+    if (usang(item)) return rantaiRef.current;
+    tandaiTerkirim(item.lessonId, item.percent);
+    rantaiRef.current = rantaiRef.current.then(async () => {
+      // Diperiksa LAGI saat gilirannya tiba: di antara "antre" dan "jalan", materi ini
+      // bisa saja sudah dinyatakan SELESAI (tombol Tandai Selesai). Tanpa penjaga ini,
+      // angka parsial yang basi menimpa record yang sudah selesai menjadi done:false —
+      // dan karena done:false tidak memicu reload(), kesalahannya baru terlihat saat
+      // peserta membuka app lagi dan progresnya turun sendiri.
+      if (usang(item)) return;
+      try {
+        await simpanMedia(item);
+        // Hanya penyelesaian yang layak memicu reload() — progres parsial tidak,
+        // supaya membaca 10 halaman PDF tidak berarti 10x tarikan data.
+        if (item.done) await reload();
+      } catch (e) {
+        // Gagal simpan tidak boleh mengganggu kegiatan membaca/menonton. Antrean
+        // dikembalikan supaya percobaan berikutnya mencoba lagi — TAPI hanya kalau
+        // belum tersalip dan belum ada kemajuan yang lebih baru (angka tidak mundur).
+        sentPercentRef.current.delete(item.lessonId);
+        const sekarang = pendingRef.current;
+        if (!usang(item) && (!sekarang || (sekarang.percent || 0) < (item.percent || 0))) {
+          pendingRef.current = item;
+        }
+        setActionErr('Progres baca/tonton gagal disimpan: ' + (e?.message || 'koneksi bermasalah')
+          + '. Progres lama Anda tetap aman. Anda juga bisa menekan "Tandai Selesai" secara manual.');
+      }
+    });
+    return rantaiRef.current;
+  }, [simpanMedia, reload, usang, tandaiTerkirim]);
+
+  const lacakMedia = useCallback((lessonId, percent, detail, selesai) => {
+    if (!lessonId) return;
+    const p = Math.max(0, Math.min(100, Math.round(percent)));
+    const target = selesai ? 100 : p;
+    setMediaPercent(prev => Math.max(prev, target));
+    const tersimpan = ambangTersimpan(lessonId);
+    if (target <= tersimpan) return;                     // tidak ada kemajuan → tidak menulis
+    pendingRef.current = { lessonId, percent: target, done: !!selesai, detail };
+    if (selesai || tersimpan === 0 || (target - tersimpan) >= AMBANG_SIMPAN) flushMedia();
+  }, [flushMedia, ambangTersimpan]);
+
+  // Aturan (d): saat berpindah materi / keluar dari pemutar, sisa perubahan disimpan.
+  useEffect(() => () => { flushMedia(); }, [activeId, flushMedia]);
+
+  /** Dipanggil PdfReader tiap halaman ditampilkan. */
+  const bacaHalamanPdf = useCallback((halaman, totalHalaman) => {
+    const st = mediaRef.current;
+    if (!st.lessonId || !(totalHalaman > 0)) return;
+    st.lastPage = halaman;
+    lastPageRef.current.set(st.lessonId, halaman);
+    sesiRef.current.set(st.lessonId, st);
+    if (lessonDoneRef.current) return;   // sudah selesai → tidak perlu menulis apa pun lagi
+    st.pagesViewed.add(halaman);
+    // Buang nomor halaman yang melebihi jumlah halaman berkas SEKARANG. Kalau admin
+    // mengganti PDF dengan versi yang lebih pendek, jejak lama bisa membuat materi
+    // langsung dinyatakan selesai tanpa dibaca.
+    const dibaca = [...st.pagesViewed].filter(n => n >= 1 && n <= totalHalaman).sort((a, b) => a - b);
+    const persen = Math.round((dibaca.length / totalHalaman) * 100);
+    lacakMedia(
+      st.lessonId,
+      persen,
+      { lastPage: halaman, pagesViewed: dibaca, totalPages: totalHalaman },
+      persen >= 100
+    );
+  }, [lacakMedia]);
+
+  /** Dipanggil pemutar YouTube tiap detik selama memutar. */
+  const tontonVideo = useCallback((detik, durasi) => {
+    const st = mediaRef.current;
+    if (!st.lessonId || !(durasi > 0)) return;
+    // Monotonik: mundurkan video tidak menurunkan persen.
+    st.maxSeconds = Math.max(st.maxSeconds, detik);
+    st.duration = durasi;
+    sesiRef.current.set(st.lessonId, st);
+    if (lessonDoneRef.current) return;
+    const persen = Math.round((st.maxSeconds / durasi) * 100);
+    lacakMedia(
+      st.lessonId,
+      persen,
+      { maxSeconds: Math.round(st.maxSeconds), duration: Math.round(durasi) },
+      persen >= AMBANG_TONTON
+    );
+  }, [lacakMedia]);
+
   // Muat isi materi saat lesson dibuka. SELALU setBodyLoading(false) di finally —
   // ini bug nyata di app induk: halaman nyangkut di "Memuat..." selamanya.
   useEffect(() => {
@@ -325,6 +655,26 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
     setQuizPhase('idle'); setAnswers({}); setQuizResult(null); setQuizErr(''); setQuizStartedAt(null);
     setActionErr(''); setOutlineOpen(false);
     setAsgImages([]); setAsgErr('');
+    // Siapkan pelacakan baca/tonton materi baru. Nilai lama diambil dari record
+    // progress supaya persen TIDAK PERNAH turun saat materi dibuka lagi (halaman
+    // yang sudah pernah dibaca & detik tontonan tertinggi ikut dipulihkan).
+    const rec0 = (Array.isArray(my?.progress) ? my.progress : []).find(p => p?.lessonId === activeId) || null;
+    const det0 = (rec0 && rec0.detail) || {};
+    // Ingatan SESI menang atas record server: simpanan parsial tidak memuat ulang data,
+    // jadi `my.progress` bisa lebih tua daripada yang baru saja dibaca peserta.
+    const sesi = sesiRef.current.get(activeId);
+    mediaRef.current = sesi || {
+      lessonId: activeId,
+      pagesViewed: new Set(Array.isArray(det0.pagesViewed) ? det0.pagesViewed : []),
+      lastPage: Number(det0.lastPage) || 1,
+      maxSeconds: Number(det0.maxSeconds) || 0,
+      duration: Number(det0.duration) || 0,
+    };
+    sesiRef.current.set(activeId, mediaRef.current);
+    setMediaPercent(Math.max(
+      rec0 ? progressPercent(rec0) : 0,
+      savedPercentRef.current.get(activeId) || 0
+    ));
     const l = findLesson(course, activeId);
     const sub = mySubmissions.find(s => s.lessonId === activeId) || null;
     const last = sub && sub.history && sub.history.length ? sub.history[sub.history.length - 1] : null;
@@ -341,18 +691,41 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
   const goTo = (id) => { if (id) setActiveId(id); };
 
   // -------------------------------------------------- Tandai selesai
+  // Tombol manual ini SENGAJA tetap ada untuk semua materi konten (teks, PDF, video,
+  // dokumen) — jalan keluar kalau pemutar PDF/video bermasalah di perangkat peserta.
   const markDone = async () => {
     if (!lesson) return;
     setActionErr('');
     setBusy(true);
+    // Batalkan antrean parsial MILIK MATERI INI dulu, lalu tunggu penulisan yang
+    // mungkin sedang berjalan — kalau tidak, tulisan lama bisa mendarat SETELAH tanda
+    // selesai dan mengembalikan record ini jadi "belum selesai".
+    // Antrean milik materi LAIN tidak boleh dibuang begitu saja: itu progres peserta
+    // yang belum tersimpan. Kirim dulu, baru lanjut.
+    if (pendingRef.current && pendingRef.current.lessonId === lesson.id) pendingRef.current = null;
+    else if (pendingRef.current) flushMedia();
     try {
+      await rantaiRef.current;
+      const now = new Date().toISOString();
+      const st = mediaRef.current;
+      const detail = st.lessonId === lesson.id
+        ? (st.pagesViewed.size > 0
+            ? { lastPage: st.lastPage, pagesViewed: [...st.pagesViewed].sort((a, b) => a - b) }
+            : (st.maxSeconds > 0 ? { maxSeconds: Math.round(st.maxSeconds), duration: Math.round(st.duration) } : null))
+        : null;
       await saveProgress({
         id: progressId(user.id, lesson.id),
         userId: user.id,
         lessonId: lesson.id,
         courseId: course.id,
-        completedAt: new Date().toISOString(),
+        percent: 100,
+        done: true,
+        detail,
+        completedAt: now,
+        updatedAt: now,
       });
+      savedPercentRef.current.set(lesson.id, 100);
+      setLocalPercent(m => ({ ...m, [lesson.id]: 100 }));
       await reload();
       if (nextLesson) setActiveId(nextLesson.id);
     } catch (e) {
@@ -500,6 +873,23 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
     return [...a, ...b].sort((x, y) => String(x.at).localeCompare(String(y.at)));
   }, [currentSub]);
 
+  // Materi video: link YouTube diputar DI DALAM aplikasi (dengan pelacakan tontonan);
+  // link lain (mis. Google Drive) memakai perilaku lama persis — tombol ke tab baru.
+  const ytId = lesson?.type === 'video' ? youtubeId(lesson.videoUrl) : '';
+  // Satu angka untuk badge DAN outline, supaya tidak ada dua persen berbeda di satu layar.
+  const persenMateri = Math.max(mediaPercent, percentByLesson.get(activeId) || 0);
+  // Link yang ditempel admin bisa tanpa 'https://' — dinormalkan supaya tombolnya
+  // tidak berubah jadi tautan relatif di dalam app.
+  const videoHref = lesson?.type === 'video' ? (normalizeUrl(lesson.videoUrl) || lesson.videoUrl || '') : '';
+  const docHref = lesson?.type === 'document' ? (normalizeUrl(lesson.docUrl) || lesson.docUrl || '') : '';
+  // Halaman awal PDF: lanjutkan dari halaman terakhir, bukan mulai dari 1 lagi.
+  const pdfStartPage = useMemo(() => {
+    const sesi = lastPageRef.current.get(activeId);
+    if (sesi) return sesi;
+    const rec = myProgress.find(p => p?.lessonId === activeId);
+    return Math.max(1, Number(rec?.detail?.lastPage) || 1);
+  }, [myProgress, activeId]);
+
   // ------------------------------------------------------------- RENDER
   if (!course) {
     return <LmsEmpty icon={AlertCircle} title="Kursus tidak ditemukan" text="Kursus ini mungkin sudah dihapus. Kembali dan pilih kursus lain."
@@ -528,7 +918,8 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
       </button>
 
       <div className={`${outlineOpen ? 'block' : 'hidden'} lg:block mt-4 lg:max-h-[65vh] lg:overflow-y-auto scroll-thin`}>
-        <CourseOutline course={course} ctx={ctx} locked={locked} activeId={activeId} onPick={goTo} />
+        <CourseOutline course={course} ctx={ctx} locked={locked} activeId={activeId}
+          percents={percentByLesson} onPick={goTo} />
       </div>
     </LmsCard>
   );
@@ -543,7 +934,11 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">{course.title}</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">{course.title}</h1>
+            {/* Kursus lama tanpa field priority otomatis tampil sebagai "Wajib". */}
+            <LmsBadge color={coursePriority(course).color}>{coursePriority(course).label}</LmsBadge>
+          </div>
           {course.description && <p className="text-sm text-slate-500 mt-1.5">{course.description}</p>}
         </div>
       </div>
@@ -585,6 +980,12 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
                         </LmsBadge>
                         {Number(lesson.estimatedMinutes) > 0 && <LmsBadge>{lesson.estimatedMinutes} menit</LmsBadge>}
                         {lesson.required === false && <LmsBadge>Opsional</LmsBadge>}
+                        {!lessonDone && persenMateri > 0 && persenMateri < 100
+                          && (lesson.type === 'pdf' || (lesson.type === 'video' && ytId)) && (
+                          <LmsBadge color="bg-amber-100 text-amber-800">
+                            {lesson.type === 'pdf' ? `Dibaca ${persenMateri}%` : `Ditonton ${persenMateri}%`}
+                          </LmsBadge>
+                        )}
                         {lessonDone && <LmsBadge color="bg-emerald-100 text-emerald-800">Selesai</LmsBadge>}
                       </div>
                       <h2 className="font-display text-lg font-bold text-slate-900 mt-2">{lesson.title || 'Materi'}</h2>
@@ -606,27 +1007,69 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
                 {/* ---------------- TEXT / VIDEO / DOCUMENT ---------------- */}
                 {CONTENT_TYPES.includes(lesson.type) && (
                   <LmsCard className="p-5 space-y-4">
+                    {lesson.type === 'pdf' && (
+                      <div className="space-y-3">
+                        {lesson.pdfUrl ? (
+                          <>
+                            {/* key={lesson.id} → pembaca dimulai ulang tiap ganti materi,
+                                termasuk halaman awalnya. */}
+                            <PdfReader key={lesson.id} url={lesson.pdfUrl}
+                              initialPage={pdfStartPage} onPageView={bacaHalamanPdf} />
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="text-[11px] text-slate-500 truncate">{lesson.pdfName || 'Berkas PDF'}</span>
+                              <a href={lesson.pdfUrl} target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 hover:underline">
+                                <ExternalLink className="w-4 h-4" /> Buka di tab baru
+                              </a>
+                            </div>
+                            <LmsNote>
+                              Persen dibaca dihitung dari jumlah halaman yang pernah Anda buka. Materi otomatis ditandai selesai setelah semua halaman terbuka.
+                            </LmsNote>
+                          </>
+                        ) : (
+                          <LmsNote tone="amber">Berkas PDF belum diunggah oleh pengelola kursus.</LmsNote>
+                        )}
+                      </div>
+                    )}
+
                     {lesson.type === 'video' && (
                       <div className="space-y-3">
-                        {lesson.videoUrl ? (
-                          <a href={lesson.videoUrl} target="_blank" rel="noopener noreferrer"
-                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-white font-semibold px-5 py-3 rounded-xl transition"
-                            style={{ backgroundColor: '#2563EB' }}>
-                            <PlayCircle className="w-5 h-5" /> Buka Video
-                          </a>
-                        ) : (
+                        {!lesson.videoUrl ? (
                           <LmsNote tone="amber">Link video belum diisi oleh pengelola kursus.</LmsNote>
+                        ) : ytId ? (
+                          <>
+                            {/* key = id MATERI, bukan id video: dua materi berbeda bisa
+                                memakai video yang sama, dan tanpa remount detik tontonan
+                                materi lama akan tercatat sebagai progres materi baru. */}
+                            <YouTubeLesson key={lesson.id} videoId={ytId} onWatch={tontonVideo} />
+                            <a href={videoHref} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 hover:underline">
+                              <ExternalLink className="w-4 h-4" /> Buka di YouTube
+                            </a>
+                            <LmsNote>
+                              Bagian video yang sudah Anda tonton dicatat otomatis. Materi ditandai selesai setelah Anda menonton minimal {AMBANG_TONTON}%; melompati bagian video tidak menambah persen.
+                            </LmsNote>
+                          </>
+                        ) : (
+                          <>
+                            {/* BUKAN YouTube (mis. Google Drive) → perilaku lama dipertahankan. */}
+                            <a href={videoHref} target="_blank" rel="noopener noreferrer"
+                              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-white font-semibold px-5 py-3 rounded-xl transition"
+                              style={{ backgroundColor: '#2563EB' }}>
+                              <PlayCircle className="w-5 h-5" /> Buka Video
+                            </a>
+                            <LmsNote>
+                              Video terbuka di tab baru. Aplikasi ini tidak merekam berapa lama Anda menonton — kejujuran Anda yang dipakai, dan pemahaman Anda diuji lewat kuis atau tugas praktik.
+                            </LmsNote>
+                          </>
                         )}
-                        <LmsNote>
-                          Video terbuka di tab baru. Aplikasi ini tidak merekam berapa lama Anda menonton — kejujuran Anda yang dipakai, dan pemahaman Anda diuji lewat kuis atau tugas praktik.
-                        </LmsNote>
                       </div>
                     )}
 
                     {lesson.type === 'document' && (
                       <div className="space-y-3">
                         {lesson.docUrl ? (
-                          <a href={lesson.docUrl} target="_blank" rel="noopener noreferrer"
+                          <a href={docHref} target="_blank" rel="noopener noreferrer"
                             className="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-white font-semibold px-5 py-3 rounded-xl transition"
                             style={{ backgroundColor: '#2563EB' }}>
                             <Link2 className="w-5 h-5" /> Buka Dokumen
