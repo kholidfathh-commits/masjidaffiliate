@@ -43,6 +43,58 @@ cek('tugas belum APPROVED tidak dihitung selesai',
 cek('kursus tanpa materi wajib TIDAK dianggap selesai',
   L.computeCourseProgress({id:'x',modules:[{id:'m',order:0,lessons:[{id:'a',type:'text',order:0,required:false}]}]}, ctx()).completed===false);
 
+console.log('\n== PRIORITAS KURSUS (Wajib / Sunnah / Mubah) ==');
+cek('kursus LAMA tanpa field priority dianggap Wajib', L.coursePriority({id:'c'}).key==='wajib');
+cek('priority sunnah terbaca apa adanya', L.coursePriority({id:'c',priority:'sunnah'}).key==='sunnah');
+cek('priority asing jatuh ke Wajib', L.coursePriority({id:'c',priority:'ngawur'}).key==='wajib');
+cek('prioritas TIDAK mengubah perhitungan progres',
+  L.computeCourseProgress({...kursus,priority:'mubah'}, ctx([L1])).percent===33);
+
+console.log('\n== PROGRES PARSIAL (PDF & video) — KOMPATIBILITAS MUNDUR ==');
+cek('record LAMA tanpa field done TETAP dianggap selesai', L.isProgressDone({userId:'u',lessonId:'x',completedAt:'2026-01-01'})===true);
+cek('record parsial (done:false, percent:40) TIDAK selesai', L.isProgressDone({done:false,percent:40})===false);
+cek('record baru done:true selesai', L.isProgressDone({done:true,percent:100})===true);
+cek('buildCtx menyaring record parsial dari progressSet',
+  (()=>{const c=L.buildCtx({progress:[
+      {userId:'u',lessonId:'lama'},
+      {userId:'u',lessonId:'parsial',done:false,percent:40},
+      {userId:'u',lessonId:'tuntas',done:true,percent:100}]},'u');
+    return c.progressSet.has('lama') && !c.progressSet.has('parsial') && c.progressSet.has('tuntas');})());
+cek('persen record lama (tanpa field percent) dibaca 100', L.progressPercent({userId:'u',lessonId:'x'})===100);
+cek('persen record parsial dibaca apa adanya', L.progressPercent({done:false,percent:40})===40);
+cek('tipe pdf terdaftar di LESSON_TYPES', L.LESSON_TYPES.pdf?.label==='Bacaan PDF');
+cek('materi PDF berperilaku seperti tipe konten di isLessonDone (record lama = selesai)',
+  L.isLessonDone({id:'pdf1',type:'pdf'}, L.buildCtx({progress:[{userId:'u',lessonId:'pdf1'}]},'u'))===true);
+cek('materi PDF selesai bila done:true',
+  L.isLessonDone({id:'pdf2',type:'pdf'}, L.buildCtx({progress:[{userId:'u',lessonId:'pdf2',done:true,percent:100}]},'u'))===true);
+cek('materi PDF baru dibaca 60% BELUM selesai',
+  L.isLessonDone({id:'pdf3',type:'pdf'}, L.buildCtx({progress:[{userId:'u',lessonId:'pdf3',done:false,percent:60}]},'u'))===false);
+cek('kursus: materi PDF parsial tidak menaikkan persen kursus',
+  (()=>{const k={id:'cp',modules:[{id:'m',order:0,lessons:[
+      {id:'pdf4',type:'pdf',order:0,required:true},{id:'t4',type:'text',order:1,required:true}]}]};
+    const c=L.buildCtx({progress:[{userId:'u',lessonId:'pdf4',done:false,percent:80}]},'u');
+    return L.computeCourseProgress(k,c).percent===0;})());
+cek('kursus: materi PDF tuntas menaikkan persen kursus',
+  (()=>{const k={id:'cp2',modules:[{id:'m',order:0,lessons:[
+      {id:'pdf5',type:'pdf',order:0,required:true},{id:'t5',type:'text',order:1,required:true}]}]};
+    const c=L.buildCtx({progress:[{userId:'u',lessonId:'pdf5',done:true,percent:100}]},'u');
+    return L.computeCourseProgress(k,c).percent===50;})());
+
+console.log('\n== LINK VIDEO YOUTUBE ==');
+cek('watch?v= dikenali', L.youtubeId('https://www.youtube.com/watch?v=dQw4w9WgXcQ')==='dQw4w9WgXcQ');
+cek('youtu.be/ dikenali', L.youtubeId('https://youtu.be/dQw4w9WgXcQ?t=30')==='dQw4w9WgXcQ');
+cek('shorts/ dikenali', L.youtubeId('https://www.youtube.com/shorts/dQw4w9WgXcQ')==='dQw4w9WgXcQ');
+cek('embed/ dikenali', L.youtubeId('https://www.youtube.com/embed/dQw4w9WgXcQ')==='dQw4w9WgXcQ');
+cek('m.youtube.com dikenali', L.youtubeId('https://m.youtube.com/watch?v=dQw4w9WgXcQ')==='dQw4w9WgXcQ');
+cek('Google Drive BUKAN YouTube (perilaku lama dipertahankan)',
+  L.youtubeId('https://drive.google.com/file/d/abc123/view')==='');
+cek('link kosong / bukan URL aman', L.youtubeId('')==='' && L.youtubeId('bukan link')==='');
+cek('domain penipu tidak lolos', L.youtubeId('https://youtube.com.jahat.id/watch?v=dQw4w9WgXcQ')==='');
+cek('link tanpa https:// tetap dikenali', L.youtubeId('youtu.be/dQw4w9WgXcQ')==='dQw4w9WgXcQ');
+cek('normalizeUrl menambahkan skema', L.normalizeUrl('drive.google.com/file/d/abc/view')==='https://drive.google.com/file/d/abc/view');
+cek('normalizeUrl menolak teks biasa', L.normalizeUrl('tanya leader saja')==='');
+cek('normalizeUrl membiarkan URL lengkap apa adanya', L.normalizeUrl('https://youtu.be/abc')==='https://youtu.be/abc');
+
 console.log('\n== JALUR (perbaikan: kursus hilang tidak bikin macet) ==');
 const jalur={id:'p1',status:'published',courses:[{courseId:'c1',order:0,required:true},{courseId:'c2',order:1,required:true}]};
 const penuh=L.computePathProgress(jalur,new Map([['c1',kursus],['c2',kursus]]),ctx([L1,L2,L3,LOPS],[{userId:'u',lessonId:L2,passed:true}],[{userId:'u',lessonId:L3,status:'APPROVED'}]));
@@ -86,6 +138,29 @@ cek('nomor dari MAX bukan JUMLAH (deret berlubang)',
   (()=>{const berlubang=[{lessonId:'lq',userId:'u',attemptNo:2}]; // 001 & 003 terhapus, 002 tersisa
         const nomor=berlubang.filter(a=>a.lessonId==='lq'&&a.userId==='u').reduce((m,a)=>Math.max(m,a.attemptNo||0),0)+1;
         return nomor===3;})());
+
+console.log('\n== MODUL BACAAN (perpustakaan, sifatnya sunnah) ==');
+cek('prefix TIDAK mengandung _ (wildcard LIKE Postgres)',
+  !L.LMS_LIBRARY_PREFIX.includes('_') && !L.LMS_LIBRARY_BODY_PREFIX.includes('_'));
+cek('key backup modul bacaan terdaftar di LMS_BACKUP_KEYS',
+  L.LMS_BACKUP_KEYS.includes('lms:library:all') && L.LMS_BACKUP_KEYS.includes('lms:library-bodies:all'));
+await L.saveLibrary({id:'lib1',title:'Buku Hook',category:'Panduan Hook',type:'text',status:'published',order:0});
+await L.saveLibrary({id:'lib2',title:'Sejarah Al-Kahfi',category:'Sejarah',type:'pdf',status:'draft',order:1,pdfUrl:'https://x/y.pdf'});
+await L.saveLibraryBody('lib1','Isi buku hook yang panjang...');
+cek('modul bacaan tersimpan per-record', (await L.loadLmsLibrary()).length===2);
+cek('ISI modul TIDAK ikut tertarik saat memuat daftar',
+  (await L.loadLmsLibrary()).every(m => m.body === undefined));
+cek('isi modul dimuat on-demand', (await L.loadLibraryBody('lib1'))==='Isi buku hook yang panjang...');
+cek('prefix record & prefix isi tidak saling menarik',
+  (await L.loadLmsLibraryBodies()).length===1);
+cek('modul bacaan TIDAK punya record progress → persen jalur tidak berubah',
+  L.computePathProgress(jalur,new Map([['c1',kursus],['c2',kursus]]),
+    ctx([L1,L2,L3,LOPS],[{userId:'u',lessonId:L2,passed:true}],[{userId:'u',lessonId:L3,status:'APPROVED'}])).percent===100);
+await L.deleteLibrary('lib2');
+await L.deleteLibrary('lib1');
+await L.deleteLibraryBody('lib1');
+cek('hapus modul ikut membersihkan isinya (tidak ada baris yatim)',
+  (await L.loadLmsLibrary()).length===0 && (await L.loadLmsLibraryBodies()).length===0);
 
 console.log('\n== OTORISASI ==');
 const semuaUser=[{id:'a',role:'operasional',leaderId:'L'},{id:'b',role:'operasional',leaderId:'X'},{id:'L',role:'leader'}];
