@@ -315,25 +315,68 @@ async function removeStorageImage(path) {
   try { await supabase.storage.from(STORAGE_BUCKET).remove([path]); }
   catch (e) { console.warn('Hapus objek Storage gagal:', e?.message || e); }
 }
-// ===== BERKAS (PDF materi LMS & modul bacaan) → Storage. Blob di-upload APA ADANYA (bukan base64). =====
-// Beda penting dari putImage: TIDAK ADA fallback ke brankas DB. Satu PDF bisa berukuran megabyte,
-// dan menaruhnya di kv_store persis cara project ini dulu kena batas kuota egress. Jadi kalau bucket
-// belum siap, lebih baik GAGAL dengan pesan jelas daripada diam-diam menggemukkan database.
+// ====== BERKAS LMS (PDF materi & modul bacaan) → bucket PRIVAT ======
+// Bucket TERPISAH dari 'photos' dan sengaja PRIVAT: berkasnya tidak boleh bisa dibuka
+// lewat URL tanpa login, tidak boleh bisa disebar, dan tidak boleh bisa diunduh dari UI.
+// 'photos' TIDAK boleh ikut dijadikan privat — record foto app menyimpan URL publik,
+// jadi mematikannya akan membuat SEMUA avatar/bukti/lampiran gagal tampil seketika.
+// Setup sekali lewat supabase-lms-private-setup.sql.
+const LMS_BUCKET = import.meta.env.VITE_SUPABASE_LMS_BUCKET || 'lms-files';
+const PESAN_LMS_BUCKET = 'Bucket Storage belum siap — jalankan supabase-lms-private-setup.sql';
+let _lmsBucketProbe = null; // null=belum tahu | true=siap | false=belum siap (sesi ini)
+
+// Upload Blob APA ADANYA (bukan base64) → mengembalikan PATH di bucket, BUKAN URL.
+// Beda penting dari putImage: TIDAK ADA fallback ke brankas DB. Satu PDF bisa berukuran
+// megabyte, dan menaruhnya di kv_store persis cara project ini dulu kena batas kuota egress.
+// Yang disimpan di record cuma path-nya; URL baru dibuat sesaat lewat createSignedUrl().
 async function putFile(blob, { folder = 'lms-pdf/', contentType = 'application/pdf' } = {}) {
   if (!blob) throw new Error('Berkas kosong.');
-  const PESAN_BUCKET = 'Bucket Storage belum siap — jalankan supabase-storage-setup.sql';
-  if (_storageProbe === false) throw new Error(PESAN_BUCKET); // sudah ketahuan belum siap sesi ini
+  if (_lmsBucketProbe === false) throw new Error(PESAN_LMS_BUCKET);
   const path = folder + _newImgId() + '.pdf';
-  const { error } = await supabase.storage.from(STORAGE_BUCKET)
+  const { error } = await supabase.storage.from(LMS_BUCKET)
     .upload(path, blob, { contentType, cacheControl: '31536000', upsert: false });
   if (error) {
-    if (_isStorageConfigError(error.message)) { _storageProbe = false; throw new Error(PESAN_BUCKET); }
+    if (_isStorageConfigError(error.message)) { _lmsBucketProbe = false; throw new Error(PESAN_LMS_BUCKET); }
     throw new Error('Upload berkas gagal: ' + error.message);
   }
-  _storageProbe = true;
-  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-  if (!data?.publicUrl) throw new Error('Berkas terunggah tetapi URL publiknya tidak didapat.');
-  return data.publicUrl;
+  _lmsBucketProbe = true;
+  return path;
+}
+
+// Signed URL berumur pendek untuk SATU berkas privat. Dipanggil tepat sebelum berkasnya
+// ditarik ke memori, dan URL-nya tidak pernah masuk href/iframe/window.open.
+async function signLmsFile(path, detik = 600) {
+  const p = String(path || '').trim();
+  if (!p) throw new Error('Berkas tidak ditemukan.');
+  const { data, error } = await supabase.storage.from(LMS_BUCKET).createSignedUrl(p, detik);
+  if (error) {
+    if (_isStorageConfigError(error.message)) { _lmsBucketProbe = false; throw new Error(PESAN_LMS_BUCKET); }
+    throw new Error('Izin membaca berkas gagal dibuat: ' + error.message);
+  }
+  if (!data?.signedUrl) throw new Error('Izin membaca berkas tidak didapat.');
+  _lmsBucketProbe = true;
+  return data.signedUrl;
+}
+
+// ====== JEJAK AKSES MODUL ======
+// Tabel SENDIRI (bukan kv_store): log ini bertambah tiap modul dibuka, dan kalau
+// ditaruh di kv_store dia ikut tertarik setiap backup. Ini catatan audit, bukan data
+// tak tergantikan. Kegagalan mencatat TIDAK PERNAH boleh menggagalkan pembacaan materi.
+async function logAksesModul({ modulId, userId, userName, jenis }) {
+  if (!modulId || !userId) return false;
+  try {
+    const { error } = await supabase.from('log_akses_modul').insert({
+      modul_id: String(modulId),
+      user_id: String(userId),
+      user_nama: userName || null,
+      jenis: jenis || 'modul-bacaan',
+    });
+    if (error) { console.warn('Jejak akses modul gagal dicatat:', error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn('Jejak akses modul gagal dicatat:', e?.message || e);
+    return false;
+  }
 }
 // ===== SELFIE ABSEN → Storage (fallback base64 di DB). Simpan {url,path} agar objek bisa dihapus saat prune 60 hari. =====
 async function putSelfie(b64) {
@@ -526,6 +569,8 @@ initLms({
   putImage,
   fetchImage,
   putFile,
+  signFile: signLmsFile,
+  logAkses: logAksesModul,
   log: (text, userName) => logActivity(text, userName),
 });
 
