@@ -14,11 +14,11 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   GraduationCap, BookOpen, PlayCircle, CheckCircle2, Clock, Award, ArrowRight, RefreshCw,
-  Library, Search, ArrowLeft, FileText, ExternalLink,
+  Library, Search, ArrowLeft, FileText,
 } from 'lucide-react';
 import {
   loadLmsPaths, loadLmsCourses, loadMyEnrollments, loadMyProgress, loadMyAttempts,
-  loadMySubmissions, loadMyValidations, loadLmsLibrary, loadLibraryBody,
+  loadMySubmissions, loadMyValidations, loadLmsLibrary, loadLibraryBody, lmsLogAkses,
   buildCtx, computeCourseProgress, computePathProgress, nextLessonOf,
   allLessons, courseTotalMinutes, syncEnrollmentStatus, coursePriority,
   ENROLL_STATUS, VALIDATION_STATUS,
@@ -26,7 +26,7 @@ import {
 import {
   LmsCard, LmsBadge, LmsStat, LmsProgressBar, LmsRing, LmsAccordion, LmsEmpty,
   LmsSkeleton, LmsLoading, LmsError, LmsNote, LmsPrimaryBtn, LmsGhostBtn,
-  inputCls, fmtBytes,
+  inputCls, fmtBytes, LmsAreaTerlindungi, useKunciSimpanCetak, usePesanProteksi,
 } from './ui.jsx';
 import CoursePlayer from './CoursePlayer.jsx';
 import PdfReader from './PdfReader.jsx';
@@ -261,7 +261,7 @@ export default function MyLearningView({ user, allUsers }) {
   if (openLibrary) {
     // key = id modul: pembaca dipasang ulang tiap ganti modul, supaya halaman terakhir
     // dan isi bacaannya tidak terbawa dari modul sebelumnya.
-    return <LibraryReader key={openLibrary.id} item={openLibrary} onBack={() => setOpenLibrary(null)} />;
+    return <LibraryReader key={openLibrary.id} item={openLibrary} user={user} onBack={() => setOpenLibrary(null)} />;
   }
 
   return (
@@ -412,12 +412,27 @@ function LibrarySection({ modules, onOpen }) {
 // TIDAK menulis progres apa pun ke database. Yang diingat cuma halaman terakhir,
 // dan itu pun hanya di localStorage perangkat peserta.
 // ============================================================================
-function LibraryReader({ item, onBack }) {
+function LibraryReader({ item, user, onBack }) {
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(item.type === 'text');
   const [errBody, setErrBody] = useState('');
   const [nonce, setNonce] = useState(0);
   const [halaman, setHalaman] = useState(() => bacaHalamanTerakhir(item.id));
+  const { blokir, toast } = usePesanProteksi();
+  // Modul teks pun tidak boleh gampang disalin — kunci pintasan simpan/cetak
+  // selama pembaca terbuka, sama seperti pembaca PDF.
+  useKunciSimpanCetak(item.type === 'text', blokir);
+
+  // JEJAK AKSES: satu baris per pembukaan modul. Best-effort — kegagalan mencatat
+  // tidak boleh membuat karyawan gagal membaca.
+  useEffect(() => {
+    lmsLogAkses({
+      modulId: item.id,
+      userId: user?.id,
+      userName: user?.name,
+      jenis: 'modul-bacaan',
+    });
+  }, [item.id, user?.id, user?.name]);
 
   useEffect(() => {
     if (item.type !== 'text') return;
@@ -461,6 +476,7 @@ function LibraryReader({ item, onBack }) {
       </div>
 
       <LmsCard className="p-5 space-y-4">
+        {toast}
         {item.type === 'text' ? (
           loading ? (
             <LmsLoading text="Memuat isi bacaan..." />
@@ -471,24 +487,30 @@ function LibraryReader({ item, onBack }) {
             </>
           ) : body ? (
             <>
-              <div className="whitespace-pre-wrap text-slate-700 leading-relaxed">{body}</div>
+              {/* Modul teks ikut dilindungi: klik kanan & seleksi teks dimatikan. */}
+              <LmsAreaTerlindungi onBlokir={blokir}>
+                <div className="whitespace-pre-wrap text-slate-700 leading-relaxed">{body}</div>
+              </LmsAreaTerlindungi>
+              <div className="lms-terlindungi-cetak text-sm text-slate-700">
+                Materi ini hanya bisa dibaca di dalam aplikasi Al-Kahfi Team.
+              </div>
               <LmsGhostBtn onClick={() => setNonce(n => n + 1)}>Muat Ulang Isi</LmsGhostBtn>
             </>
           ) : (
             <LmsNote tone="slate">Isi bacaan masih kosong. Hubungi pengelola pembelajaran.</LmsNote>
           )
-        ) : item.pdfUrl ? (
+        ) : (item.pdfPath || item.pdfUrl) ? (
           <>
-            {/* Komponen yang sama dengan materi PDF di kursus — bedanya di sini
-                TIDAK ada satu pun penulisan progres. */}
-            <PdfReader url={item.pdfUrl} initialPage={halaman} onPageView={catatHalaman} />
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="text-[11px] text-slate-500 truncate">{item.pdfName || 'Berkas PDF'}</span>
-              <a href={item.pdfUrl} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 hover:underline">
-                <ExternalLink className="w-4 h-4" /> Buka di tab baru
-              </a>
-            </div>
+            {/* Pembaca terproteksi yang sama dengan materi PDF di kursus — bedanya
+                di sini TIDAK ada satu pun penulisan progres. */}
+            <PdfReader
+              berkas={item}
+              pembaca={{ nama: user?.name, id: user?.username || user?.email || user?.id }}
+              initialPage={halaman}
+              onPageView={catatHalaman}
+              onBlokir={blokir}
+            />
+            <div className="text-[11px] text-slate-500 truncate">{item.pdfName || 'Berkas PDF'}</div>
             <LmsNote tone="slate">
               Halaman terakhir yang Anda buka diingat di perangkat ini, jadi enak dibuka bolak-balik.
               Bacaan ini tidak dinilai dan tidak mempengaruhi progres belajar Anda.
