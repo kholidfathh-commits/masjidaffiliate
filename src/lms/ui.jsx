@@ -17,9 +17,9 @@
 // di sana berisiko; di sini kita punya prop `size` sendiri tanpa menyentuh app.
 // ============================================================================
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Shield, ChevronDown, X, Loader2 } from 'lucide-react';
+import { Shield, ChevronDown, X, Loader2, Lock } from 'lucide-react';
 
 // ---------------------------------------------------------------- Kartu & teks
 export function LmsCard({ children, className = '', ...rest }) {
@@ -201,6 +201,93 @@ export function LmsSkeleton({ rows = 3 }) {
       ))}
     </div>
   );
+}
+
+// ======================================================================
+// AREA TERLINDUNGI (modul bacaan & materi PDF)
+// ----------------------------------------------------------------------
+// Tujuannya menutup jalur penyebaran yang PALING SERING dipakai: klik kanan →
+// simpan, blok teks → salin, Ctrl+S, Ctrl+P. Ini pagar produk, bukan pagar
+// kriptografis — screenshot tetap tidak bisa dicegah, dan mitigasinya adalah
+// watermark identitas yang digambar MENYATU di canvas (lihat PdfReader.jsx).
+// ======================================================================
+
+const PESAN_PROTEKSI_BAWAAN = 'Modul ini hanya untuk dibaca di aplikasi.';
+
+/** Toast kecil di bawah layar, hilang sendiri. */
+export function LmsToast({ text, onDone, ms = 2600 }) {
+  useEffect(() => {
+    if (!text) return;
+    const t = setTimeout(() => onDone?.(), ms);
+    return () => clearTimeout(t);
+  }, [text, ms, onDone]);
+  if (!text) return null;
+  return createPortal(
+    <div className="fixed inset-x-0 bottom-6 z-[120] flex justify-center px-4 pointer-events-none">
+      <div className="flex items-center gap-2 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg max-w-md"
+        style={{ backgroundColor: '#0B1120' }}>
+        <Lock className="w-4 h-4 flex-shrink-0" />
+        <span>{text}</span>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/**
+ * State + toast untuk pesan proteksi. Dipakai bersama LmsAreaTerlindungi
+ * dan useKunciSimpanCetak.
+ * @returns {{blokir: function, toast: React.ReactNode}}
+ */
+export function usePesanProteksi() {
+  const [pesan, setPesan] = useState('');
+  const blokir = useCallback((t) => setPesan(typeof t === 'string' && t ? t : PESAN_PROTEKSI_BAWAAN), []);
+  const toast = <LmsToast text={pesan} onDone={() => setPesan('')} />;
+  return { blokir, toast };
+}
+
+/** Pembungkus: klik kanan mati, teks tidak bisa diseleksi/disalin/di-drag. */
+export function LmsAreaTerlindungi({ children, className = '', onBlokir, style }) {
+  const tolak = (e) => { e.preventDefault(); onBlokir?.(); };
+  return (
+    <div
+      className={'lms-terlindungi ' + className}
+      onContextMenu={tolak}
+      onCopy={tolak}
+      onCut={tolak}
+      onDragStart={(e) => e.preventDefault()}
+      style={{
+        userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none',
+        WebkitTouchCallout: 'none',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Cegah Ctrl/Cmd+S dan Ctrl/Cmd+P SELAMA area terlindungi terbuka saja.
+ * Sengaja tidak dipasang permanen: di halaman lain pintasan itu harus tetap normal.
+ */
+export function useKunciSimpanCetak(aktif, onBlokir) {
+  const ref = useRef(onBlokir);
+  useEffect(() => { ref.current = onBlokir; }, [onBlokir]);
+  useEffect(() => {
+    if (!aktif || typeof window === 'undefined') return;
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = String(e.key || '').toLowerCase();
+      if (k !== 's' && k !== 'p') return;
+      e.preventDefault();
+      e.stopPropagation();
+      ref.current?.();
+    };
+    // capture:true supaya tertangkap sebelum handler lain sempat bereaksi.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [aktif]);
 }
 
 // ---------------------------------------------------------------------- Modal
