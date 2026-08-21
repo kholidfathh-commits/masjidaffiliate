@@ -119,7 +119,7 @@ state lokal `CoursePlayer`; hanya penyelesaian yang memicu `reload()`.
 
 | Hal | Aturan |
 |---|---|
-| PDF disimpan di | Supabase Storage folder `lms-pdf/` lewat `lmsPutFile()`. **Tidak pernah** masuk `kv_store`. Maks 20 MB. |
+| PDF disimpan di | Bucket **privat** `lms-files`, folder `lms-pdf/`, lewat `lmsPutFile()`. Record menyimpan **path**, bukan URL. **Tidak pernah** masuk `kv_store`. Maks 20 MB. Lihat bagian 14. |
 | Persen dibaca | halaman unik yang pernah dibuka ÷ total halaman. 100% → otomatis selesai. |
 | Persen ditonton | detik tontonan **tertinggi** (monotonik, tidak turun saat mundur) ÷ durasi. ≥ 90% → otomatis selesai (disimpan 100). |
 | Video bukan YouTube | perilaku **lama** dipertahankan persis: tombol buka tab baru, tanpa pelacakan. Pengenalan link ada di `youtubeId()` (`data.js`). |
@@ -331,11 +331,12 @@ node uji-lms.mjs
 ```
 
 Satu file Node biasa, tanpa framework & tanpa dependency baru, memakai storage tiruan
-di memori (database production tidak disentuh). Menguji 68 hal: perhitungan progres,
+di memori (database production tidak disentuh). Menguji 79 hal: perhitungan progres,
 label prioritas kursus, kontrak "selesai" record progress (termasuk kompatibilitas mundur
 record lama & progres parsial PDF/video), pengenalan link YouTube, penargetan & idempotensi
-auto-enrollment, penilaian kuis, penomoran percobaan, batas wewenang leader, dan pemisahan
-record modul bacaan. **Jalankan setiap kali `src/lms/data.js` diubah.**
+auto-enrollment, penilaian kuis, penomoran percobaan, batas wewenang leader, pemisahan
+record modul bacaan, dan jalur berkas terproteksi (signed URL vs berkas warisan).
+**Jalankan setiap kali `src/lms/data.js` diubah.**
 
 ---
 
@@ -355,7 +356,7 @@ cuma di kalimat:
 |---|---|
 | Metadata | `lms:library:rec:<id>` — `{ id, title, description, category, type: 'pdf'\|'text', pdfUrl, pdfName, pdfSize, status, order, createdAt, createdById, createdByName, updatedAt }` |
 | Isi teks | `lms:library:body:<id>` — record terpisah, dimuat **on-demand** + cache per sesi, dan **melempar error** saat gagal baca (bukan mengembalikan string kosong) |
-| Isi PDF | Supabase Storage `lms-pdf/`, record hanya menyimpan URL |
+| Isi PDF | Bucket **privat** `lms-files`, record hanya menyimpan **path** (bukan URL) |
 | Admin | Kelola Pembelajaran → tab **Modul Bacaan**: buat, edit, urutkan, Terbitkan/Jadikan Draft, hapus (record + isinya) |
 | Karyawan | *Pembelajaran Saya* → bagian **Modul Bacaan** di bawah jalur belajar. Hanya yang `published`, urut `order`, ada pencarian judul + kategori di sisi klien |
 | Pembaca | tipe `pdf` memakai `PdfReader.jsx` yang sama dengan materi kursus — **tanpa** satu pun penulisan progres; tipe `text` di-render `whitespace-pre-wrap` |
@@ -370,3 +371,48 @@ dijaga bersamanya:
 2. Hapus modul **selalu** menghapus baris isinya, apa pun tipenya — kalau dibatasi ke
    tipe `text`, modul yang pernah teks lalu jadi PDF meninggalkan baris yatim yang ikut
    terbawa backup selamanya.
+
+---
+
+## 14. Berkas terproteksi (materi PDF & modul bacaan)
+
+Tujuannya: berkas tidak bisa diunduh, disalin, atau disebar lewat link. Lima lapis,
+semuanya harus utuh — kalau satu dilepas, lapis lainnya ikut kehilangan artinya.
+
+| Lapis | Mekanisme |
+|---|---|
+| 1. Penyimpanan | Bucket **privat** `lms-files`. URL objeknya tidak bisa dibuka langsung — uji di incognito harus **gagal**. Setup sekali lewat `supabase-lms-private-setup.sql`. |
+| 2. Izin sesaat | `signLmsFile(path, 600)` → signed URL **10 menit**, dibuat hanya saat berkas dibuka. |
+| 3. Baca dari memori | Signed URL langsung di-`fetch` jadi `ArrayBuffer` (`loadLmsFileBytes()`), lalu dilupakan. URL **tidak pernah** masuk `href`, `iframe`, `window.open`, atau state. Karena berkasnya sudah di memori, masa berlaku 10 menit tidak pernah mengganggu yang sedang membaca. |
+| 4. Watermark | Digambar **ke canvas yang sama** setelah tiap halaman selesai dirender: `{nama} • {id} • Al-Kahfi Corp`, opacity 0.12, miring, pola grid. Karena menyatu di piksel, tidak bisa dihapus lewat inspect element. |
+| 5. Penghalang salin | Klik kanan, seleksi teks, drag, `Ctrl/Cmd+S`, `Ctrl/Cmd+P` dimatikan di area terlindungi (`LmsAreaTerlindungi` + `useKunciSimpanCetak` di `ui.jsx`). Jalur cetak lewat menu browser ditutup CSS `@media print`. Modul jenis **Teks Panjang** ikut dilindungi. |
+
+**Kenapa bukan bucket `photos` yang dijadikan privat.** Bucket itu menyimpan seluruh
+foto app (avatar, bukti GMV, lampiran laporan, selfie absen) dan record-nya menyimpan
+**URL publik**. Mematikan public access di sana akan membuat semua foto itu gagal tampil
+seketika. Karena itu berkas LMS dipindah ke bucket privat sendiri.
+
+**Kompatibilitas mundur.** Record lama menyimpan `pdfUrl` (URL publik di bucket `photos`);
+record baru menyimpan `pdfPath`. `loadLmsFileBytes()` memakai `pdfPath` bila ada, dan jatuh
+ke `pdfUrl` bila tidak — materi lama tetap terbaca, tapi berkasnya **belum terlindungi**.
+`berkasBelumTerlindungi()` menandainya, dan halaman admin menampilkan peringatan
+"unggah ulang" pada berkas seperti itu.
+
+**Jejak akses.** Tabel `log_akses_modul` (bukan `kv_store`) diisi satu baris tiap modul
+atau materi PDF dibuka: `modul_id`, `user_id`, `user_nama`, `jenis`, `waktu_buka`.
+Sengaja di luar `kv_store` karena log ini bertambah terus dan bukan data tak tergantikan —
+kalau ditaruh di `kv_store` dia ikut menggemukkan setiap snapshot backup.
+Kegagalan mencatat **tidak pernah** menggagalkan pembacaan materi.
+
+### Batas kejujuran fitur ini
+
+- **Screenshot tidak bisa dicegah.** Watermark identitas adalah mitigasinya: kalau berkas
+  tersebar, ketahuan tersebar lewat siapa. Itu sebabnya watermark WAJIB digambar ke canvas,
+  bukan ditumpuk sebagai elemen DOM.
+- **Ini pagar produk, bukan pagar kriptografis.** App ini tidak punya backend dan
+  publishable key-nya ikut ter-bundle, jadi orang yang paham teknis dan memegang key itu
+  tetap bisa meminta signed URL sendiri. Yang benar-benar dihentikan adalah jalur
+  penyebaran normal: unduh, klik kanan → simpan, salin link, kirim ke grup. Perlindungan
+  sungguhan baru mungkin setelah backlog *Supabase Auth + RLS penuh* dikerjakan —
+  jangan diselundupkan sebagai tambalan kecil.
+- Berkas yang diunggah lalu batal disimpan tetap menjadi objek yatim di bucket.
