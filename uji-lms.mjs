@@ -162,6 +162,52 @@ await L.deleteLibraryBody('lib1');
 cek('hapus modul ikut membersihkan isinya (tidak ada baris yatim)',
   (await L.loadLmsLibrary()).length===0 && (await L.loadLmsLibraryBodies()).length===0);
 
+console.log('\n== BERKAS TERPROTEKSI (bucket privat + signed URL) ==');
+cek('berkas ber-pdfPath dianggap SUDAH terlindungi',
+  L.berkasBelumTerlindungi({pdfPath:'lms-pdf/abc.pdf'})===false);
+cek('berkas warisan (cuma pdfUrl) ditandai BELUM terlindungi',
+  L.berkasBelumTerlindungi({pdfUrl:'https://publik/abc.pdf'})===true);
+cek('umur signed URL <= 10 menit sesuai spesifikasi', L.UMUR_SIGNED_URL_DETIK<=600);
+
+{
+  const fetchAsli = globalThis.fetch;
+  const jejakSign = [];
+  const jejakFetch = [];
+  const jejakLog = [];
+  globalThis.fetch = async (u) => { jejakFetch.push(String(u)); return { ok:true, arrayBuffer: async () => new Uint8Array([37,80,68,70]).buffer }; };
+  L.initLms({
+    signFile: async (path, detik) => { jejakSign.push([path, detik]); return 'https://signed.example/' + path + '?exp=' + detik; },
+    logAkses: async (info) => { jejakLog.push(info); throw new Error('server sibuk'); },
+  });
+
+  const b1 = await L.loadLmsFileBytes({ pdfPath: 'lms-pdf/rahasia.pdf' });
+  cek('berkas privat: signed URL diminta dengan umur yang benar',
+    jejakSign.length===1 && jejakSign[0][0]==='lms-pdf/rahasia.pdf' && jejakSign[0][1]===600);
+  cek('berkas privat: yang di-fetch adalah signed URL, bukan path mentah',
+    jejakFetch.length===1 && jejakFetch[0].startsWith('https://signed.example/'));
+  cek('berkas dikembalikan sebagai bytes untuk dirender dari MEMORI',
+    b1 instanceof Uint8Array && b1.length===4);
+
+  await L.loadLmsFileBytes({ pdfUrl: 'https://publik.example/lama.pdf' });
+  cek('berkas warisan dibaca langsung TANPA minta signed URL',
+    jejakSign.length===1 && jejakFetch[1]==='https://publik.example/lama.pdf');
+
+  let dilempar = false;
+  try { await L.loadLmsFileBytes({}); } catch { dilempar = true; }
+  cek('tanpa path maupun URL -> melempar, bukan diam-diam kosong', dilempar===true);
+
+  globalThis.fetch = async () => ({ ok:false, status:403 });
+  let gagal403 = false;
+  try { await L.loadLmsFileBytes({ pdfPath: 'x.pdf' }); } catch { gagal403 = true; }
+  cek('signed URL kedaluwarsa/ditolak -> error jelas, bukan berkas kosong', gagal403===true);
+
+  await L.lmsLogAkses({ modulId:'m1', userId:'u1' });
+  cek('jejak akses dicatat', jejakLog.length===1 && jejakLog[0].modulId==='m1');
+  cek('jejak akses GAGAL tidak pernah melempar keluar (membaca tetap jalan)', true);
+
+  globalThis.fetch = fetchAsli;
+}
+
 console.log('\n== OTORISASI ==');
 const semuaUser=[{id:'a',role:'operasional',leaderId:'L'},{id:'b',role:'operasional',leaderId:'X'},{id:'L',role:'leader'}];
 cek('leader hanya lihat timnya', L.learnersVisibleTo({id:'L',role:'leader'},semuaUser).map(u=>u.id).join()==='a');
