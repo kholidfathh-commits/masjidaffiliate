@@ -25,12 +25,13 @@ import {
   saveProgress, progressId,
   gradeQuiz, saveAttempt, attemptId, attemptsUsed, attemptsLeft, bestAttempt,
   emptySubmission, submitAssignment, lmsPutImage, lmsFetchImage, loadMyAttempts,
-  coursePriority,
+  coursePriority, lmsLogAkses,
   SUBMISSION_STATUS, LESSON_TYPES,
 } from './data.js';
 import {
   LmsCard, LmsBadge, LmsProgressBar, LmsRing, LmsEmpty, LmsLoading, LmsError,
   LmsNote, LmsPrimaryBtn, LmsGhostBtn, LmsImage, LmsField, inputCls,
+  usePesanProteksi,
 } from './ui.jsx';
 
 const TYPE_ICON = {
@@ -417,6 +418,8 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
   const [busy, setBusy] = useState(false);
   const [actionErr, setActionErr] = useState('');
   const [outlineOpen, setOutlineOpen] = useState(false);
+  // Pesan saat aksi salin / simpan / cetak ditahan di materi PDF.
+  const { blokir: blokirProteksi, toast: toastProteksi } = usePesanProteksi();
 
   // ---- state kuis ----
   const [quizPhase, setQuizPhase] = useState('idle'); // idle | running | result
@@ -585,6 +588,13 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
 
   // Aturan (d): saat berpindah materi / keluar dari pemutar, sisa perubahan disimpan.
   useEffect(() => () => { flushMedia(); }, [activeId, flushMedia]);
+
+  // JEJAK AKSES: materi PDF dicatat saat dibuka (best-effort, tidak memblokir belajar).
+  useEffect(() => {
+    const l = findLesson(course, activeId);
+    if (!l || l.type !== 'pdf') return;
+    lmsLogAkses({ modulId: l.id, userId: user?.id, userName: user?.name, jenis: 'materi-kursus' });
+  }, [course, activeId, user?.id, user?.name]);
 
   /** Dipanggil PdfReader tiap halaman ditampilkan. */
   const bacaHalamanPdf = useCallback((halaman, totalHalaman) => {
@@ -926,6 +936,7 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
 
   return (
     <div className="max-w-7xl">
+      {toastProteksi}
       {/* Header kursus */}
       <div className="flex items-start gap-3 mb-5 pb-4 border-b border-slate-200/60">
         <button type="button" onClick={onBack}
@@ -1009,19 +1020,15 @@ export default function CoursePlayer({ user, course, startLessonId, my, reload, 
                   <LmsCard className="p-5 space-y-4">
                     {lesson.type === 'pdf' && (
                       <div className="space-y-3">
-                        {lesson.pdfUrl ? (
+                        {(lesson.pdfPath || lesson.pdfUrl) ? (
                           <>
                             {/* key={lesson.id} → pembaca dimulai ulang tiap ganti materi,
                                 termasuk halaman awalnya. */}
-                            <PdfReader key={lesson.id} url={lesson.pdfUrl}
-                              initialPage={pdfStartPage} onPageView={bacaHalamanPdf} />
-                            <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <span className="text-[11px] text-slate-500 truncate">{lesson.pdfName || 'Berkas PDF'}</span>
-                              <a href={lesson.pdfUrl} target="_blank" rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 hover:underline">
-                                <ExternalLink className="w-4 h-4" /> Buka di tab baru
-                              </a>
-                            </div>
+                            <PdfReader key={lesson.id} berkas={lesson}
+                              pembaca={{ nama: user?.name, id: user?.username || user?.email || user?.id }}
+                              initialPage={pdfStartPage} onPageView={bacaHalamanPdf}
+                              onBlokir={blokirProteksi} />
+                            <div className="text-[11px] text-slate-500 truncate">{lesson.pdfName || 'Berkas PDF'}</div>
                             <LmsNote>
                               Persen dibaca dihitung dari jumlah halaman yang pernah Anda buka. Materi otomatis ditandai selesai setelah semua halaman terbuka.
                             </LmsNote>
