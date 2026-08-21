@@ -21,6 +21,10 @@ const _dep = {
   // Upload BERKAS (PDF) ke Supabase Storage. Sengaja melempar sebagai bawaan:
   // berkas besar TIDAK BOLEH diam-diam mendarat di kv_store (kuota egress).
   putFile: async () => { throw new Error('Upload berkas belum tersedia (initLms belum menyuntikkan putFile).'); },
+  // Signed URL berumur pendek untuk berkas di bucket PRIVAT.
+  signFile: async () => { throw new Error('Pembaca berkas belum siap (initLms belum menyuntikkan signFile).'); },
+  // Jejak akses modul. Kegagalannya TIDAK PERNAH boleh menggagalkan pembacaan.
+  logAkses: async () => {},
   log: async () => {},
 };
 
@@ -303,6 +307,58 @@ export const lmsFetchImage = (ref) => _dep.fetchImage(ref);
  * di sana persis cara project ini dulu kena batas kuota egress.
  */
 export const lmsPutFile = (blob, opts) => _dep.putFile(blob, opts);
+
+/** Signed URL berumur pendek (detik) untuk satu berkas di bucket privat. */
+export const lmsSignFile = (path, detik) => _dep.signFile(path, detik);
+
+/** Catat "siapa membuka modul apa". Best-effort — tidak pernah melempar keluar. */
+export async function lmsLogAkses(info) {
+  try { await _dep.logAkses(info); } catch { /* jejak gagal tidak boleh memblokir bacaan */ }
+}
+
+// Umur signed URL. Cukup pendek supaya link yang bocor cepat mati, dan itu aman
+// karena berkasnya langsung ditarik ke memori begitu URL didapat — masa berlaku
+// tidak pernah mengganggu peserta yang sedang membaca.
+export const UMUR_SIGNED_URL_DETIK = 600;
+
+/**
+ * Ambil isi berkas PDF sebagai bytes untuk dirender dari MEMORI.
+ *
+ * Kenapa tidak menaruh URL-nya di <a href> / iframe / window.open:
+ *  - URL yang pernah muncul di DOM atau tab baru bisa disalin & disebar;
+ *  - berkas yang dibuka lewat viewer bawaan browser selalu punya tombol
+ *    unduh dan cetak yang tidak bisa kita matikan.
+ * Dengan menariknya ke ArrayBuffer, berkasnya hanya hidup di memori tab ini.
+ *
+ * @param {{pdfPath?: string, pdfUrl?: string}} berkas
+ * @returns {Promise<Uint8Array>}
+ */
+export async function loadLmsFileBytes(berkas) {
+  const path = String(berkas?.pdfPath || '').trim();
+  const urlLama = String(berkas?.pdfUrl || '').trim();
+  let url = '';
+  if (path) {
+    url = await lmsSignFile(path, UMUR_SIGNED_URL_DETIK);
+    if (!url) throw new Error('Izin membaca berkas tidak didapat. Coba muat ulang halaman.');
+  } else if (urlLama) {
+    // KOMPATIBILITAS MUNDUR: berkas yang diunggah sebelum bucket privat dipakai
+    // masih berupa URL publik di bucket 'photos'. Tetap bisa dibaca supaya materi
+    // lama tidak mati, tapi berkasnya sendiri belum terlindungi — unggah ulang
+    // lewat form materi/modul untuk memindahkannya.
+    url = urlLama;
+  } else {
+    throw new Error('Berkas PDF belum tersedia.');
+  }
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Berkas gagal diunduh dari server (kode ' + res.status + ').');
+  const buf = await res.arrayBuffer();
+  if (!buf || buf.byteLength === 0) throw new Error('Berkas kosong atau rusak.');
+  return new Uint8Array(buf);
+}
+
+/** Apakah berkas ini masih memakai URL publik lama (belum pindah ke bucket privat)? */
+export const berkasBelumTerlindungi = (berkas) =>
+  !String(berkas?.pdfPath || '').trim() && !!String(berkas?.pdfUrl || '').trim();
 
 // ============================================================================
 // KUNCI KOMPOSIT DETERMINISTIK
