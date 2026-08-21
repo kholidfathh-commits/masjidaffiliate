@@ -14,8 +14,9 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   BookOpen, Route, Users, BarChart3, Plus, Edit2, Trash2, ArrowUp, ArrowDown,
-  Send, Archive, AlertCircle, CheckCircle2, Sparkles, Upload, FileText, Library,
+  Send, Archive, AlertCircle, CheckCircle2, Sparkles, Upload, FileText, Library, Eye,
 } from 'lucide-react';
+import PdfReader from './PdfReader.jsx';
 import {
   isLmsAdmin, lmsUid, lmsLog,
   COURSE_STATUS, COURSE_PRIORITY, coursePriority, LESSON_TYPES, QUESTION_TYPES,
@@ -25,6 +26,7 @@ import {
   saveLibrary, getLibrary, deleteLibrary, deleteLibraryBody,
   loadLibraryBody, saveLibraryBody,
   loadLessonBody, saveLessonBody, sealQuestion, lmsPutFile, isProgressDone,
+  berkasBelumTerlindungi,
   allLessons, courseTotalMinutes, computePathProgress,
   autoEnrollUser, manualEnroll,
 } from './data.js';
@@ -32,6 +34,7 @@ import {
   LmsCard, LmsBadge, LmsStat, LmsProgressBar, LmsRing, LmsTabs, LmsEmpty,
   LmsNoAccess, LmsLoading, LmsSkeleton, LmsModal, LmsField, LmsActions,
   LmsError, LmsNote, LmsPrimaryBtn, LmsGhostBtn, inputCls, selectCls, fmtBytes,
+  usePesanProteksi,
 } from './ui.jsx';
 
 // Batas ukuran PDF (materi kursus & modul bacaan). Storage Supabase punya batasnya
@@ -41,6 +44,36 @@ const MAX_PDF_MB = 20;
 // Tipe materi yang punya "isi materi"/catatan pendamping di record terpisah
 // (lms:lesson:body:<lessonId>). Kuis & tugas praktik tidak punya.
 const BODY_TYPES = ['text', 'pdf', 'video', 'document'];
+
+/** Apakah record ini sudah punya berkas PDF (path baru ATAU URL lama)? */
+const punyaPdf = (r) => !!(String(r?.pdfPath || '').trim() || String(r?.pdfUrl || '').trim());
+
+/**
+ * Pratinjau berkas untuk admin — memakai pembaca TERPROTEKSI yang sama dengan
+ * karyawan. Sengaja BUKAN tautan ke berkasnya: tautan berarti URL berkas muncul
+ * di DOM dan bisa disalin, dan itu persis yang ingin dicegah fitur ini.
+ */
+function PratinjauPdfModal({ berkas, judul, user, onClose }) {
+  const { blokir, toast } = usePesanProteksi();
+  return (
+    <LmsModal size="xl" title="Pratinjau Berkas" subtitle={judul || 'Berkas PDF'} onClose={onClose}>
+      {toast}
+      <PdfReader
+        berkas={berkas}
+        pembaca={{ nama: user?.name, id: user?.username || user?.email || user?.id }}
+        onBlokir={blokir}
+      />
+      {berkasBelumTerlindungi(berkas) && (
+        <div className="mt-3">
+          <LmsNote tone="amber">
+            Berkas ini masih tersimpan di penyimpanan <b>lama yang publik</b>. Unggah ulang berkasnya
+            supaya pindah ke penyimpanan privat dan ikut terlindungi.
+          </LmsNote>
+        </div>
+      )}
+    </LmsModal>
+  );
+}
 
 // ---------------------------------------------------------------- Konstanta
 const DIVISION_OPTIONS = [
@@ -491,6 +524,7 @@ function LearningAdminBody({ user, allUsers, settings }) {
 
           {tab === 'bacaan' && (
             <BacaanTab
+              user={user}
               modules={library}
               onNew={() => setLibraryModal({ initial: null })}
               onEdit={(m) => setLibraryModal({ initial: m })}
@@ -840,6 +874,7 @@ function CourseBuilder({ initial, user, onClose, onSaved }) {
           initialBody={editor.body}
           loadingBody={editor.loadingBody}
           bodyFailed={!!editor.bodyFailed}
+          user={user}
           onCancel={() => setEditor(null)}
           onSave={commitLesson}
         />
@@ -995,12 +1030,13 @@ function CourseBuilder({ initial, user, onClose, onSaved }) {
 }
 
 // ---------------------------------------------------------------- Editor materi
-function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onCancel, onSave }) {
+function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, user, onCancel, onSave }) {
   const [lesson, setLesson] = useState(() => deepCopy(initialLesson));
   const [body, setBody] = useState(initialBody || '');
   const [err, setErr] = useState('');
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfErr, setPdfErr] = useState('');
+  const [pratinjau, setPratinjau] = useState(false);
   const pdfRef = useRef(null);
 
   // Isi materi baru selesai dimuat setelah editor dibuka → sinkronkan sekali.
@@ -1021,8 +1057,11 @@ function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onC
     if (file.size > MAX_PDF_MB * 1024 * 1024) { setPdfErr('Ukuran PDF maksimal ' + MAX_PDF_MB + ' MB.'); return; }
     setPdfBusy(true);
     try {
-      const url = await lmsPutFile(file, { folder: 'lms-pdf/', contentType: 'application/pdf' });
-      setLesson(l => ({ ...l, pdfUrl: url, pdfName: file.name, pdfSize: file.size }));
+      // putFile mengembalikan PATH di bucket PRIVAT, bukan URL publik. pdfUrl lama
+      // dikosongkan supaya materi yang diunggah ulang benar-benar pindah ke
+      // penyimpanan terproteksi (kalau tidak, URL publik lamanya tetap hidup).
+      const path = await lmsPutFile(file, { folder: 'lms-pdf/', contentType: 'application/pdf' });
+      setLesson(l => ({ ...l, pdfPath: path, pdfUrl: '', pdfName: file.name, pdfSize: file.size }));
     } catch (ex) {
       setPdfErr('Gagal mengunggah PDF: ' + (ex?.message || ex));
     } finally {
@@ -1040,7 +1079,7 @@ function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onC
   const save = () => {
     if (!lesson.title.trim()) { setErr('Judul materi wajib diisi.'); return; }
     if (lesson.type === 'video' && !(lesson.videoUrl || '').trim()) { setErr('Link video wajib diisi.'); return; }
-    if (lesson.type === 'pdf' && !(lesson.pdfUrl || '').trim()) { setErr('Berkas PDF wajib diunggah.'); return; }
+    if (lesson.type === 'pdf' && !punyaPdf(lesson)) { setErr('Berkas PDF wajib diunggah.'); return; }
     if (lesson.type === 'document' && !(lesson.docUrl || '').trim()) { setErr('Link dokumen wajib diisi.'); return; }
     if (lesson.type === 'quiz' && (lesson.quiz?.questions || []).length === 0) { setErr('Kuis harus punya minimal satu soal.'); return; }
     if (lesson.type === 'assignment' && !(lesson.assignment?.instructions || '').trim()) { setErr('Instruksi tugas wajib diisi.'); return; }
@@ -1056,7 +1095,8 @@ function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onC
     if (lesson.type === 'video') clean.videoUrl = (lesson.videoUrl || '').trim();
     if (lesson.type === 'document') clean.docUrl = (lesson.docUrl || '').trim();
     if (lesson.type === 'pdf') {
-      clean.pdfUrl = (lesson.pdfUrl || '').trim();
+      clean.pdfPath = (lesson.pdfPath || '').trim();          // bucket privat (baru)
+      clean.pdfUrl = (lesson.pdfUrl || '').trim();            // URL publik lama — dipertahankan apa adanya
       clean.pdfName = (lesson.pdfName || '').trim();
       clean.pdfSize = num(lesson.pdfSize, 0);
     }
@@ -1128,19 +1168,17 @@ function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onC
         <div className="space-y-3">
           <LmsField
             label="Berkas PDF"
-            hint={'Maksimal ' + MAX_PDF_MB + ' MB. Berkas disimpan di penyimpanan file (CDN), BUKAN di database — supaya kuota data aman. Peserta membacanya langsung di dalam aplikasi dan persen dibacanya tercatat otomatis.'}
+            hint={'Maksimal ' + MAX_PDF_MB + ' MB. Berkas disimpan di penyimpanan PRIVAT (bukan di database, dan tidak bisa dibuka tanpa login). Peserta membacanya di dalam aplikasi dengan watermark nama mereka; persen dibacanya tercatat otomatis.'}
           >
-            {lesson.pdfUrl ? (
+            {punyaPdf(lesson) ? (
               <div className="flex items-center gap-2 flex-wrap border border-slate-200 rounded-xl p-3 bg-slate-50">
                 <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-slate-800 truncate">{lesson.pdfName || 'Berkas PDF'}</div>
                   <div className="text-[11px] text-slate-500">{fmtBytes(lesson.pdfSize)}</div>
                 </div>
-                <a href={lesson.pdfUrl} target="_blank" rel="noopener noreferrer"
-                  className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50">
-                  Lihat
-                </a>
+                {/* Pratinjau memakai pembaca terproteksi — BUKAN tautan ke berkasnya. */}
+                <LmsGhostBtn icon={Eye} onClick={() => setPratinjau(true)}>Pratinjau</LmsGhostBtn>
                 <LmsGhostBtn icon={Upload} onClick={() => pdfRef.current?.click()} disabled={pdfBusy}>
                   {pdfBusy ? 'Mengunggah...' : 'Ganti File'}
                 </LmsGhostBtn>
@@ -1153,6 +1191,16 @@ function LessonEditor({ initialLesson, initialBody, loadingBody, bodyFailed, onC
             <input ref={pdfRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={pilihPdf} />
           </LmsField>
           {pdfErr && <LmsError>{pdfErr}</LmsError>}
+          {berkasBelumTerlindungi(lesson) && (
+            <LmsNote tone="amber">
+              Berkas materi ini masih di penyimpanan <b>lama yang publik</b>. Tekan <b>Ganti File</b> dan
+              unggah ulang berkas yang sama supaya pindah ke penyimpanan privat dan ikut terlindungi.
+            </LmsNote>
+          )}
+          {pratinjau && (
+            <PratinjauPdfModal berkas={lesson} judul={lesson.pdfName} user={user}
+              onClose={() => setPratinjau(false)} />
+          )}
           <LmsField label="Catatan Pendamping">
             <textarea className={inputCls} rows={5} value={body} onChange={e => setBody(e.target.value)} disabled={bodyFailed || loadingBody}
               placeholder="Bagian mana yang harus dibaca lebih dulu (opsional)" />
@@ -2031,7 +2079,8 @@ function AssignModal({ actor, person, paths, enrollments, onClose, onSaved }) {
 //  - isi teks di record TERPISAH (lms:library:body:) supaya memuat daftar tetap ringan,
 //  - PDF di Supabase Storage, bukan di database.
 // ============================================================================
-function BacaanTab({ modules, onNew, onEdit, onToggleStatus, onMove, onDelete }) {
+function BacaanTab({ user, modules, onNew, onEdit, onToggleStatus, onMove, onDelete }) {
+  const [pratinjau, setPratinjau] = useState(null); // modul yang sedang dipratinjau
   const sorted = useMemo(
     () => [...modules].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     [modules]
@@ -2086,6 +2135,9 @@ function BacaanTab({ modules, onNew, onEdit, onToggleStatus, onMove, onDelete })
                     <div className="text-[11px] text-slate-500 mt-2 flex items-center gap-3 flex-wrap">
                       {m.type === 'pdf' && <span className="truncate max-w-[220px]">{m.pdfName || 'Berkas PDF'}</span>}
                       {m.type === 'pdf' && num(m.pdfSize) > 0 && <span>{fmtBytes(m.pdfSize)}</span>}
+                      {m.type === 'pdf' && berkasBelumTerlindungi(m) && (
+                        <span className="text-amber-700 font-semibold">Berkas belum terlindungi — unggah ulang</span>
+                      )}
                       {m.createdByName && <span>Dibuat oleh {m.createdByName}</span>}
                     </div>
                   </div>
@@ -2098,11 +2150,10 @@ function BacaanTab({ modules, onNew, onEdit, onToggleStatus, onMove, onDelete })
                   ) : (
                     <LmsPrimaryBtn icon={Send} onClick={() => onToggleStatus(m)}>Terbitkan</LmsPrimaryBtn>
                   )}
-                  {m.type === 'pdf' && m.pdfUrl && (
-                    <a href={m.pdfUrl} target="_blank" rel="noopener noreferrer"
-                      className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50">
-                      Lihat PDF
-                    </a>
+                  {/* Pratinjau lewat pembaca terproteksi. SENGAJA bukan tautan:
+                      tautan berarti URL berkas muncul di DOM dan bisa disalin. */}
+                  {m.type === 'pdf' && punyaPdf(m) && (
+                    <LmsGhostBtn icon={Eye} onClick={() => setPratinjau(m)}>Pratinjau</LmsGhostBtn>
                   )}
                   <button onClick={() => onDelete(m)}
                     className="px-3 py-2 rounded-lg font-semibold text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 border border-red-200">
@@ -2113,6 +2164,11 @@ function BacaanTab({ modules, onNew, onEdit, onToggleStatus, onMove, onDelete })
             );
           })}
         </div>
+      )}
+
+      {pratinjau && (
+        <PratinjauPdfModal berkas={pratinjau} judul={pratinjau.title} user={user}
+          onClose={() => setPratinjau(null)} />
       )}
     </div>
   );
@@ -2126,6 +2182,7 @@ function newLibraryModule(order) {
     description: '',
     category: '',
     type: 'pdf',
+    pdfPath: '',
     pdfUrl: '',
     pdfName: '',
     pdfSize: 0,
@@ -2148,6 +2205,7 @@ function LibraryBuilder({ initial, user, nextOrder, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfErr, setPdfErr] = useState('');
+  const [pratinjau, setPratinjau] = useState(false);
   const pdfRef = useRef(null);
 
   useEffect(() => {
@@ -2175,8 +2233,10 @@ function LibraryBuilder({ initial, user, nextOrder, onClose, onSaved }) {
     if (file.size > MAX_PDF_MB * 1024 * 1024) { setPdfErr('Ukuran PDF maksimal ' + MAX_PDF_MB + ' MB.'); return; }
     setPdfBusy(true);
     try {
-      const url = await lmsPutFile(file, { folder: 'lms-pdf/', contentType: 'application/pdf' });
-      setForm(f => ({ ...f, pdfUrl: url, pdfName: file.name, pdfSize: file.size }));
+      // PATH di bucket privat. pdfUrl lama dikosongkan supaya berkas yang diunggah
+      // ulang benar-benar pindah ke penyimpanan terproteksi.
+      const path = await lmsPutFile(file, { folder: 'lms-pdf/', contentType: 'application/pdf' });
+      setForm(f => ({ ...f, pdfPath: path, pdfUrl: '', pdfName: file.name, pdfSize: file.size }));
     } catch (ex) {
       setPdfErr('Gagal mengunggah PDF: ' + (ex?.message || ex));
     } finally {
@@ -2187,7 +2247,7 @@ function LibraryBuilder({ initial, user, nextOrder, onClose, onSaved }) {
   const handleSave = async () => {
     setErr('');
     if (!form.title.trim()) { setErr('Judul modul wajib diisi.'); return; }
-    if (form.type === 'pdf' && !(form.pdfUrl || '').trim()) { setErr('Berkas PDF wajib diunggah.'); return; }
+    if (form.type === 'pdf' && !punyaPdf(form)) { setErr('Berkas PDF wajib diunggah.'); return; }
     if (form.type === 'text' && !bodyFailed && !body.trim()) { setErr('Isi teks wajib diisi.'); return; }
     setSaving(true);
     const teks = form.type === 'text';
@@ -2197,7 +2257,8 @@ function LibraryBuilder({ initial, user, nextOrder, onClose, onSaved }) {
       description: (form.description || '').trim(),
       category: (form.category || '').trim(),
       type: teks ? 'text' : 'pdf',
-      pdfUrl: teks ? '' : (form.pdfUrl || '').trim(),
+      pdfPath: teks ? '' : (form.pdfPath || '').trim(),   // bucket privat (baru)
+      pdfUrl: teks ? '' : (form.pdfUrl || '').trim(),     // URL publik lama, dipertahankan apa adanya
       pdfName: teks ? '' : (form.pdfName || '').trim(),
       pdfSize: teks ? 0 : num(form.pdfSize, 0),
       status: form.status === 'published' ? 'published' : 'draft',
@@ -2289,18 +2350,16 @@ function LibraryBuilder({ initial, user, nextOrder, onClose, onSaved }) {
 
         {form.type !== 'text' && (
           <div className="space-y-3">
-            <LmsField label="Berkas PDF" hint={'Maksimal ' + MAX_PDF_MB + ' MB. Disimpan di penyimpanan file (CDN), bukan di database.'}>
-              {form.pdfUrl ? (
+            <LmsField label="Berkas PDF" hint={'Maksimal ' + MAX_PDF_MB + ' MB. Disimpan di penyimpanan PRIVAT — tidak bisa dibuka tanpa login, dan dibaca di dalam aplikasi dengan watermark nama pembaca.'}>
+              {punyaPdf(form) ? (
                 <div className="flex items-center gap-2 flex-wrap border border-slate-200 rounded-xl p-3 bg-slate-50">
                   <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-slate-800 truncate">{form.pdfName || 'Berkas PDF'}</div>
                     <div className="text-[11px] text-slate-500">{fmtBytes(form.pdfSize)}</div>
                   </div>
-                  <a href={form.pdfUrl} target="_blank" rel="noopener noreferrer"
-                    className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50">
-                    Lihat
-                  </a>
+                  {/* Pratinjau memakai pembaca terproteksi — BUKAN tautan ke berkasnya. */}
+                  <LmsGhostBtn icon={Eye} onClick={() => setPratinjau(true)}>Pratinjau</LmsGhostBtn>
                   <LmsGhostBtn icon={Upload} onClick={() => pdfRef.current?.click()} disabled={pdfBusy}>
                     {pdfBusy ? 'Mengunggah...' : 'Ganti File'}
                   </LmsGhostBtn>
@@ -2313,6 +2372,16 @@ function LibraryBuilder({ initial, user, nextOrder, onClose, onSaved }) {
               <input ref={pdfRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={pilihPdf} />
             </LmsField>
             {pdfErr && <LmsError>{pdfErr}</LmsError>}
+            {berkasBelumTerlindungi(form) && (
+              <LmsNote tone="amber">
+                Berkas modul ini masih di penyimpanan <b>lama yang publik</b>. Tekan <b>Ganti File</b> dan
+                unggah ulang berkas yang sama supaya pindah ke penyimpanan privat.
+              </LmsNote>
+            )}
+            {pratinjau && (
+              <PratinjauPdfModal berkas={form} judul={form.pdfName} user={user}
+                onClose={() => setPratinjau(false)} />
+            )}
           </div>
         )}
 
