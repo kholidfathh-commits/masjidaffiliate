@@ -1300,6 +1300,10 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [entered, setEntered] = useState(false);
+  // INSIDEN 29 Agu 2026: gagal baca server pernah dianggap "database kosong" → app menampilkan
+  // Setup Pertama → owner baru dibuat → users:list (29 akun) tertimpa 1 akun. Flag ini memisahkan
+  // "gagal memuat" dari "memang belum ada user". JANGAN dihapus.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const refreshAll = async () => {
     const [users, s] = await Promise.all([
@@ -1326,6 +1330,7 @@ export default function App() {
         const sidebarPref = await storage.get('ui:sidebar-open', false);
         if (sidebarPref !== null && typeof sidebarPref === 'boolean') setSidebarOpen(sidebarPref);
       } catch (e) {
+        setLoadFailed(true); // gagal baca server ≠ data kosong → JANGAN tampilkan Setup Pertama
         console.error('Load awal gagal (akan dicoba ulang):', e?.message || e);
       } finally {
         setLoading(false); // jangan nyangkut di layar loading walau server sempat gagal
@@ -1383,6 +1388,10 @@ export default function App() {
 
   if (!currentUser && !entered) {
     return <LandingPage settings={settings} onGetStarted={() => setEntered(true)} />;
+  }
+  // Server tak terbaca → layar "gagal muat" (BUKAN Setup Pertama, yang akan menimpa users:list).
+  if (loadFailed && allUsers.length === 0) {
+    return <LoadFailedScreen settings={settings} />;
   }
   if (allUsers.length === 0) {
     return <FirstTimeSetup settings={settings} onComplete={async u => { await refreshAll(); handleLogin(u); }} />;
@@ -1650,6 +1659,34 @@ function LandingPage({ settings, onGetStarted }) {
 }
 
 // ============ FIRST TIME SETUP ============
+// ============ LAYAR: DATA GAGAL DIMUAT ============
+// Muncul HANYA saat pembacaan ke server gagal (bukan saat database benar-benar kosong).
+// Sengaja tidak menawarkan "buat akun owner" — itu yang menyebabkan insiden 29 Agu 2026.
+function LoadFailedScreen({ settings }) {
+  return (
+    <AuthShell settings={settings}>
+      <div className="text-center">
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-amber-50 text-amber-800 rounded-full text-xs font-bold mb-4 border border-amber-200/60">
+          <AlertCircle className="w-3.5 h-3.5" /> KONEKSI BERMASALAH
+        </div>
+        <h2 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">Data Gagal Dimuat</h2>
+        <p className="text-sm text-slate-500 mt-2 leading-relaxed">
+          Server data sedang tidak bisa dihubungi, jadi daftar akun belum bisa ditampilkan.
+          Data Anda <b>aman</b> — ini murni masalah koneksi, bukan data hilang.
+        </p>
+        <button onClick={() => window.location.reload()}
+          className="w-full bg-gradient-to-r from-[#2563EB] to-blue-700 hover:from-[#2563EB] hover:to-blue-800 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-blue-900/20 hover:shadow-xl hover:shadow-blue-900/30 flex items-center justify-center gap-2 mt-6">
+          <RefreshCw className="w-4 h-4" /> Coba Muat Ulang
+        </button>
+        <p className="text-[11px] text-center text-slate-500 mt-3 leading-relaxed">
+          <Shield className="w-3 h-3 inline -mt-0.5 mr-1 text-blue-600" />
+          Jangan membuat akun baru saat layar ini muncul. Kalau berulang, hubungi Manajer.
+        </p>
+      </div>
+    </AuthShell>
+  );
+}
+
 function FirstTimeSetup({ settings, onComplete }) {
   const [form, setForm] = useState({ name: '', username: '', password: '', confirmPassword: '' });
   const [show, setShow] = useState(false);
@@ -1663,6 +1700,19 @@ function FirstTimeSetup({ settings, onComplete }) {
     if (form.password !== form.confirmPassword) return setError('Konfirmasi password tidak cocok.');
     if (!/^[a-z0-9_.]+$/.test(form.username)) return setError('Username hanya boleh huruf kecil, angka, titik, dan underscore.');
     setBusy(true);
+    // PENGAMAN GANDA (insiden 29 Agu 2026): baris di bawah menimpa SELURUH users:list.
+    // Jadi pastikan dulu ke server bahwa daftarnya memang benar-benar kosong.
+    try {
+      const existing = await storage.getList('users:list'); // melempar error kalau server bermasalah
+      if (existing.length > 0) {
+        setBusy(false);
+        return setError('Sistem sudah punya akun terdaftar. Layar ini muncul karena data sempat gagal dimuat. Muat ulang halaman lalu login seperti biasa — jangan buat akun baru.');
+      }
+    } catch (e) {
+      setBusy(false);
+      console.error('Verifikasi users:list sebelum setup GAGAL:', e?.message || e);
+      return setError('Tidak bisa memverifikasi data ke server. Muat ulang halaman dan coba lagi. Jangan membuat akun baru saat koneksi bermasalah.');
+    }
     const salt = genSalt();
     const passwordHash = await hashPassword(form.password, salt);
     const newUser = {
@@ -1736,12 +1786,28 @@ function LoginScreen({ allUsers, settings, onLogin }) {
     setError('');
     if (!form.username.trim() || !form.password) return setError('Lengkapi username dan password.');
     setBusy(true);
-    const user = allUsers.find(u => u.username === form.username.trim().toLowerCase());
-    if (!user) { setBusy(false); return setError('Username tidak ditemukan.'); }
-    const hash = await hashPassword(form.password, user.salt);
-    if (hash !== user.passwordHash) { setBusy(false); return setError('Password salah.'); }
-    setBusy(false);
-    onLogin(user);
+    const uname = form.username.trim().toLowerCase();
+    const match = list => (list || []).find(u => (u?.username || '').trim().toLowerCase() === uname);
+    try {
+      // Sebelum memvonis "username tidak ditemukan", cek ulang ke server: daftar di memori bisa
+      // basi/tidak lengkap kalau load awal sempat gagal. Kalau server bermasalah, getList MELEMPAR
+      // error → masuk catch → pesannya "gangguan sistem", BUKAN "username tidak ditemukan".
+      let user = match(allUsers);
+      if (!user) user = match(await storage.getList('users:list'));
+      if (!user) { setBusy(false); return setError('Username tidak ditemukan.'); }
+      if (!user.salt || !user.passwordHash) {
+        setBusy(false);
+        return setError('Akun ini belum punya password. Hubungi Manajer atau Leader untuk reset.');
+      }
+      const hash = await hashPassword(form.password, user.salt);
+      if (hash !== user.passwordHash) { setBusy(false); return setError('Password salah.'); }
+      setBusy(false);
+      onLogin(user);
+    } catch (e) {
+      setBusy(false);
+      console.error('Login gagal — gangguan sistem/koneksi:', e?.message || e); // detail hanya di log
+      setError('Terjadi gangguan sistem. Cek koneksi internet lalu coba lagi.');
+    }
   };
 
   return (
