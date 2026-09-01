@@ -33,6 +33,14 @@ import {
   loadLmsQuizResets, loadLmsLibrary, loadLmsLibraryBodies,
   autoEnrollUser, loadMyEnrollments,
 } from './lms/data.js';
+
+// ============ MODUL ABSENSI (logika murni) ============
+// Fungsi tanggal & status absensi dipisah ke file sendiri supaya bisa diuji lewat
+// `node uji-absensi.mjs` tanpa menjalankan React. File itu TIDAK meng-import App.jsx
+// (aturan anti circular import yang sama dengan src/lms/).
+import * as Abs from './absensi/logika.js';
+import { wibDayKey } from './absensi/logika.js';
+
 // Halaman LMS dimuat LAZY: anggota yang tidak pernah membuka menu Pembelajaran
 // tidak ikut mengunduh kodenya (bundle utama app sudah ~973 kB).
 const MyLearningView = React.lazy(() => import('./lms/MyLearning.jsx'));
@@ -1107,7 +1115,8 @@ const dayKey = (d = new Date()) => {
 };
 // Tanggal kalender (YYYY-MM-DD) dalam WIB dari sebuah timestamp — supaya pengelompokan tanggal
 // (mis. absensi yang disimpan sebagai timestamp UTC) konsisten di semua device, bukan ikut zona perangkat.
-const wibDayKey = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(d));
+// Definisinya kini ada di `src/absensi/logika.js` (di-import di atas) supaya app & file uji
+// memakai fungsi yang PERSIS SAMA — tidak ada lagi dua salinan yang bisa berbeda diam-diam.
 const daysInMonth = (mKey) => { const [y, m] = mKey.split('-').map(Number); return new Date(y, m, 0).getDate(); };
 const DEFAULT_AFFILIATE_GOAL = 1000000000; // target Affiliator Internal default 1 Miliar/bulan
 
@@ -1189,7 +1198,16 @@ function computeKpi(userId, data, mKey, cfg) {
   // 1) Kehadiran: hadir penuh = 1 hari, izin disetujui = kredit 0.5 hari, alpa = 0 (otomatis mengurangi)
   const myIns = attendance.filter(a => a.userId === userId && a.type === 'in' && (a.timestamp || '').slice(0, 7) === mKey);
   const attDays = new Set(myIns.map(a => (a.timestamp || '').slice(0, 10))).size;
-  const izinDays = new Set(leaves.filter(l => l.userId === userId && l.status === 'approved' && (l.date || '').slice(0, 7) === mKey).map(l => l.date)).size;
+  // Izin multi-hari (punya `dateEnd`) dihitung PER HARI yang jatuh di bulan ini — bukan 1 hari.
+  // Record lama tanpa `dateEnd` otomatis tetap 1 hari, jadi skor KPI lama tidak berubah.
+  const izinDaySet = new Set();
+  for (const l of leaves) {
+    if (!l || l.userId !== userId || l.status !== 'approved') continue;
+    for (const d of Abs.daftarHari(Abs.izinMulai(l), Abs.izinSelesai(l), 62)) {
+      if (d.slice(0, 7) === mKey) izinDaySet.add(d);
+    }
+  }
+  const izinDays = izinDaySet.size;
   const attScore = Math.min((attDays + izinDays * 0.5) / workdays, 1) * w.attendance;
 
   // 2) Disiplin: % absen masuk tepat waktu. Tidak pernah absen = 0 (bukan 100%) — tanpa kehadiran tidak ada disiplin.
@@ -3814,7 +3832,7 @@ function DateRangePopover({ value, onChange, tabs = ['custom', 'day', 'week', 'm
   const [pendStart, setPendStart] = useState(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const btnRef = useRef(null);
-  const today = dayKey();
+  const today = wibDayKey(); // acuan "hari ini" ikut WIB, bukan zona perangkat
   const maxD = maxDate === undefined ? today : maxDate; // null = boleh masa depan
   const start = value?.start || '';
   const end = value?.end || '';
@@ -3860,14 +3878,16 @@ function DateRangePopover({ value, onChange, tabs = ['custom', 'day', 'week', 'm
     emit('month', 'Bulan', `${mk}-01`, clampEnd(`${mk}-${String(last).padStart(2, '0')}`));
   };
 
-  const defPresets = [
-    { label: 'Hari Ini', get: () => ({ id: 'day', label: 'Hari Ini', start: today, end: today }) },
-    { label: 'Kemarin', get: () => { const d = new Date(); d.setDate(d.getDate() - 1); const k = dayKey(d); return { id: 'day', label: 'Kemarin', start: k, end: k }; } },
-    { label: '7 Hari Terakhir', get: () => { const d = new Date(); d.setDate(d.getDate() - 6); return { id: 'custom', label: '7 Hari Terakhir', start: dayKey(d), end: today }; } },
-    { label: '28 Hari Terakhir', get: () => { const d = new Date(); d.setDate(d.getDate() - 27); return { id: 'custom', label: '28 Hari Terakhir', start: dayKey(d), end: today }; } },
-    { label: 'Bulan Ini', get: () => { const n = new Date(); const mk = monthKey(); const last = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate(); return { id: 'this-month', label: 'Bulan Ini', start: `${mk}-01`, end: `${mk}-${String(last).padStart(2, '0')}` }; } },
-    { label: 'Bulan Lalu', get: () => { const n = new Date(); const s = new Date(n.getFullYear(), n.getMonth() - 1, 1); const e = new Date(n.getFullYear(), n.getMonth(), 0); return { id: 'month', label: 'Bulan Lalu', start: dayKey(s), end: dayKey(e) }; } }
-  ];
+  // Preset rentang dihitung di `src/absensi/logika.js` dengan acuan hari WIB dan
+  // aritmetika string/UTC. Dulu preset dibuat dari `new Date()` perangkat sehingga bisa
+  // geser sehari di device yang zonanya bukan WIB. Semuanya INKLUSIF:
+  // acuan 27 Agu → "7 Hari Terakhir" = 21–27 Agu (bukan 21 Agu saja).
+  // `idLama` dipakai saat emit supaya Dashboard & Keuangan (yang membedakan mode bulan
+  // lewat id 'this-month'/'month') tetap berperilaku sama seperti sebelumnya.
+  const defPresets = Abs.PRESET_RENTANG.map(p => ({
+    label: p.label,
+    get: () => { const r = Abs.rentangPreset(p.id, wibDayKey()); return { ...r, id: r.idLama }; },
+  }));
 
   // grid 42 sel, Senin dulu
   const firstDow = (new Date(view.y, view.m, 1).getDay() + 6) % 7;
@@ -8701,7 +8721,11 @@ function AttendanceView({ user, allUsers }) {
   const [note, setNote] = useState('');
   const [filterUser, setFilterUser] = useState('all');
   const [filterDiv, setFilterDiv] = useState('all');
-  const [filterDate, setFilterDate] = useState(''); // '' = semua tanggal
+  // RENTANG tanggal rekap ({start,end} kosong = semua tanggal).
+  // Dulu ini cuma SATU tanggal (`filterDate`) padahal preset kalender mengirim rentang,
+  // sehingga "7 Hari Terakhir" hanya menampilkan tanggal awalnya saja (21 Agu, bukan 21–27 Agu).
+  const [filterRange, setFilterRange] = useState({ id: 'all', label: 'Semua', start: '', end: '' });
+  const [sertakanTanpaData, setSertakanTanpaData] = useState(true); // tampilkan juga yg tak absen & tak izin
   const [config, setConfig] = useState(DEFAULT_ATTENDANCE_CONFIG);
   const [result, setResult] = useState(null);   // banner hasil absen (telat/lokasi)
   const [showSettings, setShowSettings] = useState(false);
@@ -8874,15 +8898,19 @@ function AttendanceView({ user, allUsers }) {
     const rec = {
       id: uid(), userId: user.id, userName: user.name, division: user.division || '',
       type: data.type, date: data.date, reason: data.reason,
+      // `dateEnd` OPSIONAL & BARU: hanya ditulis kalau izinnya memang lebih dari 1 hari.
+      // Record lama tanpa field ini tetap dibaca sebagai izin 1 hari — tidak ada migrasi.
+      ...(data.dateEnd && data.dateEnd > data.date ? { dateEnd: data.dateEnd } : {}),
       status: 'pending', createdAt: new Date().toISOString()
     };
     const ok = await storage.set(LEAVE_REC_PREFIX + rec.id, rec);
     if (!ok) { alert('Gagal mengajukan izin. Coba lagi saat koneksi stabil.'); return; }
-    await logActivity(`mengajukan ${data.type === 'sakit' ? 'izin sakit' : 'izin'} untuk ${fmtDate(data.date)}`, user.name);
+    const rentang = rec.dateEnd ? `${fmtDate(rec.date)} s/d ${fmtDate(rec.dateEnd)}` : fmtDate(rec.date);
+    await logActivity(`mengajukan ${data.type === 'sakit' ? 'izin sakit' : 'izin'} untuk ${rentang}`, user.name);
     setShowIzin(false); await load();
   };
   const cancelIzin = async (l) => {
-    if (!confirm(`Batalkan pengajuan izin ${fmtDate(l.date)}?`)) return;
+    if (!confirm(`Batalkan pengajuan izin ${fmtRentangIzin(l)}?`)) return;
     const ok = await storage.delete(LEAVE_REC_PREFIX + l.id);
     if (!ok) { alert('Gagal membatalkan izin. Coba lagi.'); return; }
     setLeaveDetail(null); await load();
@@ -8893,12 +8921,13 @@ function AttendanceView({ user, allUsers }) {
     if (!cur) return;
     const ok = await storage.set(LEAVE_REC_PREFIX + l.id, { ...cur, status, note, decidedById: user.id, decidedByName: user.name, decidedAt: new Date().toISOString() });
     if (!ok) { alert('Gagal menyimpan keputusan izin. Coba lagi.'); return; }
-    await logActivity(`${status === 'approved' ? 'menyetujui' : 'menolak'} izin ${l.userName} (${fmtDate(l.date)})`, user.name);
+    await logActivity(`${status === 'approved' ? 'menyetujui' : 'menolak'} izin ${l.userName} (${fmtRentangIzin(l)})`, user.name);
     setLeaveDetail(null); await load();
   };
   const myLeaves = leaves.filter(l => l.userId === user.id).sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 6);
   const pendingForMe = leaves.filter(l => l.status === 'pending' && canDecideLeave(l)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  const approvedTodayLeave = leaves.find(l => l.userId === user.id && l.status === 'approved' && l.date === dayKey());
+  // Pakai wibDayKey + izinBerlakuPada supaya izin multi-hari tetap terdeteksi di hari tengahnya.
+  const approvedTodayLeave = Abs.izinPadaTanggal(leaves.filter(l => l.userId === user.id), wibDayKey());
 
   // Lihat selfie sebuah record (dimuat saat diminta biar hemat data)
   const viewSelfie = async (r) => {
@@ -8946,52 +8975,9 @@ function AttendanceView({ user, allUsers }) {
     await load();
   };
 
-  // Permission: siapa yang bisa dilihat
-  const visibleRecords = useMemo(() => {
-    let list = records;
-    if (user.role === 'owner' || user.role === 'manajer') {
-      // semua
-    } else if (user.role === 'leader') {
-      const teamIds = new Set(allUsers.filter(u => u.leaderId === user.id).map(u => u.id));
-      teamIds.add(user.id);
-      list = list.filter(r => teamIds.has(r.userId));
-    } else {
-      list = list.filter(r => r.userId === user.id);
-    }
-    if (filterDiv !== 'all') list = list.filter(r => (r.division || 'internal') === filterDiv);
-    if (filterUser !== 'all') list = list.filter(r => r.userId === filterUser);
-    if (filterDate) list = list.filter(r => wibDayKey(r.timestamp) === filterDate);
-    return list;
-  }, [records, user, allUsers, filterUser, filterDiv, filterDate]);
-
-  // Ringkasan jumlah yang hadir pada tanggal terpilih (dihitung dari absen masuk, per orang unik)
-  const presentSummary = useMemo(() => {
-    if (!filterDate) return null;
-    const hadir = new Set(visibleRecords.filter(r => r.type === 'in').map(r => r.userId));
-    return { hadir: hadir.size };
-  }, [filterDate, visibleRecords]);
-
-  // Rekap harian: gabungkan absen masuk & pulang per orang per tanggal → 1 baris rapi
-  const [openRow, setOpenRow] = useState(null);
-  const dailyRows = useMemo(() => {
-    const map = {};
-    visibleRecords.forEach(r => {
-      const d = wibDayKey(r.timestamp);
-      const k = `${d}|${r.userId}`;
-      if (!map[k]) map[k] = { key: k, date: d, userId: r.userId, userName: r.userName, division: r.division, ins: [], outs: [] };
-      (r.type === 'in' ? map[k].ins : map[k].outs).push(r);
-    });
-    return Object.values(map).map(g => {
-      g.ins.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-      g.outs.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-      const inRec = g.ins[0] || null;
-      const outRec = g.outs.length ? g.outs[g.outs.length - 1] : null;
-      const durMin = inRec && outRec ? Math.max(0, Math.round((new Date(outRec.timestamp) - new Date(inRec.timestamp)) / 60000)) : null;
-      return { ...g, inRec, outRec, durMin };
-    }).sort((a, b) => b.date.localeCompare(a.date) || a.userName.localeCompare(b.userName));
-  }, [visibleRecords]);
-  const fmtDur = (m) => m == null ? '–' : `${Math.floor(m / 60)}j ${String(m % 60).padStart(2, '0')}m`;
-
+  // ===== PERMISSION & CAKUPAN DATA =====
+  // Blok ini sengaja diletakkan SEBELUM semua useMemo rekap di bawahnya (aturan urutan
+  // deklarasi const — salah urutan = TDZ = layar putih yang tidak ketangkap vite build).
   const canSeeOthers = user.role === 'owner' || user.role === 'manajer' || user.role === 'leader';
   const teamForFilter = useMemo(() => {
     if (user.role === 'owner' || user.role === 'manajer') return allUsers;
@@ -8999,47 +8985,136 @@ function AttendanceView({ user, allUsers }) {
     return [user];
   }, [allUsers, user]);
 
+  // Record yang boleh dilihat berdasarkan ROLE saja (belum kena filter divisi/nama/tanggal).
+  const roleRecords = useMemo(() => {
+    if (user.role === 'owner' || user.role === 'manajer') return records;
+    if (user.role === 'leader') {
+      const teamIds = new Set(allUsers.filter(u => u.leaderId === user.id).map(u => u.id));
+      teamIds.add(user.id);
+      return records.filter(r => teamIds.has(r.userId));
+    }
+    return records.filter(r => r.userId === user.id);
+  }, [records, user, allUsers]);
+
+  // Anggota setelah filter divisi & nama — dipakai rekap DAN papan status harian.
+  const scopedUsers = useMemo(() => {
+    let list = teamForFilter;
+    if (filterDiv !== 'all') list = list.filter(u => (u.division || 'internal') === filterDiv);
+    if (filterUser !== 'all') list = list.filter(u => u.id === filterUser);
+    return list;
+  }, [teamForFilter, filterDiv, filterUser]);
+
+  // Absensi milik akun yang SUDAH DIHAPUS tetap ditampilkan di rekap — riwayat tidak boleh
+  // hilang diam-diam hanya karena orangnya sudah tidak ada di daftar anggota.
+  const usersForRekap = useMemo(() => {
+    if (filterUser !== 'all' || filterDiv !== 'all') return scopedUsers;
+    const ada = new Set(scopedUsers.map(u => u.id));
+    const extra = [];
+    for (const r of roleRecords) {
+      if (!r || !r.userId || ada.has(r.userId)) continue;
+      ada.add(r.userId);
+      extra.push({ id: r.userId, name: `${r.userName || 'Akun dihapus'} (nonaktif)`, division: r.division || '', jobTitle: r.jobTitle || '' });
+    }
+    return extra.length ? [...scopedUsers, ...extra] : scopedUsers;
+  }, [scopedUsers, roleRecords, filterUser, filterDiv]);
+
+  // Dipakai export Excel & pengecekan "ada data atau tidak".
+  // PERBAIKAN BUG: dulu `wibDayKey(r.timestamp) === filterDate` (satu tanggal), sekarang
+  // benar-benar RANGE >= start && <= end.
+  const visibleRecords = useMemo(() => {
+    let list = roleRecords;
+    if (filterDiv !== 'all') list = list.filter(r => (r.division || 'internal') === filterDiv);
+    if (filterUser !== 'all') list = list.filter(r => r.userId === filterUser);
+    return list.filter(r => Abs.dalamRentang(wibDayKey(r.timestamp), filterRange.start, filterRange.end));
+  }, [roleRecords, filterUser, filterDiv, filterRange.start, filterRange.end]);
+
+  const scopedLeaves = useMemo(() => {
+    const ids = new Set(usersForRekap.map(u => u.id));
+    return leaves.filter(l => l && ids.has(l.userId));
+  }, [leaves, usersForRekap]);
+
+  // INDEKS dibangun SEKALI per perubahan data (anti N+1). Tanpa ini, setiap kartu anggota
+  // memfilter ulang SELURUH array record → O(anggota × record) di setiap render.
+  const idxAbsen = useMemo(() => Abs.indeksAbsensi(roleRecords), [roleRecords]);
+  const idxIzin = useMemo(() => Abs.indeksIzin(scopedLeaves), [scopedLeaves]);
+
+  // Jadwal kerja efektif (override per-karyawan > jadwal per hari > default tim).
+  const jadwalUntuk = useMemo(
+    () => (userId, tanggal) => effectiveAttConfig(config, userId, new Date(tanggal + 'T00:00:00')),
+    [config]
+  );
+
+  const todayKey = wibDayKey();
+  const menitSekarang = Abs.wibMenit();
+  const punyaRentang = !!filterRange.start && !!filterRange.end;
+
+  // Rekap harian: 1 baris per orang per hari, menggabungkan absensi + izin/sakit +
+  // (opsional) karyawan yang tidak punya keduanya → rekap mewakili STATUS KEHADIRAN,
+  // bukan sekadar log check-in.
+  const [openRow, setOpenRow] = useState(null);
+  const dailyRows = useMemo(() => Abs.bangunBarisRekap({
+    users: usersForRekap, indeks: idxAbsen, izinPerUser: idxIzin,
+    start: filterRange.start, end: filterRange.end,
+    hariIni: todayKey, menitSekarang, jadwalUntuk,
+    sertakanTanpaData: sertakanTanpaData && punyaRentang,
+  }), [usersForRekap, idxAbsen, idxIzin, filterRange.start, filterRange.end, todayKey, menitSekarang, jadwalUntuk, sertakanTanpaData, punyaRentang]);
+
+  const rekapRingkas = useMemo(() => Abs.ringkasStatus(dailyRows), [dailyRows]);
+
+  // Batas baris yang DIRENDER (bukan batas data). Rentang 28 hari × puluhan anggota bisa
+  // ribuan baris dan membuat tabel berat. Yang dipotong SELALU diberi tahu di layar —
+  // tidak boleh terlihat seolah "cuma segitu datanya". Export Excel tetap memakai data penuh.
+  const MAKS_BARIS_TAMPIL = 500;
+  const adaBarisDipotong = dailyRows.length > MAKS_BARIS_TAMPIL;
+  const dailyRowsTampil = useMemo(
+    () => (adaBarisDipotong ? dailyRows.slice(0, MAKS_BARIS_TAMPIL) : dailyRows),
+    [dailyRows, adaBarisDipotong]
+  );
+
+  const fmtDur = (m) => m == null ? '–' : `${Math.floor(m / 60)}j ${String(m % 60).padStart(2, '0')}m`;
+
+  // Chip untuk satu baris rekap: status UTAMA dulu, lalu info tambahan.
+  const chipsBaris = (row) => {
+    const w = Abs.warnaStatus(row.status.key);
+    const out = [{ t: row.status.label, c: w.badge }];
+    if (row.status.konflik) out.push({ t: '⚠ Konflik data', c: 'bg-rose-100 text-rose-700' });
+    if (row.masuk && !row.pulang && row.status.key !== Abs.STATUS.BELUM_PULANG) out.push({ t: 'Belum pulang', c: 'bg-blue-100 text-blue-700' });
+    if (row.pulang?.earlyLeave) out.push({ t: `Pulang cepat ${row.pulang.earlyBy || ''}m`, c: 'bg-amber-100 text-amber-700' });
+    if (row.masuk?.locationMismatch || row.pulang?.locationMismatch) out.push({ t: 'Lokasi ✗', c: 'bg-rose-100 text-rose-700' });
+    return out;
+  };
+
   // Export rekap absensi ke Excel (.xlsx) \u2014 RAPI: 1 baris per orang per hari (bukan per record),
   // jadi gampang dibaca di Excel (kolom otomatis, tidak nempel seperti CSV).
   const downloadRecap = async () => {
-    if (visibleRecords.length === 0) { alert('Tidak ada data absensi pada filter ini untuk diexport.'); return; }
+    if (dailyRows.length === 0) { alert('Tidak ada data pada filter ini untuk diexport.'); return; }
     try {
       const XLSX = await import('xlsx');
-      // Gabung per orang per hari
-      const map = {};
-      visibleRecords.forEach(r => {
-        const d = wibDayKey(r.timestamp);
-        const k = `${d}|${r.userId}`;
-        if (!map[k]) map[k] = { date: d, userName: r.userName, division: r.division, jobTitle: r.jobTitle, ins: [], outs: [] };
-        (r.type === 'in' ? map[k].ins : map[k].outs).push(r);
-      });
-      const groups = Object.values(map).sort((a, b) => b.date.localeCompare(a.date) || a.userName.localeCompare(b.userName));
+      // Sumbernya `dailyRows` \u2014 SAMA PERSIS dengan tabel di layar, jadi izin/sakit dan
+      // karyawan tanpa keterangan ikut terekspor, bukan cuma yang check-in.
       const header = ['Tanggal', 'Nama', 'Divisi', 'Jabatan', 'Jam Masuk', 'Jam Pulang', 'Durasi', 'Status', 'Catatan'];
       const aoa = [header];
-      groups.forEach(g => {
-        g.ins.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-        g.outs.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-        const inRec = g.ins[0] || null;
-        const outRec = g.outs.length ? g.outs[g.outs.length - 1] : null;
-        const durMin = inRec && outRec ? Math.max(0, Math.round((new Date(outRec.timestamp) - new Date(inRec.timestamp)) / 60000)) : null;
-        const status = inRec ? (inRec.late ? 'Hadir (telat)' : 'Hadir') : 'Hanya pulang';
+      dailyRows.forEach(row => {
+        const { masuk, pulang, durasiMenit, izin, status } = row;
         const ket = [
-          inRec?.late ? `Telat ${inRec.lateBy || ''}m` : '',
-          outRec?.earlyLeave ? `Pulang cepat ${outRec.earlyBy || ''}m` : '',
-          (inRec?.locationMismatch || outRec?.locationMismatch) ? 'Lokasi tidak sesuai' : '',
-          (inRec?.note || outRec?.note || '')
+          status.konflik ? 'KONFLIK DATA: ada izin resmi TAPI juga absen masuk' : '',
+          masuk?.late ? `Telat ${masuk.lateBy || ''}m` : '',
+          pulang?.earlyLeave ? `Pulang cepat ${pulang.earlyBy || ''}m` : '',
+          (masuk?.locationMismatch || pulang?.locationMismatch) ? 'Lokasi tidak sesuai' : '',
+          izin ? `${Abs.labelIzin(izin)}: ${izin.reason || '-'}${Abs.izinSelesai(izin) !== Abs.izinMulai(izin) ? ` (${Abs.izinMulai(izin)} s/d ${Abs.izinSelesai(izin)})` : ''}` : '',
+          (masuk?.note || pulang?.note || ''),
         ].filter(Boolean).join(' \u00b7 ');
         aoa.push([
-          fmtDate(g.date), g.userName,
-          g.division ? divLabel(g.division) : '-', g.jobTitle || '-',
-          inRec ? fmtTime(inRec.timestamp) : '\u2013',
-          outRec ? fmtTime(outRec.timestamp) : '\u2013',
-          durMin == null ? '\u2013' : `${Math.floor(durMin / 60)}j ${String(durMin % 60).padStart(2, '0')}m`,
-          status, ket
+          fmtDate(row.tanggal), row.userName,
+          row.division ? divLabel(row.division) : '-', row.jobTitle || '-',
+          masuk ? fmtTime(masuk.timestamp) : '\u2013',
+          pulang ? fmtTime(pulang.timestamp) : '\u2013',
+          durasiMenit == null ? '\u2013' : `${Math.floor(durasiMenit / 60)}j ${String(durasiMenit % 60).padStart(2, '0')}m`,
+          status.label, ket
         ]);
       });
       const ws = XLSX.utils.aoa_to_sheet(aoa);
-      ws['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 14 }, { wch: 30 }];
+      ws['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 16 }, { wch: 34 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Rekap Absensi');
       XLSX.writeFile(wb, `Rekap-Absensi-${dayKey()}.xlsx`);
@@ -9049,38 +9124,44 @@ function AttendanceView({ user, allUsers }) {
   const fmtTime = ts => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
   // ===== STATUS HARIAN TIM: per tanggal, siapa hadir / belum absen / tidak masuk / izin / libur =====
-  const boardUsers = useMemo(() => {
-    let list = teamForFilter;
-    if (filterDiv !== 'all') list = list.filter(u => (u.division || 'internal') === filterDiv);
-    if (filterUser !== 'all') list = list.filter(u => u.id === filterUser);
-    return list;
-  }, [teamForFilter, filterDiv, filterUser]);
+  const boardUsers = scopedUsers; // sudah dihitung di atas (filter divisi + nama)
 
+  // Urutan tampil kartu: yang butuh perhatian manajer duluan.
+  const URUT_STATUS = {
+    [Abs.STATUS.TANPA_DATA]: 0, [Abs.STATUS.TANPA_KETERANGAN]: 0,
+    [Abs.STATUS.BELUM_ABSEN]: 1, [Abs.STATUS.BELUM_MASUK]: 2,
+    [Abs.STATUS.TERLAMBAT]: 3, [Abs.STATUS.BELUM_PULANG]: 4, [Abs.STATUS.HADIR]: 5,
+    [Abs.STATUS.SAKIT]: 6, [Abs.STATUS.IZIN]: 6, [Abs.STATUS.CUTI]: 6,
+    [Abs.STATUS.LIBUR]: 7, [Abs.STATUS.BELUM_WAKTUNYA]: 8,
+  };
+
+  // STATUS HARI INI + AKTIVITAS TERAKHIR untuk SETIAP anggota.
+  // Dua informasi ini sengaja DIPISAH: status "Sakit" tanggal 28 tidak boleh membuat
+  // orangnya dianggap masih sakit tanggal 31 — kecuali izinnya memang punya rentang
+  // sampai tanggal 31 (lihat `izinBerlakuPada`).
   const dailyBoard = useMemo(() => {
-    const todayK = wibDayKey();
-    const dObj = new Date(boardDate + 'T00:00:00');
     const rows = boardUsers.map(u => {
-      const leave = leaves.find(l => l.userId === u.id && l.status === 'approved' && l.date === boardDate);
-      const ins = records.filter(r => r.userId === u.id && r.type === 'in' && wibDayKey(r.timestamp) === boardDate)
-        .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-      const outs = records.filter(r => r.userId === u.id && r.type === 'out' && wibDayKey(r.timestamp) === boardDate);
-      if (ins.length) {
-        const late = ins[0].late;
-        return { u, key: 'hadir', label: late ? 'Hadir (telat)' : 'Hadir', sub: `Masuk ${fmtTime(ins[0].timestamp)}${outs.length ? ` · pulang ${fmtTime(outs[outs.length - 1].timestamp)}` : ''}`, color: late ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700', dot: late ? 'bg-amber-500' : 'bg-emerald-500' };
-      }
-      if (leave) return { u, key: 'izin', label: leave.type === 'sakit' ? 'Sakit' : 'Izin', sub: leave.reason || '', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500', leave };
-      const cfg = effectiveAttConfig(config, u.id, dObj);
-      if (cfg.libur) return { u, key: 'libur', label: 'Libur', sub: 'jadwal libur', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-300' };
-      if (boardDate > todayK) return { u, key: 'belum', label: '–', sub: 'belum waktunya', color: 'bg-slate-50 text-slate-400', dot: 'bg-slate-200' };
-      if (boardDate === todayK) return { u, key: 'belumabsen', label: 'Belum absen', sub: 'hari ini', color: 'bg-amber-50 text-amber-700', dot: 'bg-amber-400' };
-      return { u, key: 'alpa', label: 'Tidak masuk', sub: 'tanpa kabar', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' };
+      const grup = idxAbsen.perHari.get(`${boardDate}|${u.id}`) || null;
+      const { masuk, pulang, durasiMenit } = Abs.ringkasHari(grup);
+      const daftarIzin = idxIzin.get(u.id) || [];
+      const izin = Abs.izinPadaTanggal(daftarIzin, boardDate);
+      const status = Abs.hitungStatusHarian({
+        tanggal: boardDate, hariIni: todayKey, menitSekarang,
+        masuk, pulang, izin, jadwal: jadwalUntuk(u.id, boardDate),
+      });
+      const rekamUser = idxAbsen.perUser.get(u.id) || { ins: [], outs: [] };
+      const aktivitas = Abs.aktivitasTerakhir({ masukList: rekamUser.ins, izinList: daftarIzin, hariIni: todayKey });
+      return { u, status, izin, masuk, pulang, durasiMenit, aktivitas };
     });
-    const count = { hadir: 0, izin: 0, belumabsen: 0, alpa: 0, libur: 0, belum: 0 };
-    rows.forEach(r => { count[r.key] = (count[r.key] || 0) + 1; });
-    const order = { hadir: 0, belumabsen: 1, alpa: 2, izin: 3, libur: 4, belum: 5 };
-    rows.sort((a, b) => (order[a.key] - order[b.key]) || a.u.name.localeCompare(b.u.name));
+    const count = {};
+    rows.forEach(r => { count[r.status.key] = (count[r.status.key] || 0) + 1; });
+    count.konflik = rows.filter(r => r.status.konflik).length;
+    count.hadirTotal = (count[Abs.STATUS.HADIR] || 0) + (count[Abs.STATUS.TERLAMBAT] || 0) + (count[Abs.STATUS.BELUM_PULANG] || 0);
+    rows.sort((a, b) =>
+      ((URUT_STATUS[a.status.key] ?? 9) - (URUT_STATUS[b.status.key] ?? 9))
+      || String(a.u.name || '').localeCompare(String(b.u.name || '')));
     return { rows, count };
-  }, [boardUsers, leaves, records, config, boardDate]);
+  }, [boardUsers, idxAbsen, idxIzin, boardDate, todayKey, menitSekarang, jadwalUntuk]);
 
   // Export Status Harian Tim ke Excel (.xlsx) — LENGKAP untuk tanggal terpilih:
   // semua anggota + status (Hadir / Hadir (telat) / Izin / Sakit / Tidak Masuk / Libur / Belum absen).
@@ -9088,47 +9169,35 @@ function AttendanceView({ user, allUsers }) {
     if (!boardUsers.length) { alert('Tidak ada anggota pada filter ini untuk diexport.'); return; }
     try {
       const XLSX = await import('xlsx');
-      const todayK = wibDayKey();
-      const dObj = new Date(boardDate + 'T00:00:00');
-      const header = ['Tanggal', 'Nama', 'Divisi', 'Jabatan', 'Status', 'Jam Masuk', 'Jam Pulang', 'Durasi', 'Keterangan'];
+      // Memakai `dailyBoard.rows` yang SAMA dengan yang tampil di layar — supaya isi Excel
+      // tidak pernah berbeda dari yang dilihat manajer (dulu logikanya ditulis dua kali).
+      const header = ['Tanggal', 'Nama', 'Divisi', 'Jabatan', 'Status', 'Jam Masuk', 'Jam Pulang', 'Durasi',
+        'Keterangan', 'Terakhir Hadir', 'Aktivitas Terakhir', 'Tgl Aktivitas Terakhir'];
       const aoa = [header];
-      // Urut: hadir → belum absen → tidak masuk → izin → libur, lalu nama
-      const order = { 'Hadir': 0, 'Hadir (telat)': 0, 'Belum absen': 1, 'Tidak masuk': 2, 'Izin': 3, 'Sakit': 3, 'Libur': 4, 'Belum waktunya': 5 };
-      const built = boardUsers.map(u => {
-        const leave = leaves.find(l => l.userId === u.id && l.status === 'approved' && l.date === boardDate);
-        const ins = records.filter(r => r.userId === u.id && r.type === 'in' && wibDayKey(r.timestamp) === boardDate).sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-        const outs = records.filter(r => r.userId === u.id && r.type === 'out' && wibDayKey(r.timestamp) === boardDate).sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-        const inRec = ins[0] || null;
-        const outRec = outs.length ? outs[outs.length - 1] : null;
-        const durMin = inRec && outRec ? Math.max(0, Math.round((new Date(outRec.timestamp) - new Date(inRec.timestamp)) / 60000)) : null;
-        let status, ket = '';
-        if (inRec) {
-          status = inRec.late ? 'Hadir (telat)' : 'Hadir';
-          ket = [inRec.late ? `Telat ${inRec.lateBy || ''}m` : '', outRec?.earlyLeave ? `Pulang cepat ${outRec.earlyBy || ''}m` : '', (inRec.note || outRec?.note || '')].filter(Boolean).join(' · ');
-        } else if (leave) {
-          status = leave.type === 'sakit' ? 'Sakit' : 'Izin'; ket = leave.reason || '';
-        } else {
-          const cfg = effectiveAttConfig(config, u.id, dObj);
-          if (cfg.libur) status = 'Libur';
-          else if (boardDate > todayK) status = 'Belum waktunya';
-          else if (boardDate === todayK) status = 'Belum absen';
-          else { status = 'Tidak masuk'; ket = 'tanpa kabar'; }
-        }
-        return { u, status, ket, inRec, outRec, durMin };
-      }).sort((a, b) => (order[a.status] - order[b.status]) || a.u.name.localeCompare(b.u.name));
-      built.forEach(({ u, status, ket, inRec, outRec, durMin }) => {
+      dailyBoard.rows.forEach(({ u, status, izin, masuk, pulang, durasiMenit, aktivitas }) => {
+        const ket = [
+          status.konflik ? 'KONFLIK DATA: ada izin resmi TAPI juga absen masuk' : '',
+          masuk?.late ? `Telat ${masuk.lateBy || ''}m` : '',
+          pulang?.earlyLeave ? `Pulang cepat ${pulang.earlyBy || ''}m` : '',
+          izin ? `${Abs.labelIzin(izin)}: ${izin.reason || '-'}${Abs.izinSelesai(izin) !== Abs.izinMulai(izin) ? ` (s/d ${Abs.izinSelesai(izin)})` : ''}` : '',
+          (masuk?.note || pulang?.note || ''),
+        ].filter(Boolean).join(' · ');
+        const akt = aktivitas.terakhir;
         aoa.push([
           fmtDate(boardDate), u.name,
           u.division ? divLabel(u.division) : '-', u.jobTitle || '-',
-          status,
-          inRec ? fmtTime(inRec.timestamp) : '–',
-          outRec ? fmtTime(outRec.timestamp) : '–',
-          durMin == null ? '–' : `${Math.floor(durMin / 60)}j ${String(durMin % 60).padStart(2, '0')}m`,
-          ket
+          status.label,
+          masuk ? fmtTime(masuk.timestamp) : '–',
+          pulang ? fmtTime(pulang.timestamp) : '–',
+          durasiMenit == null ? '–' : `${Math.floor(durasiMenit / 60)}j ${String(durasiMenit % 60).padStart(2, '0')}m`,
+          ket,
+          aktivitas.terakhirHadir ? `${aktivitas.terakhirHadir.tanggal} ${fmtTime(aktivitas.terakhirHadir.ts)}` : 'Belum pernah absen',
+          akt ? (akt.jenis === 'hadir' ? 'Hadir' : Abs.JENIS_IZIN_LABEL[akt.jenis] || 'Izin') : 'Belum pernah absen',
+          akt ? akt.tanggal : '–',
         ]);
       });
       const ws = XLSX.utils.aoa_to_sheet(aoa);
-      ws['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 28 }];
+      ws['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 34 }, { wch: 20 }, { wch: 18 }, { wch: 16 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Status Harian');
       XLSX.writeFile(wb, `Status-Harian-${boardDate}.xlsx`);
@@ -9150,6 +9219,11 @@ function AttendanceView({ user, allUsers }) {
     await load();
   };
   const fmtDate = ts => new Date(ts).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+  // Teks tanggal izin — otomatis jadi rentang bila izinnya lebih dari 1 hari.
+  const fmtRentangIzin = (l) => {
+    const a = Abs.izinMulai(l), b = Abs.izinSelesai(l);
+    return a === b ? fmtDate(a) : `${fmtDate(a)} s/d ${fmtDate(b)} (${Abs.jumlahHari(a, b)} hari)`;
+  };
   const mapsLink = (lat, lng) => `https://www.google.com/maps?q=${lat},${lng}`;
   const osmEmbed = (lat, lng) => {
     const d = 0.004;
@@ -9157,6 +9231,32 @@ function AttendanceView({ user, allUsers }) {
   };
 
   // Kartu detail 1 record absen (dipakai tabel desktop & kartu mobile)
+  // Kartu detail izin/sakit untuk baris rekap (alasan, rentang, catatan, siapa yang memutuskan).
+  // Datanya TIDAK dipangkas — semua yang tersimpan ditampilkan di sini.
+  const renderIzinDetail = (l) => {
+    const w = Abs.warnaStatus(l.type === 'sakit' ? Abs.STATUS.SAKIT : l.type === 'cuti' ? Abs.STATUS.CUTI : Abs.STATUS.IZIN);
+    const mulai = Abs.izinMulai(l), selesai = Abs.izinSelesai(l);
+    const tgl = (d) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+    return (
+      <div key={`izin-${l.id}`} className="bg-white rounded-xl border border-slate-200 p-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${w.badge}`}>{Abs.labelIzin(l).toUpperCase()}</span>
+          <span className="text-sm font-bold text-slate-800">
+            {mulai === selesai ? tgl(mulai) : `${tgl(mulai)} – ${tgl(selesai)} (${Abs.jumlahHari(mulai, selesai)} hari)`}
+          </span>
+          <button onClick={(e) => { e.stopPropagation(); setLeaveDetail(l); }}
+            className="ml-auto text-[11px] font-bold text-blue-600 hover:text-blue-800">Detail →</button>
+        </div>
+        {l.reason && <div className="text-xs text-slate-600 mt-1.5"><b className="text-slate-400">Alasan:</b> {l.reason}</div>}
+        {l.note && <div className="text-xs text-slate-600 mt-1"><b className="text-slate-400">Catatan:</b> {l.note}</div>}
+        <div className="text-[11px] text-slate-400 mt-1.5">
+          {l.decidedByName ? `Disetujui oleh ${l.decidedByName}` : 'Menunggu keputusan'}
+          {l.decidedAt ? ` · ${new Date(l.decidedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+        </div>
+      </div>
+    );
+  };
+
   const renderRecDetail = (label, rec) => (
                                 <div key={label} className="bg-white rounded-xl border border-slate-200 p-3">
                                   <div className="flex items-center gap-2 flex-wrap">
@@ -9335,7 +9435,7 @@ function AttendanceView({ user, allUsers }) {
                   <button onClick={() => setLeaveDetail(l)} className="flex items-center gap-2 flex-1 min-w-0 text-left group">
                     <span className="text-lg">{l.type === 'sakit' ? '🤒' : '✋'}</span>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-slate-800 group-hover:text-blue-700">{fmtDate(l.date)} <span className="text-xs font-normal text-slate-500">· {l.type === 'sakit' ? 'Sakit' : 'Izin'}</span></div>
+                      <div className="text-sm font-semibold text-slate-800 group-hover:text-blue-700">{fmtRentangIzin(l)} <span className="text-xs font-normal text-slate-500">· {l.type === 'sakit' ? 'Sakit' : 'Izin'}</span></div>
                       <div className="text-[11px] text-slate-500 truncate">{l.reason}{l.note ? ` · catatan: ${l.note}` : ''}</div>
                     </div>
                   </button>
@@ -9364,7 +9464,7 @@ function AttendanceView({ user, allUsers }) {
                       <button onClick={() => setLeaveDetail(l)} className="flex items-center gap-2 flex-1 min-w-0 text-left group">
                         <Avatar person={allUsers.find(u => u.id === l.userId) || { name: l.userName }} size="sm" />
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm font-semibold text-slate-800 truncate group-hover:text-blue-700">{l.userName} · {fmtDate(l.date)}</div>
+                          <div className="text-sm font-semibold text-slate-800 truncate group-hover:text-blue-700">{l.userName} · {fmtRentangIzin(l)}</div>
                           <div className="text-[11px] text-slate-500 truncate">{l.type === 'sakit' ? '🤒 Sakit' : '✋ Izin'} — {l.reason} · <span className="text-blue-600 font-semibold">lihat detail</span></div>
                         </div>
                       </button>
@@ -9387,7 +9487,9 @@ function AttendanceView({ user, allUsers }) {
           <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
             <h3 className="font-display font-bold text-slate-900 flex items-center gap-2"><Users className="w-5 h-5 text-blue-600" /> Status Harian Tim</h3>
             <div className="flex items-center gap-2">
-              <DateRangePopover tabs={['day']} defaultTab="day" maxDate={wibDayKey()} compact
+              {/* Papan ini memang SATU tanggal. Preset rentang (7/28 hari, bulan) sengaja
+                  disembunyikan supaya tidak salah pilih — rentang tempatnya di Riwayat Absensi. */}
+              <DateRangePopover tabs={['day']} defaultTab="day" maxDate={wibDayKey()} compact showPresets={false}
                 value={{ id: 'day', label: 'Hari', start: boardDate, end: boardDate }}
                 onChange={p => p.start && setBoardDate(p.start)} />
               <button onClick={() => setBoardDate(wibDayKey())}
@@ -9402,40 +9504,91 @@ function AttendanceView({ user, allUsers }) {
           {/* Ringkasan jumlah */}
           <div className="flex flex-wrap gap-2 mb-4">
             {[
-              ['hadir', 'Hadir', 'bg-emerald-50 text-emerald-700 border-emerald-200'],
-              ['belumabsen', 'Belum absen', 'bg-amber-50 text-amber-700 border-amber-200'],
-              ['alpa', 'Tidak masuk', 'bg-red-50 text-red-700 border-red-200'],
-              ['izin', 'Izin/Sakit', 'bg-blue-50 text-blue-700 border-blue-200'],
-              ['libur', 'Libur', 'bg-slate-50 text-slate-500 border-slate-200'],
-            ].map(([k, label, cls]) => (
-              <div key={k} className={`px-3 py-1.5 rounded-xl border text-sm font-semibold ${cls}`}>
-                {label}: <b className="tabular-nums">{dailyBoard.count[k] || 0}</b>
+              ['__hadir', 'Hadir', 'bg-emerald-50 text-emerald-700 border-emerald-200'],
+              [Abs.STATUS.TERLAMBAT, 'Terlambat', 'bg-red-50 text-red-700 border-red-200'],
+              [Abs.STATUS.SAKIT, 'Sakit', 'bg-violet-50 text-violet-700 border-violet-200'],
+              [Abs.STATUS.IZIN, 'Izin', 'bg-amber-50 text-amber-700 border-amber-200'],
+              [Abs.STATUS.BELUM_ABSEN, 'Belum absen', 'bg-amber-50 text-amber-700 border-amber-200'],
+              [Abs.STATUS.TANPA_DATA, 'Belum ada keterangan', 'bg-slate-100 text-slate-600 border-slate-200'],
+              [Abs.STATUS.LIBUR, 'Libur', 'bg-slate-50 text-slate-500 border-slate-200'],
+            ].map(([k, label, cls]) => {
+              const n = k === '__hadir' ? dailyBoard.count.hadirTotal : (dailyBoard.count[k] || 0);
+              if (!n) return null;
+              return (
+                <div key={k} className={`px-3 py-1.5 rounded-xl border text-sm font-semibold ${cls}`}>
+                  {label}: <b className="tabular-nums">{n}</b>
+                </div>
+              );
+            })}
+            {dailyBoard.count.konflik > 0 && (
+              <div className="px-3 py-1.5 rounded-xl border text-sm font-semibold bg-rose-50 text-rose-700 border-rose-300 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5" /> Konflik data: <b className="tabular-nums">{dailyBoard.count.konflik}</b>
               </div>
-            ))}
+            )}
           </div>
-          {/* Daftar anggota */}
+          {/* Daftar anggota: Status Hari Ini + Aktivitas Terakhir (dua info TERPISAH) */}
           {dailyBoard.rows.length === 0 ? (
             <div className="text-sm text-slate-400 text-center py-4">Tidak ada anggota pada filter ini.</div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {dailyBoard.rows.map(({ u, label, sub, color, dot, key, leave }) => (
-                <div key={u.id} className="flex items-center gap-2.5 border border-slate-100 rounded-xl px-3 py-2">
-                  <Avatar person={u} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-slate-800 truncate">{u.name}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{u.jobTitle || ROLES[u.role]?.label || ''}{sub ? ` · ${sub}` : ''}</div>
+              {dailyBoard.rows.map(({ u, status, izin, masuk, pulang, aktivitas }) => {
+                const w = Abs.warnaStatus(status.key);
+                const labelPapan = Abs.LABEL_PAPAN[status.key] || status.label;
+                const jam = masuk ? fmtTime(masuk.timestamp) : null;
+                const akt = aktivitas.terakhir;
+                const wAkt = akt ? Abs.warnaStatus(akt.jenis === 'hadir' ? Abs.STATUS.HADIR : akt.jenis) : null;
+                return (
+                  <div key={u.id} className="border border-slate-100 rounded-xl px-3 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <Avatar person={u} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-slate-800 truncate">{u.name}</div>
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {u.jobTitle || ROLES[u.role]?.label || ''}{u.division ? ` · ${divLabel(u.division)}` : ''}
+                        </div>
+                      </div>
+                      {izin ? (
+                        <button onClick={() => setLeaveDetail(izin)}
+                          className={`text-[11px] px-2.5 py-1 rounded-full font-bold inline-flex items-center gap-1 flex-shrink-0 ${w.badge} hover:opacity-80`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${w.dot}`} /> {labelPapan} →
+                        </button>
+                      ) : (
+                        <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold inline-flex items-center gap-1 flex-shrink-0 ${w.badge}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${w.dot}`} /> {labelPapan}{jam ? ` · ${jam}` : ''}
+                        </span>
+                      )}
+                    </div>
+                    {status.konflik && (
+                      <div className="mt-1.5 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2 py-1 flex items-start gap-1">
+                        <AlertCircle className="w-3 h-3 mt-px flex-shrink-0" />
+                        Konflik: ada {Abs.labelIzin(izin).toLowerCase()} resmi TAPI juga absen masuk {jam}. Cek datanya.
+                      </div>
+                    )}
+                    <div className="mt-1.5 pt-1.5 border-t border-slate-100 flex items-center gap-1.5 text-[11px] text-slate-500 flex-wrap">
+                      <span className="font-semibold text-slate-400 uppercase text-[9px] tracking-wide">Aktivitas terakhir</span>
+                      {akt ? (
+                        <>
+                          <span className={`px-1.5 py-0.5 rounded-full font-bold inline-flex items-center gap-1 ${wAkt.badge}`}>
+                            <span className={`w-1 h-1 rounded-full ${wAkt.dot}`} />
+                            {akt.jenis === 'hadir' ? 'Hadir' : (Abs.JENIS_IZIN_LABEL[akt.jenis] || 'Izin')}
+                          </span>
+                          <span className="tabular-nums">
+                            {new Date(akt.tanggal + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            {akt.ts ? ` · ${fmtTime(akt.ts)}` : ''}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="italic text-slate-400">Belum pernah melakukan absensi</span>
+                      )}
+                    </div>
+                    {aktivitas.terakhirHadir && akt && akt.jenis !== 'hadir' && (
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        Terakhir hadir: {new Date(aktivitas.terakhirHadir.tanggal + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })} · {fmtTime(aktivitas.terakhirHadir.ts)}
+                      </div>
+                    )}
                   </div>
-                  {leave ? (
-                    <button onClick={() => setLeaveDetail(leave)} className={`text-[11px] px-2.5 py-1 rounded-full font-bold inline-flex items-center gap-1 ${color} hover:opacity-80`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} /> {label} →
-                    </button>
-                  ) : (
-                    <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold inline-flex items-center gap-1 ${color}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} /> {label}
-                    </span>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -9475,39 +9628,80 @@ function AttendanceView({ user, allUsers }) {
         <h3 className="font-display font-bold text-slate-900">Riwayat Absensi</h3>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <span className="text-xs text-slate-500 font-semibold">Tanggal:</span>
-          <DateRangePopover tabs={['day']} defaultTab="day" compact allowClear clearLabel="Semua" placeholder="Semua tanggal"
-            value={{ id: 'day', label: 'Hari', start: filterDate, end: filterDate }}
-            onChange={p => setFilterDate(p.start || '')} />
-          <button onClick={() => setFilterDate(wibDayKey())}
+          {/* PERBAIKAN: seluruh objek rentang disimpan (start DAN end). Dulu hanya `p.start`
+              yang dipakai, sehingga preset "7 Hari Terakhir" menyusut jadi 1 tanggal. */}
+          <DateRangePopover tabs={['day', 'custom', 'month']} defaultTab="day" compact allowClear clearLabel="Semua" placeholder="Semua tanggal"
+            value={filterRange}
+            onChange={p => setFilterRange({ id: p.id || 'custom', label: p.label || '', start: p.start || '', end: p.end || p.start || '' })} />
+          <button onClick={() => setFilterRange(Abs.rentangPreset('hari-ini', wibDayKey()))}
             className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">Hari ini</button>
-          {filterDate && (
-            <button onClick={() => setFilterDate('')}
+          <button onClick={() => setFilterRange(Abs.rentangPreset('7-hari', wibDayKey()))}
+            className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">7 hari</button>
+          {punyaRentang && (
+            <button onClick={() => setFilterRange({ id: 'all', label: 'Semua', start: '', end: '' })}
               className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-500">Semua</button>
           )}
         </div>
       </div>
-      {presentSummary && (
-        <div className="mb-3 flex items-center gap-2 text-sm bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
-          <Users className="w-4 h-4 text-emerald-600" />
-          <span className="text-slate-700">
-            <b className="text-emerald-700">{presentSummary.hadir} orang</b> hadir pada {new Date(filterDate + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+      {punyaRentang && (
+        <div className="mb-3 bg-white border border-slate-200 rounded-xl px-3 py-2.5">
+          <div className="flex items-center gap-2 flex-wrap text-sm">
+            <CalendarDays className="w-4 h-4 text-blue-600 flex-shrink-0" />
+            <span className="text-slate-700">
+              <b>{filterRange.label || 'Rentang'}</b>: {new Date(filterRange.start + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+              {filterRange.end !== filterRange.start && <> – {new Date(filterRange.end + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</>}
+              <span className="text-slate-400"> · {Abs.jumlahHari(filterRange.start, filterRange.end)} hari · {dailyRows.length} baris</span>
+            </span>
+            {canSeeOthers && (
+              <label className="ml-auto flex items-center gap-1.5 text-xs text-slate-600 font-semibold cursor-pointer">
+                <input type="checkbox" checked={sertakanTanpaData} onChange={e => setSertakanTanpaData(e.target.checked)}
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                Tampilkan yang tidak absen & tidak izin
+              </label>
+            )}
+          </div>
+          {/* Ringkasan status pada rentang terpilih */}
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {[
+              ['__hadir', 'Hadir', 'bg-emerald-50 text-emerald-700 border-emerald-200'],
+              [Abs.STATUS.TERLAMBAT, 'Terlambat', 'bg-red-50 text-red-700 border-red-200'],
+              [Abs.STATUS.BELUM_PULANG, 'Belum pulang', 'bg-blue-50 text-blue-700 border-blue-200'],
+              [Abs.STATUS.SAKIT, 'Sakit', 'bg-violet-50 text-violet-700 border-violet-200'],
+              [Abs.STATUS.IZIN, 'Izin', 'bg-amber-50 text-amber-700 border-amber-200'],
+              [Abs.STATUS.TANPA_DATA, 'Belum ada keterangan', 'bg-slate-100 text-slate-600 border-slate-200'],
+              [Abs.STATUS.LIBUR, 'Libur', 'bg-slate-50 text-slate-500 border-slate-200'],
+            ].map(([k, label, cls]) => {
+              const n = k === '__hadir'
+                ? (rekapRingkas[Abs.STATUS.HADIR] || 0)
+                : (rekapRingkas[k] || 0);
+              if (!n) return null;
+              return <span key={k} className={`text-[11px] px-2 py-0.5 rounded-full border font-bold ${cls}`}>{label}: {n}</span>;
+            })}
+            {rekapRingkas.konflik > 0 && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full border font-bold bg-rose-50 text-rose-700 border-rose-300">⚠ Konflik data: {rekapRingkas.konflik}</span>
+            )}
+          </div>
+        </div>
+      )}
+      {adaBarisDipotong && (
+        <div className="mb-3 flex items-start gap-2 text-sm bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-amber-800">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            Menampilkan <b>{MAKS_BARIS_TAMPIL}</b> baris pertama dari <b>{dailyRows.length}</b> baris agar tabel tetap ringan.
+            Persempit rentang tanggal / filter anggota, atau matikan "Tampilkan yang tidak absen &amp; tidak izin".
+            <b> Export Excel tetap berisi seluruh {dailyRows.length} baris.</b>
           </span>
         </div>
       )}
-      {visibleRecords.length === 0 ? (
-        <EmptyState icon={MapPin} text="Belum ada data absensi." />
+      {dailyRows.length === 0 ? (
+        <EmptyState icon={MapPin} text={punyaRentang ? 'Tidak ada data pada rentang tanggal ini.' : 'Belum ada data absensi.'} />
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
           {/* MOBILE: kartu ringkas per orang per hari */}
           <div className="md:hidden divide-y divide-slate-100">
-            {dailyRows.map(row => {
+            {dailyRowsTampil.map(row => {
               const open = openRow === row.key;
-              const anyMismatch = (row.inRec?.locationMismatch || row.outRec?.locationMismatch);
-              const chips = [];
-              if (row.inRec?.late) chips.push({ t: `Telat ${row.inRec.lateBy || ''}m`, c: 'bg-red-100 text-red-700' });
-              if (row.outRec?.earlyLeave) chips.push({ t: `Pulang cepat ${row.outRec.earlyBy || ''}m`, c: 'bg-amber-100 text-amber-700' });
-              if (anyMismatch) chips.push({ t: 'Lokasi ✗', c: 'bg-rose-100 text-rose-700' });
-              if (chips.length === 0 && row.inRec) chips.push({ t: row.outRec ? '✓ Tepat waktu' : 'Belum pulang', c: row.outRec ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700' });
+              const chips = chipsBaris(row);
               return (
                 <div key={row.key} className="p-3.5">
                   <button onClick={() => setOpenRow(open ? null : row.key)} className="w-full text-left">
@@ -9515,22 +9709,22 @@ function AttendanceView({ user, allUsers }) {
                       <Avatar person={allUsers.find(u => u.id === row.userId) || { name: row.userName }} size="md" />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-semibold text-slate-900 truncate">{row.userName}</div>
-                        <div className="text-[11px] text-slate-500">{new Date(row.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short' })}</div>
+                        <div className="text-[11px] text-slate-500">{new Date(row.tanggal + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short' })}</div>
                       </div>
                       <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
                     </div>
                     <div className="grid grid-cols-3 gap-2 mt-2.5">
                       <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
                         <div className="text-[9px] font-bold text-slate-400 uppercase">Masuk</div>
-                        <div className={`text-sm font-bold tabular-nums ${row.inRec ? (row.inRec.late ? 'text-red-600' : 'text-emerald-700') : 'text-slate-300'}`}>{row.inRec ? fmtTime(row.inRec.timestamp) : '–'}</div>
+                        <div className={`text-sm font-bold tabular-nums ${row.masuk ? (row.masuk.late ? 'text-red-600' : 'text-emerald-700') : 'text-slate-300'}`}>{row.masuk ? fmtTime(row.masuk.timestamp) : '–'}</div>
                       </div>
                       <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
                         <div className="text-[9px] font-bold text-slate-400 uppercase">Pulang</div>
-                        <div className={`text-sm font-bold tabular-nums ${row.outRec ? (row.outRec.earlyLeave ? 'text-amber-600' : 'text-slate-700') : 'text-slate-300'}`}>{row.outRec ? fmtTime(row.outRec.timestamp) : '–'}</div>
+                        <div className={`text-sm font-bold tabular-nums ${row.pulang ? (row.pulang.earlyLeave ? 'text-amber-600' : 'text-slate-700') : 'text-slate-300'}`}>{row.pulang ? fmtTime(row.pulang.timestamp) : '–'}</div>
                       </div>
                       <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
                         <div className="text-[9px] font-bold text-slate-400 uppercase">Durasi</div>
-                        <div className="text-sm font-bold tabular-nums text-slate-700">{fmtDur(row.durMin)}</div>
+                        <div className="text-sm font-bold tabular-nums text-slate-700">{fmtDur(row.durasiMenit)}</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 flex-wrap mt-2">
@@ -9539,7 +9733,10 @@ function AttendanceView({ user, allUsers }) {
                   </button>
                   {open && (
                     <div className="mt-3 space-y-2.5">
-                      {[['Masuk', row.inRec], ['Pulang', row.outRec]].map(([label, rec]) => renderRecDetail(label, rec))}
+                      {row.izin && renderIzinDetail(row.izin)}
+                      {(row.masuk || row.pulang)
+                        ? [['Masuk', row.masuk], ['Pulang', row.pulang]].map(([label, rec]) => renderRecDetail(label, rec))
+                        : !row.izin && <div className="text-xs text-slate-400 italic">Tidak ada data absensi maupun izin pada tanggal ini.</div>}
                     </div>
                   )}
                 </div>
@@ -9562,19 +9759,14 @@ function AttendanceView({ user, allUsers }) {
                 </tr>
               </thead>
               <tbody>
-                {dailyRows.map(row => {
+                {dailyRowsTampil.map(row => {
                   const open = openRow === row.key;
-                  const anyMismatch = (row.inRec?.locationMismatch || row.outRec?.locationMismatch);
-                  const chips = [];
-                  if (row.inRec?.late) chips.push({ t: `Telat ${row.inRec.lateBy || ''}m`, c: 'bg-red-100 text-red-700' });
-                  if (row.outRec?.earlyLeave) chips.push({ t: `Pulang cepat ${row.outRec.earlyBy || ''}m`, c: 'bg-amber-100 text-amber-700' });
-                  if (anyMismatch) chips.push({ t: 'Lokasi ✗', c: 'bg-rose-100 text-rose-700' });
-                  if (chips.length === 0 && row.inRec) chips.push({ t: row.outRec ? '✓ Tepat waktu' : 'Belum pulang', c: row.outRec ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700' });
+                  const chips = chipsBaris(row);
                   return (
                     <React.Fragment key={row.key}>
                       <tr onClick={() => setOpenRow(open ? null : row.key)}
                         className={`border-t border-slate-100 cursor-pointer transition ${open ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}>
-                        <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{new Date(row.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
+                        <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{new Date(row.tanggal + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-2 min-w-0">
                             <Avatar person={allUsers.find(u => u.id === row.userId) || { name: row.userName }} size="sm" />
@@ -9582,16 +9774,16 @@ function AttendanceView({ user, allUsers }) {
                           </div>
                         </td>
                         <td className="px-3 py-2.5 whitespace-nowrap">
-                          {row.inRec ? (
-                            <span className={`font-semibold tabular-nums ${row.inRec.late ? 'text-red-600' : 'text-emerald-700'}`}>{fmtTime(row.inRec.timestamp)}</span>
+                          {row.masuk ? (
+                            <span className={`font-semibold tabular-nums ${row.masuk.late ? 'text-red-600' : 'text-emerald-700'}`}>{fmtTime(row.masuk.timestamp)}</span>
                           ) : <span className="text-slate-300">–</span>}
                         </td>
                         <td className="px-3 py-2.5 whitespace-nowrap">
-                          {row.outRec ? (
-                            <span className={`font-semibold tabular-nums ${row.outRec.earlyLeave ? 'text-amber-600' : 'text-slate-700'}`}>{fmtTime(row.outRec.timestamp)}</span>
+                          {row.pulang ? (
+                            <span className={`font-semibold tabular-nums ${row.pulang.earlyLeave ? 'text-amber-600' : 'text-slate-700'}`}>{fmtTime(row.pulang.timestamp)}</span>
                           ) : <span className="text-slate-300">–</span>}
                         </td>
-                        <td className="px-3 py-2.5 text-slate-600 tabular-nums whitespace-nowrap">{fmtDur(row.durMin)}</td>
+                        <td className="px-3 py-2.5 text-slate-600 tabular-nums whitespace-nowrap">{fmtDur(row.durasiMenit)}</td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-1 flex-wrap">
                             {chips.map((ch, i) => <span key={i} className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${ch.c}`}>{ch.t}</span>)}
@@ -9604,9 +9796,14 @@ function AttendanceView({ user, allUsers }) {
                       {open && (
                         <tr className="border-t border-blue-100 bg-blue-50/30">
                           <td colSpan={7} className="px-4 py-3">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {[['Masuk', row.inRec], ['Pulang', row.outRec]].map(([label, rec]) => renderRecDetail(label, rec))}
-                            </div>
+                            {row.izin && <div className="mb-3">{renderIzinDetail(row.izin)}</div>}
+                            {(row.masuk || row.pulang) ? (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {[['Masuk', row.masuk], ['Pulang', row.pulang]].map(([label, rec]) => renderRecDetail(label, rec))}
+                              </div>
+                            ) : !row.izin && (
+                              <div className="text-xs text-slate-400 italic">Tidak ada data absensi maupun izin pada tanggal ini.</div>
+                            )}
                           </td>
                         </tr>
                       )}
@@ -9676,7 +9873,14 @@ function LeaveDetailModal({ leave, person, canDecide, canCancel, onApprove, onRe
           </div>
           <div className="bg-slate-50 p-3 rounded-lg">
             <div className="text-[10px] uppercase font-bold text-slate-500">Tanggal Izin</div>
-            <div className="font-semibold text-slate-800 mt-0.5">{fmtDate(leave.date)}</div>
+            <div className="font-semibold text-slate-800 mt-0.5">
+              {Abs.izinSelesai(leave) === Abs.izinMulai(leave)
+                ? fmtDate(leave.date)
+                : <>{fmtDate(Abs.izinMulai(leave))} <span className="text-slate-400">s/d</span> {fmtDate(Abs.izinSelesai(leave))}</>}
+            </div>
+            {Abs.izinSelesai(leave) !== Abs.izinMulai(leave) && (
+              <div className="text-[11px] text-slate-500 mt-0.5">{Abs.jumlahHari(Abs.izinMulai(leave), Abs.izinSelesai(leave))} hari berturut-turut</div>
+            )}
           </div>
         </div>
 
@@ -9710,17 +9914,21 @@ function LeaveDetailModal({ leave, person, canDecide, canCancel, onApprove, onRe
 
 // Modal pengajuan izin (H-n untuk izin biasa, sakit boleh hari-H)
 function LeaveRequestModal({ izinHmin, onSave, onClose }) {
-  const minIzin = dayKey(new Date(Date.now() + izinHmin * 86400000));
-  const [form, setForm] = useState({ type: 'izin', date: '', reason: '' });
+  const hariIni = wibDayKey();
+  const minIzin = Abs.geserHari(hariIni, Number(izinHmin) || 0);
+  const [form, setForm] = useState({ type: 'izin', date: '', dateEnd: '', reason: '' });
   const [error, setError] = useState('');
-  const minDate = form.type === 'sakit' ? dayKey() : minIzin;
+  const minDate = form.type === 'sakit' ? hariIni : minIzin;
+  const lamaHari = form.date ? Abs.jumlahHari(form.date, form.dateEnd && form.dateEnd > form.date ? form.dateEnd : form.date) : 0;
   const submit = () => {
     setError('');
-    if (!form.date) return setError('Pilih tanggal izin.');
+    if (!form.date) return setError('Pilih tanggal mulai izin.');
     if (!form.reason.trim()) return setError('Tulis alasan izin.');
     if (form.type === 'izin' && form.date < minIzin) return setError(`Izin biasa harus diajukan minimal H-${izinHmin} (paling cepat ${fmtDate(minIzin)}). Kalau mendadak karena sakit, pilih jenis "Sakit".`);
-    if (form.type === 'sakit' && form.date < dayKey()) return setError('Tanggal tidak boleh di masa lalu.');
-    onSave({ type: form.type, date: form.date, reason: form.reason.trim() });
+    if (form.type === 'sakit' && form.date < hariIni) return setError('Tanggal tidak boleh di masa lalu.');
+    if (form.dateEnd && form.dateEnd < form.date) return setError('Tanggal selesai tidak boleh lebih awal dari tanggal mulai.');
+    if (lamaHari > 31) return setError('Maksimal 31 hari per pengajuan. Ajukan terpisah bila lebih panjang.');
+    onSave({ type: form.type, date: form.date, dateEnd: form.dateEnd || '', reason: form.reason.trim() });
   };
   return (
     <Modal title="Ajukan Izin" onClose={onClose}>
@@ -9736,10 +9944,23 @@ function LeaveRequestModal({ izinHmin, onSave, onClose }) {
             ))}
           </div>
         </Field>
-        <Field label="Tanggal Izin *">
-          <input type="date" value={form.date} min={minDate} onChange={e => setForm({ ...form, date: e.target.value })}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Tanggal Mulai *">
+            <input type="date" value={form.date} min={minDate}
+              onChange={e => setForm({ ...form, date: e.target.value, dateEnd: form.dateEnd && form.dateEnd < e.target.value ? '' : form.dateEnd })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </Field>
+          <Field label="Tanggal Selesai">
+            <input type="date" value={form.dateEnd} min={form.date || minDate} disabled={!form.date}
+              onChange={e => setForm({ ...form, dateEnd: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400" />
+          </Field>
+        </div>
+        <div className="text-[11px] text-slate-500 -mt-1">
+          {lamaHari > 1
+            ? <>Izin berlaku <b className="text-slate-700">{lamaHari} hari</b> ({fmtDate(form.date)} s/d {fmtDate(form.dateEnd)}) — semua tanggal itu otomatis berstatus {form.type === 'sakit' ? 'Sakit' : 'Izin'}.</>
+            : 'Kosongkan "Tanggal Selesai" bila izin hanya 1 hari.'}
+        </div>
         <Field label="Alasan *">
           <textarea value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} rows={3}
             placeholder="mis. acara keluarga / kontrol ke dokter"
