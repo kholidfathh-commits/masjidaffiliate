@@ -17,6 +17,7 @@ Sistem manajemen tim internal **Al-Kahfi Corp (MCN TAP + Masjid Affiliate)**. Li
 - **Pengecualian: modul LMS ada di `src/lms/` (6 file), dimuat `React.lazy`.** App.jsx hanya menyimpan import + 3 baris rute + registry. Detail: `PANDUAN-LMS.md`. Modul di `src/lms/` TIDAK BOLEH meng-import App.jsx (circular import → layar putih); dependensi disuntik lewat `initLms()`.
 - **Pengecualian 2: logika ABSENSI ada di `src/absensi/logika.js`** — fungsi MURNI (tanggal WIB, rentang filter, status harian, aktivitas terakhir, rentang izin). Tanpa React/JSX/storage supaya bisa diuji `node uji-absensi.mjs`. Sama seperti `src/lms/`: TIDAK BOLEH meng-import App.jsx.
 - **Pengecualian 3: `src/keuangan/hitung.js` (NPM & deret Laba Bersih) dan `src/aset/data.js` (modul Aset/Inventaris + encoder barcode Code 128-B tanpa dependency).** Keduanya fungsi MURNI, diuji `node uji-keuangan-aset.mjs`, dan TIDAK BOLEH meng-import App.jsx.
+- **Pengecualian 4: `src/tiket/urutan.js`** — urutan/sortir halaman Tiket (default terbaru dulu, 5 mode). Fungsi MURNI, diuji `node uji-tiket.mjs`, TIDAK BOLEH meng-import App.jsx.
 - Data: **Supabase** (tabel `kv_store`, key-value) dengan fallback localStorage. Region Tokyo. Password di-hash PBKDF2.
 - Deploy: push ke `main` → Vercel auto-deploy.
 - 4 role: owner / manajer / leader / operasional (+ flag `isSecretariat`). Divisi (struktur 2026-2029): manajemen, keuangan, mabit, mcn, tap, event (= MMC "Malam Mabit Cuan"), internal. Divisi `media` sudah dihapus — label key dinamis WAJIB via helper `divLabel()`.
@@ -32,7 +33,7 @@ Sistem manajemen tim internal **Al-Kahfi Corp (MCN TAP + Masjid Affiliate)**. Li
 
 ## Verifikasi (WAJIB sebelum anggap selesai)
 - `npx vite build --outDir /tmp/dist-verif --emptyOutDir` harus lulus (rm di folder ini kadang ditolak, makanya build ke /tmp).
-- Jalankan uji yang relevan: `node uji-keuangan-aset.mjs` (62 tes), `node uji-absensi.mjs` (80), `node uji-lms.mjs` (79), `node uji-akses.mjs` (25). Project ini JS murni — TIDAK ada typecheck/ESLint.
+- Jalankan uji yang relevan: `node uji-tiket.mjs` (34 tes), `node uji-keuangan-aset.mjs` (62), `node uji-absensi.mjs` (80), `node uji-lms.mjs` (79), `node uji-akses.mjs` (25). Project ini JS murni — TIDAK ada typecheck/ESLint.
 - Pastikan brace/bracket balance = 0.
 - Untuk perubahan besar: cek app tidak blank (bukan cuma build lulus).
 
