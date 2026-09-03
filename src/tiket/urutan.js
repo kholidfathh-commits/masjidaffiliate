@@ -102,5 +102,17 @@ export function urutkanTiket(list = [], mode = URUT_DEFAULT) {
   }
 }
 
+/**
+ * Waktu dibuat sebagai string ISO untuk DITAMPILKAN di layar.
+ * Memakai `waktuDibuat()` yang sama dengan yang dipakai menyortir — jadi tanggal
+ * yang terlihat user selalu konsisten dengan urutan daftarnya (termasuk saat
+ * `createdAt` kosong dan waktunya didekode dari id).
+ * @returns {string|null} null kalau benar-benar tidak diketahui → tampilkan '—'
+ */
+export function isoDibuat(t) {
+  const ms = waktuDibuat(t);
+  return ms > 0 ? new Date(ms).toISOString() : null;
+}
+
 /** Label mode urut untuk ditampilkan. */
 export const labelUrut = (id) => (URUT_TIKET.find(u => u.id === id) || URUT_TIKET[0]).label;
