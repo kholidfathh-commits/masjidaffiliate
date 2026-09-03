@@ -33,7 +33,7 @@ Sistem manajemen tim internal **Al-Kahfi Corp (MCN TAP + Masjid Affiliate)**. Li
 
 ## Verifikasi (WAJIB sebelum anggap selesai)
 - `npx vite build --outDir /tmp/dist-verif --emptyOutDir` harus lulus (rm di folder ini kadang ditolak, makanya build ke /tmp).
-- Jalankan uji yang relevan: `node uji-tiket.mjs` (34 tes), `node uji-keuangan-aset.mjs` (62), `node uji-absensi.mjs` (80), `node uji-lms.mjs` (79), `node uji-akses.mjs` (25). Project ini JS murni — TIDAK ada typecheck/ESLint.
+- Jalankan uji yang relevan: `node uji-tiket.mjs` (38 tes), `node uji-keuangan-aset.mjs` (62), `node uji-absensi.mjs` (80), `node uji-lms.mjs` (79), `node uji-akses.mjs` (25). Project ini JS murni — TIDAK ada typecheck/ESLint.
 - Pastikan brace/bracket balance = 0.
 - Untuk perubahan besar: cek app tidak blank (bukan cuma build lulus).
 
