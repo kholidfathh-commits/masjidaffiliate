@@ -5764,6 +5764,7 @@ function TasksView({ user, allUsers }) {
                   <th className="text-left p-3 font-semibold">Tugas</th>
                   <th className="text-left p-3 font-semibold">Dari</th>
                   <th className="text-left p-3 font-semibold">PIC</th>
+                  <th className="text-left p-3 font-semibold">Dibuat</th>
                   <th className="text-left p-3 font-semibold">Deadline</th>
                   <th className="text-left p-3 font-semibold">Prioritas</th>
                   <th className="p-3"></th>
@@ -5772,6 +5773,7 @@ function TasksView({ user, allUsers }) {
               <tbody>
                 {filtered.map(t => {
                   const days = daysUntil(t.deadline);
+                  const dibuatIso = Tiket.isoDibuat(t);
                   const canEdit = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id;
                   return (
                     <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50">
@@ -5806,6 +5808,11 @@ function TasksView({ user, allUsers }) {
                       </td>
                       <td className="p-3 text-sm text-slate-500">{t.createdByName || '—'}</td>
                       <td className="p-3 text-sm text-slate-700">{t.assigneeName || '—'}</td>
+                      {/* Tanggal tiket dibuat — sumbernya SAMA dengan yang dipakai mengurutkan,
+                          jadi urutan daftar selalu bisa dibaca dari kolom ini. */}
+                      <td className="p-3 text-sm text-slate-500 whitespace-nowrap">
+                        {dibuatIso ? fmtDate(dibuatIso) : <span className="text-slate-400">—</span>}
+                      </td>
                       <td className="p-3 text-sm">
                         {t.deadline ? (
                           <div className={days < 0 && t.status !== 'done' ? 'text-red-600 font-semibold' : days <= 1 && t.status !== 'done' ? 'text-amber-700' : 'text-slate-700'}>
@@ -5853,6 +5860,7 @@ function TasksView({ user, allUsers }) {
         ) : (
           filtered.map(t => {
             const days = daysUntil(t.deadline);
+            const dibuatIso = Tiket.isoDibuat(t);
             const canEdit = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id;
             const canChangeStatus = (user.role === 'manajer' || user.role === 'owner') || t.createdById === user.id || (t.assigneeId === user.id && t.status !== 'done');
             return (
@@ -5879,6 +5887,11 @@ function TasksView({ user, allUsers }) {
                     <ArrowRight className="w-3 h-3 text-slate-300" />
                     <span className="font-semibold text-slate-700">PIC: {t.assigneeName || '—'}</span>
                   </span>
+                  {dibuatIso && (
+                    <span className="inline-flex items-center gap-1 text-slate-500">
+                      <CalendarDays className="w-3.5 h-3.5 text-slate-400" /> Dibuat {fmtDate(dibuatIso)}
+                    </span>
+                  )}
                   {t.deadline && (
                     <span className={`inline-flex items-center gap-1 ${days < 0 && t.status !== 'done' ? 'text-red-600 font-semibold' : days <= 1 && t.status !== 'done' ? 'text-amber-700' : ''}`}>
                       <Clock className="w-3.5 h-3.5 text-slate-400" /> {fmtDate(t.deadline)}
@@ -6017,7 +6030,7 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
           <div className="bg-slate-50 p-3 rounded-lg">
             <div className="text-[10px] uppercase font-bold text-slate-500">Pemberi Tugas</div>
             <div className="font-semibold text-slate-800 mt-0.5">{task.createdByName || '-'}</div>
-            <div className="text-xs text-slate-500">{fmtDateTime(task.createdAt)}</div>
+            <div className="text-xs text-slate-500">Dibuat: {task.createdAt ? fmtDateTime(task.createdAt) : '—'}</div>
           </div>
           {task.deadline && (
             <div className="bg-slate-50 p-3 rounded-lg">
