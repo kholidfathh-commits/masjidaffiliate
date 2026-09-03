@@ -123,6 +123,23 @@ cek('5g. Daftar berisi null/undefined tidak crash',
 cek('5h. Argumen bukan array tidak crash', T.urutkanTiket(null).length === 0 && T.urutkanTiket(undefined).length === 0);
 
 // ============================================================================
+judul('5b. Tanggal dibuat untuk ditampilkan');
+// ============================================================================
+cek('5b-1. isoDibuat mengembalikan ISO dari createdAt',
+  T.isoDibuat({ id: 'x', createdAt: '2026-08-15T10:00:00.000Z' }) === '2026-08-15T10:00:00.000Z');
+cek('5b-2. Tanpa createdAt → tetap dapat tanggal dari id (konsisten dengan urutan)',
+  T.isoDibuat({ id: idLama }) === new Date(1754000000000).toISOString(), T.isoDibuat({ id: idLama }));
+cek('5b-3. Benar-benar tidak diketahui → null (layar menampilkan "—")',
+  T.isoDibuat({ id: 'tiket-manual-01' }) === null && T.isoDibuat({}) === null && T.isoDibuat(null) === null);
+cek('5b-4. Tanggal yang ditampilkan SELALU sejalan dengan urutan', (() => {
+  const urut = T.urutkanTiket(tiket);
+  for (let i = 1; i < urut.length; i++) {
+    if (Date.parse(T.isoDibuat(urut[i - 1])) < Date.parse(T.isoDibuat(urut[i]))) return false;
+  }
+  return true;
+})());
+
+// ============================================================================
 judul('6. Tidak merusak state & deterministik');
 // ============================================================================
 const asli = [...tiket];
