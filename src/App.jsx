@@ -46,6 +46,7 @@ import { wibDayKey } from './absensi/logika.js';
 // `node uji-keuangan-aset.mjs`. Kedua file TIDAK meng-import App.jsx.
 import * as Fin from './keuangan/hitung.js';
 import * as Aset from './aset/data.js';
+import * as Tiket from './tiket/urutan.js';
 
 // Halaman LMS dimuat LAZY: anggota yang tidak pernah membuka menu Pembelajaran
 // tidak ikut mengunduh kodenya (bundle utama app sudah ~973 kB).
@@ -5544,7 +5545,7 @@ function TasksView({ user, allUsers }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
-  const [filter, setFilter] = useState({ status: 'all', assignee: 'all', search: '' });
+  const [filter, setFilter] = useState({ status: 'all', assignee: 'all', search: '', sort: Tiket.URUT_DEFAULT });
 
   const load = async () => setTasks(await loadTasks());
   useEffect(() => {
@@ -5703,12 +5704,18 @@ function TasksView({ user, allUsers }) {
     return [user];
   }, [user, allUsers]);
 
-  const filtered = visibleTasks.filter(t => {
-    if (filter.status !== 'all' && t.status !== filter.status) return false;
-    if (filter.assignee !== 'all' && t.assigneeId !== filter.assignee) return false;
-    if (filter.search && !t.title.toLowerCase().includes(filter.search.toLowerCase())) return false;
-    return true;
-  });
+  // Saring dulu (status / PIC / pencarian), BARU diurutkan — supaya filter dan
+  // sortir bisa dipakai bersamaan. Default `sort` = 'terbaru', jadi tiket yang baru
+  // dibuat langsung muncul paling atas begitu `load()` selesai (tanpa refresh manual).
+  const filtered = useMemo(() => {
+    const cocok = visibleTasks.filter(t => {
+      if (filter.status !== 'all' && t.status !== filter.status) return false;
+      if (filter.assignee !== 'all' && t.assigneeId !== filter.assignee) return false;
+      if (filter.search && !(t.title || '').toLowerCase().includes(filter.search.toLowerCase())) return false;
+      return true;
+    });
+    return Tiket.urutkanTiket(cocok, filter.sort);
+  }, [visibleTasks, filter.status, filter.assignee, filter.search, filter.sort]);
 
   return (
     <div className="max-w-7xl">
@@ -5736,6 +5743,11 @@ function TasksView({ user, allUsers }) {
           className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
           <option value="all">Semua PIC</option>
           {assignableUsers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        <select value={filter.sort} onChange={e => setFilter({ ...filter, sort: e.target.value })}
+          title="Urutkan tiket"
+          className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+          {Tiket.URUT_TIKET.map(u => <option key={u.id} value={u.id}>Urutkan: {u.label}</option>)}
         </select>
       </div>
 
