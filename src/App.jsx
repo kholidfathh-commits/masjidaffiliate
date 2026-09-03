@@ -41,6 +41,12 @@ import {
 import * as Abs from './absensi/logika.js';
 import { wibDayKey } from './absensi/logika.js';
 
+// ============ MODUL KEUANGAN & ASET (logika murni) ============
+// Sama polanya dengan src/absensi/: fungsi murni dipisah supaya bisa diuji lewat
+// `node uji-keuangan-aset.mjs`. Kedua file TIDAK meng-import App.jsx.
+import * as Fin from './keuangan/hitung.js';
+import * as Aset from './aset/data.js';
+
 // Halaman LMS dimuat LAZY: anggota yang tidak pernah membuka menu Pembelajaran
 // tidak ikut mengunduh kodenya (bundle utama app sudah ~973 kB).
 const MyLearningView = React.lazy(() => import('./lms/MyLearning.jsx'));
@@ -567,6 +573,13 @@ async function loadDivisionPlans() {
   return await storage.listByPrefix(DIVPLAN_REC_PREFIX); // throw saat koneksi gagal → pemanggil pertahankan state lama
 }
 
+// Aset / Inventaris (aset:all) — per-record, prefix 'aset:rec:'. Modul BARU sejak awal
+// per-record → tidak ada array legacy yang perlu diserap. Bentuk record & fungsi
+// hitungnya ada di `src/aset/data.js`.
+async function loadAssets() {
+  return await storage.listByPrefix(Aset.ASET_REC_PREFIX); // throw saat koneksi gagal → pemanggil pertahankan state lama
+}
+
 // ====== LMS: suntik dependensi app ke modul pembelajaran ======
 // Dipanggil SEKALI di sini, tepat sebelum registry di bawah, karena loader LMS butuh
 // `storage`. Perhatikan `log`: logActivity adalah const yang baru dideklarasikan jauh
@@ -585,6 +598,7 @@ initLms({
 // Daftar modul per-record (key backup logis → loader & prefix baris). Tambah modul baru di sini.
 const PER_RECORD_LOADERS = {
   'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar, 'division-plans:all': loadDivisionPlans, 'img:store': loadImageStore,
+  [Aset.ASET_BACKUP_KEY]: loadAssets,
   // LMS (Pembelajaran)
   'lms:paths:all': loadLmsPaths, 'lms:courses:all': loadLmsCourses, 'lms:lesson-bodies:all': loadLmsBodies,
   'lms:enrollments:all': loadLmsEnrollments, 'lms:progress:all': loadLmsProgress, 'lms:attempts:all': loadLmsAttempts,
@@ -593,6 +607,7 @@ const PER_RECORD_LOADERS = {
 };
 const PER_RECORD_PREFIX = {
   'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX, 'division-plans:all': DIVPLAN_REC_PREFIX, 'img:store': IMG_PREFIX,
+  [Aset.ASET_BACKUP_KEY]: Aset.ASET_REC_PREFIX,
   // LMS (Pembelajaran)
   'lms:paths:all': LMS_PATH_PREFIX, 'lms:courses:all': LMS_COURSE_PREFIX, 'lms:lesson-bodies:all': LMS_BODY_PREFIX,
   'lms:enrollments:all': LMS_ENROLL_PREFIX, 'lms:progress:all': LMS_PROGRESS_PREFIX, 'lms:attempts:all': LMS_ATTEMPT_PREFIX,
@@ -876,6 +891,7 @@ const BACKUP_KEYS = [
   'partner-feedback:all', 'swot:external', 'backup:last', 'leave-requests:all',
   'drive:auto-backup', 'backup:drive-last',
   'keuangan:cashflow', 'division-plans:all',
+  Aset.ASET_BACKUP_KEY, // aset/inventaris — WAJIB ikut backup
   'img:store', // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
   ...LMS_BACKUP_KEYS // LMS: jalur, kursus, isi materi, enrollment, progres, kuis, tugas, validasi, modul bacaan
 ];
@@ -1443,7 +1459,8 @@ export default function App() {
             {view === 'tap-commission' && <TapCommissionView user={currentUser} />}
             {view === 'partner-feedback' && <PartnerFeedbackView user={currentUser} />}
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
-            {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} />}
+            {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} setView={setView} />}
+            {view === 'aset' && <AsetView user={currentUser} />}
             {view === 'affiliate-accounts' && <AffiliateAccountsView user={currentUser} allUsers={allUsers} />}
             {view === 'kpi' && <KpiView user={currentUser} allUsers={allUsers} />}
             {view === 'problems' && <ProblemsView user={currentUser} allUsers={allUsers} />}
@@ -2130,7 +2147,8 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
     {
       label: 'Keuangan',
       items: [
-        { id: 'keuangan', label: 'Keuangan', icon: Wallet, show: canAccessFeature(user, 'finance') }
+        { id: 'keuangan', label: 'Keuangan', icon: Wallet, show: canAccessFeature(user, 'finance') },
+        { id: 'aset', label: 'Aset & Inventaris', icon: Building2, show: canAccessFeature(user, 'finance') }
       ]
     },
     {
@@ -6554,12 +6572,19 @@ function InteractiveLineChart({ series, color = '#2563EB', lines, height = 150, 
   if (n === 0) return null;
   const single = data.length === 1;
   const CW = 600, CH = 160, PADL = 8, PADR = 8, PADT = 16, PADB = 20;
-  const max = Math.max(...data.flatMap(l => l.series.map(s => s.value)), targetDaily || 0, 1);
+  const semuaNilai = data.flatMap(l => l.series.map(s => Number(s.value) || 0));
+  const max = Math.max(...semuaNilai, targetDaily || 0, 1);
+  // Dukungan NILAI NEGATIF (mis. garis Laba Bersih saat rugi). Kalau tidak ada nilai
+  // negatif, `min` tetap 0 → skala & tampilan grafik lama TIDAK berubah sama sekali.
+  const minNilai = Math.min(...semuaNilai, 0);
+  const min = minNilai < 0 ? minNilai : 0;
+  const span = (max - min) || 1;
   const xAt = (i) => PADL + (n <= 1 ? 0 : (i / (n - 1)) * (CW - PADL - PADR));
-  const yAt = (v) => CH - PADB - (v / max) * (CH - PADT - PADB);
+  const yAt = (v) => CH - PADB - (((Number(v) || 0) - min) / span) * (CH - PADT - PADB);
+  const yNol = yAt(0); // garis nol — hanya digambar saat ada nilai negatif
   const ptsOf = (ser) => ser.map((s, i) => `${xAt(i).toFixed(1)},${yAt(s.value).toFixed(1)}`).join(' ');
   const baseSeries = data[0].series;
-  const area = single ? `${ptsOf(baseSeries)} ${xAt(n - 1).toFixed(1)},${CH - PADB} ${xAt(0).toFixed(1)},${CH - PADB}` : '';
+  const area = single ? `${ptsOf(baseSeries)} ${xAt(n - 1).toFixed(1)},${yNol.toFixed(1)} ${xAt(0).toFixed(1)},${yNol.toFixed(1)}` : '';
   const labelEvery = Math.ceil(n / 10);
   const todayStr = dayKey();
 
@@ -6590,6 +6615,9 @@ function InteractiveLineChart({ series, color = '#2563EB', lines, height = 150, 
         })}
         {targetDaily > 0 && (
           <line x1={PADL} y1={yAt(targetDaily)} x2={CW - PADR} y2={yAt(targetDaily)} stroke="#F59E0B" strokeWidth="1.4" strokeDasharray="5 4" />
+        )}
+        {min < 0 && (
+          <line x1={PADL} y1={yNol} x2={CW - PADR} y2={yNol} stroke="#94A3B8" strokeWidth="1.2" strokeDasharray="4 3" />
         )}
         {single && <polygon points={area} fill={`url(#${gradId})`} />}
         {data.map((l, li) => (
@@ -14800,6 +14828,513 @@ function EmptyState({ icon: Icon, text }) {
     </div>
   );
 }
+// ============ ASET / INVENTARIS ============
+// Modul BARU. Data per-record di kv_store ('aset:rec:<id>') → tidak ada timpa-massal
+// saat dua orang menambah aset bersamaan. Logika murni & barcode ada di src/aset/data.js.
+
+// Barcode Code 128-B sebagai SVG murni — TANPA dependency baru.
+// Isi barcode = KODE ASET yang unik, bukan nama aset.
+function BarcodeSvg({ kode, tinggi = 64, tampilTeks = true, lebarModul = 2 }) {
+  const bc = useMemo(() => Aset.barcodeCode128(kode), [kode]);
+  if (!bc) return <div className="text-xs text-red-600 font-semibold">Kode "{kode}" mengandung karakter yang tidak bisa dijadikan barcode.</div>;
+  const QUIET = 10; // zona sunyi wajib kiri & kanan supaya terbaca pemindai
+  const w = (bc.totalModul + QUIET * 2) * lebarModul;
+  const h = tinggi + (tampilTeks ? 20 : 0);
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ maxWidth: w, height: 'auto' }} role="img" aria-label={`Barcode ${kode}`}>
+      <rect x="0" y="0" width={w} height={h} fill="#FFFFFF" />
+      {bc.segmen.filter(s => s.hitam).map((s, i) => (
+        <rect key={i} x={(QUIET + s.x) * lebarModul} y="0" width={s.lebar * lebarModul} height={tinggi} fill="#000000" />
+      ))}
+      {tampilTeks && (
+        <text x={w / 2} y={h - 5} textAnchor="middle" fontSize="13" fontFamily="ui-monospace, monospace" fill="#000000" letterSpacing="1.5">{kode}</text>
+      )}
+    </svg>
+  );
+}
+
+// SVG barcode sebagai string mandiri (dipakai unduh & cetak).
+function barcodeSvgString(kode, nama) {
+  const bc = Aset.barcodeCode128(kode);
+  if (!bc) return null;
+  const QUIET = 10, M = 2, TINGGI = 70;
+  const w = (bc.totalModul + QUIET * 2) * M, h = TINGGI + 40;
+  const bars = bc.segmen.filter(s => s.hitam)
+    .map(s => `<rect x="${(QUIET + s.x) * M}" y="18" width="${s.lebar * M}" height="${TINGGI}" fill="#000"/>`).join('');
+  const judul = String(nama || '').slice(0, 40).replace(/[<>&]/g, '');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">`
+    + `<rect width="${w}" height="${h}" fill="#fff"/>`
+    + `<text x="${w / 2}" y="12" text-anchor="middle" font-size="11" font-family="sans-serif" fill="#000">${judul}</text>`
+    + bars
+    + `<text x="${w / 2}" y="${h - 8}" text-anchor="middle" font-size="14" font-family="monospace" fill="#000" letter-spacing="1.5">${kode}</text>`
+    + `</svg>`;
+}
+
+function unduhBarcode(kode, nama) {
+  const svg = barcodeSvgString(kode, nama);
+  if (!svg) return alert('Kode ini tidak bisa dijadikan barcode.');
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = `barcode-${kode}.svg`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function cetakBarcode(kode, nama) {
+  const svg = barcodeSvgString(kode, nama);
+  if (!svg) return alert('Kode ini tidak bisa dijadikan barcode.');
+  const w = window.open('', '_blank', 'width=520,height=360');
+  if (!w) return alert('Popup diblokir browser. Izinkan popup untuk mencetak, atau pakai tombol Unduh.');
+  w.document.write(`<!doctype html><title>Barcode ${kode}</title>`
+    + `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif">${svg}</body>`);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try { w.print(); } catch { /* dibiarkan: user bisa cetak manual */ } }, 300);
+}
+
+// Pemindai barcode memakai API bawaan browser (BarcodeDetector). Tidak menambah
+// dependency; kalau browser belum mendukung, otomatis jadi input kode manual.
+function AsetScanModal({ onFound, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const aktifRef = useRef(true);
+  const [err, setErr] = useState('');
+  const [manual, setManual] = useState('');
+  const didukung = typeof window !== 'undefined' && 'BarcodeDetector' in window;
+
+  useEffect(() => {
+    aktifRef.current = true;
+    if (!didukung) return undefined;
+    let detector;
+    (async () => {
+      try {
+        detector = new window.BarcodeDetector({ formats: ['code_128', 'qr_code', 'ean_13', 'code_39'] });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        streamRef.current = stream;
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+        const loop = async () => {
+          if (!aktifRef.current || !videoRef.current) return;
+          try {
+            const hasil = await detector.detect(videoRef.current);
+            if (hasil && hasil.length) { onFound(hasil[0].rawValue); return; }
+          } catch { /* frame gagal dibaca — coba frame berikutnya */ }
+          setTimeout(loop, 350);
+        };
+        loop();
+      } catch (e) {
+        setErr(e?.name === 'NotAllowedError' ? 'Izin kamera ditolak. Aktifkan izin kamera lalu coba lagi.' : 'Kamera tidak bisa dibuka. Masukkan kode aset secara manual.');
+      }
+    })();
+    return () => {
+      aktifRef.current = false;
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    };
+  }, [didukung, onFound]);
+
+  return (
+    <Modal title="Pindai Barcode Aset" onClose={onClose}>
+      <div className="space-y-3">
+        {didukung && !err && (
+          <div className="rounded-xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center">
+            <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+          </div>
+        )}
+        {!didukung && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl px-3 py-2.5">
+            Browser ini belum mendukung pemindaian kamera. Ketik kode asetnya di bawah — hasilnya sama.
+          </div>
+        )}
+        {err && <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl px-3 py-2.5">{err}</div>}
+        <Field label="Atau ketik kode aset">
+          <div className="flex gap-2">
+            <input value={manual} onChange={e => setManual(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && manual.trim() && onFound(manual.trim())}
+              placeholder="mis. AST-0001"
+              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm uppercase" />
+            <button onClick={() => manual.trim() && onFound(manual.trim())} disabled={!manual.trim()}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-4 rounded-lg font-semibold text-sm">Cari</button>
+          </div>
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
+function AsetFormModal({ initial, daftar, onSave, onClose }) {
+  const [form, setForm] = useState(() => initial || {
+    kode: Aset.kodeBerikutnya(daftar), nama: '', kategori: 'Elektronik', divisi: 'corp',
+    jumlah: 1, hargaSatuan: '', tanggalBeli: '', kondisi: 'baik', lokasi: '', catatan: '',
+  });
+  const [error, setError] = useState('');
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const simpan = () => {
+    const pesan = Aset.validasiAset(form, daftar, initial?.id || null);
+    if (pesan) return setError(pesan);
+    setError('');
+    onSave({
+      ...form,
+      kode: Aset.rapikanKode(form.kode),
+      nama: String(form.nama).trim(),
+      jumlah: Number(form.jumlah) || 1,
+      hargaSatuan: form.hargaSatuan === '' || form.hargaSatuan == null ? null : Number(form.hargaSatuan),
+      lokasi: String(form.lokasi || '').trim(),
+      catatan: String(form.catatan || '').trim(),
+    });
+  };
+  const totalPreview = (Number(form.hargaSatuan) || 0) * (Number(form.jumlah) || 1);
+  return (
+    <Modal title={initial ? 'Edit Aset' : 'Tambah Aset'} onClose={onClose} wide>
+      <div className="space-y-3">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Kode Aset * (unik)">
+            <input value={form.kode} onChange={e => set('kode', e.target.value.toUpperCase())}
+              placeholder="AST-0001"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono uppercase" />
+          </Field>
+          <Field label="Nama Aset *">
+            <input value={form.nama} onChange={e => set('nama', e.target.value)}
+              placeholder="mis. Laptop MacBook Air M2"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+          </Field>
+          <Field label="Kategori">
+            <select value={form.kategori} onChange={e => set('kategori', e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+              {Aset.ASET_KATEGORI.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </Field>
+          <Field label="Divisi Pemilik">
+            <select value={form.divisi} onChange={e => set('divisi', e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+              {Object.entries(FIN_DIVISIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Jumlah / Kuantitas">
+            <input type="number" min="1" value={form.jumlah} onChange={e => set('jumlah', e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm tabular-nums" />
+          </Field>
+          <Field label="Harga Pembelian / unit (Rp)">
+            <input type="number" min="0" value={form.hargaSatuan ?? ''} onChange={e => set('hargaSatuan', e.target.value)}
+              placeholder="kosongkan bila belum diketahui"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm tabular-nums" />
+          </Field>
+          <Field label="Tanggal Pembelian">
+            <input type="date" value={form.tanggalBeli} onChange={e => set('tanggalBeli', e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+          </Field>
+          <Field label="Kondisi">
+            <select value={form.kondisi} onChange={e => set('kondisi', e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+              {Object.entries(Aset.ASET_KONDISI).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Lokasi">
+            <input value={form.lokasi} onChange={e => set('lokasi', e.target.value)}
+              placeholder="mis. Studio Lantai 2"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+          </Field>
+          <Field label="Catatan">
+            <input value={form.catatan} onChange={e => set('catatan', e.target.value)}
+              placeholder="opsional"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+          </Field>
+        </div>
+
+        <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 flex items-center justify-between text-sm">
+          <span className="text-slate-500 font-semibold">Total nilai pembelian</span>
+          <span className="font-extrabold text-slate-800">
+            {form.hargaSatuan === '' || form.hargaSatuan == null ? 'Belum ada harga' : fmtRupiah(totalPreview)}
+          </span>
+        </div>
+
+        {Aset.bisaBarcode(Aset.rapikanKode(form.kode)) && (
+          <div className="bg-white border border-slate-200 rounded-xl p-3">
+            <div className="text-[10px] uppercase font-bold text-slate-400 mb-1.5">Pratinjau Barcode</div>
+            <BarcodeSvg kode={Aset.rapikanKode(form.kode)} tinggi={44} lebarModul={1.6} />
+          </div>
+        )}
+
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
+        <FormActions onCancel={onClose} onSave={simpan} saveLabel={initial ? 'Simpan Perubahan' : 'Tambah Aset'} />
+      </div>
+    </Modal>
+  );
+}
+
+function AsetDetailModal({ aset, canManage, onEdit, onDelete, onClose }) {
+  const a = Aset.normalisasiAset(aset);
+  const kondisi = Aset.kondisiInfo(a.kondisi);
+  const baris = [
+    ['Kode Aset', <span className="font-mono font-bold">{a.kode || '–'}</span>],
+    ['Kategori', a.kategori],
+    ['Divisi Pemilik', FIN_DIVISIONS[a.divisi]?.label || a.divisi],
+    ['Jumlah', `${fmtNumber(a.jumlah)} unit`],
+    ['Harga Pembelian / unit', a.hargaSatuan == null ? <span className="text-slate-400 italic">Belum diisi</span> : fmtRupiah(a.hargaSatuan)],
+    ['Total Nilai Pembelian', a.hargaSatuan == null ? <span className="text-slate-400 italic">Belum dapat dihitung</span> : <b>{fmtRupiah(Aset.nilaiAset(a))}</b>],
+    ['Tanggal Pembelian', Aset.fmtTanggalId(a.tanggalBeli)],
+    ['Kondisi', <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${kondisi.badge}`}>{kondisi.label}</span>],
+    ['Lokasi', a.lokasi || '–'],
+    ['Catatan', a.catatan || '–'],
+  ];
+  return (
+    <Modal title={a.nama || 'Detail Aset'} onClose={onClose} wide>
+      <div className="space-y-4">
+        <div className="grid sm:grid-cols-2 gap-x-4 gap-y-2">
+          {baris.map(([k, v]) => (
+            <div key={k} className="flex items-start justify-between gap-3 py-1.5 border-b border-slate-100">
+              <span className="text-xs font-semibold text-slate-500 flex-shrink-0">{k}</span>
+              <span className="text-sm text-slate-800 text-right">{v}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-4 text-center">
+          <div className="text-[10px] uppercase font-bold text-slate-400 mb-2">Barcode Aset (Code 128)</div>
+          <div className="flex justify-center"><BarcodeSvg kode={a.kode} /></div>
+          <div className="flex items-center justify-center gap-2 mt-3">
+            <button onClick={() => cetakBarcode(a.kode, a.nama)}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center gap-1.5">
+              <Presentation className="w-3.5 h-3.5" /> Cetak
+            </button>
+            <button onClick={() => unduhBarcode(a.kode, a.nama)}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center gap-1.5">
+              <Download className="w-3.5 h-3.5" /> Unduh SVG
+            </button>
+          </div>
+          <div className="text-[10px] text-slate-400 mt-2">Barcode dibuat dari kode aset yang unik, bukan dari nama aset.</div>
+        </div>
+
+        {canManage && (
+          <div className="flex gap-2">
+            <button onClick={onEdit} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2">
+              <Edit2 className="w-4 h-4" /> Edit
+            </button>
+            <button onClick={onDelete} className="px-4 py-2.5 border border-red-200 text-red-600 hover:bg-red-50 rounded-lg font-semibold flex items-center gap-2">
+              <Trash2 className="w-4 h-4" /> Hapus
+            </button>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function AsetView({ user }) {
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
+  const [filterDiv, setFilterDiv] = useState('all');
+  const [filterKondisi, setFilterKondisi] = useState('all');
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [showScan, setShowScan] = useState(false);
+  const [scanPesan, setScanPesan] = useState('');
+
+  const canManage = canManageFinance(user);
+
+  const load = async () => {
+    try { setList(await loadAssets()); }
+    catch (e) { console.warn('Load aset gagal (pertahankan data lama):', e?.message || e); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 60000); return () => clearInterval(iv); }, []);
+
+  const simpan = async (data) => {
+    try {
+      // Cek ulang ke server tepat sebelum menulis: mencegah dua orang memakai kode
+      // yang sama saat menambah aset hampir bersamaan.
+      const terbaru = await loadAssets();
+      const bentrok = Aset.validasiAset(data, terbaru, editing?.id || null);
+      if (bentrok) { alert('⚠️ ' + bentrok); return; }
+      const rec = editing
+        ? { ...editing, ...data, updatedAt: new Date().toISOString() }
+        : { id: uid(), ...data, createdAt: new Date().toISOString(), createdById: user.id, createdByName: user.name };
+      const ok = await storage.set(Aset.ASET_REC_PREFIX + rec.id, rec);
+      if (!ok) { alert('⚠️ Gagal menyimpan aset. Coba lagi saat koneksi stabil.'); return; }
+      await logActivity(`${editing ? 'mengubah' : 'menambah'} aset ${rec.kode} — ${rec.nama}`, user.name);
+      setShowForm(false); setEditing(null); setDetail(null); load();
+    } catch (e) { alert('⚠️ Gagal menyimpan: ' + (e?.message || e)); }
+  };
+
+  const hapus = async (a) => {
+    if (!confirm(`Hapus aset "${a.nama}" (${a.kode})? Tindakan ini tidak bisa dibatalkan.`)) return;
+    const ok = await storage.delete(Aset.ASET_REC_PREFIX + a.id);
+    if (!ok) { alert('⚠️ Gagal menghapus aset. Coba lagi.'); return; }
+    await logActivity(`menghapus aset ${a.kode} — ${a.nama}`, user.name);
+    setDetail(null); load();
+  };
+
+  const cariKode = (teks) => {
+    const k = Aset.rapikanKode(teks);
+    const hit = list.find(a => Aset.rapikanKode(a.kode) === k);
+    if (hit) { setShowScan(false); setScanPesan(''); setDetail(hit); }
+    else setScanPesan(`Aset dengan kode "${k}" tidak ditemukan.`);
+  };
+
+  const tampil = useMemo(() => {
+    const kata = q.trim().toLowerCase();
+    return list.map(Aset.normalisasiAset).filter(Boolean)
+      .filter(a => filterDiv === 'all' || a.divisi === filterDiv)
+      .filter(a => filterKondisi === 'all' || a.kondisi === filterKondisi)
+      .filter(a => !kata || a.nama.toLowerCase().includes(kata) || a.kode.toLowerCase().includes(kata)
+        || a.kategori.toLowerCase().includes(kata) || a.lokasi.toLowerCase().includes(kata))
+      .sort((a, b) => a.kode.localeCompare(b.kode));
+  }, [list, q, filterDiv, filterKondisi]);
+
+  const ringkas = useMemo(() => Aset.ringkasAset(list, filterDiv), [list, filterDiv]);
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat data aset…</div>;
+
+  return (
+    <div className="max-w-6xl">
+      <PageHeader title="Aset & Inventaris" subtitle="Daftar aset perusahaan — kode unik, barcode, kondisi & nilai pembelian"
+        action={
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setScanPesan(''); setShowScan(true); }}
+              className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3.5 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              <Camera className="w-4 h-4" /> Pindai
+            </button>
+            {canManage && (
+              <button onClick={() => { setEditing(null); setShowForm(true); }}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+                <Plus className="w-4 h-4" /> Tambah Aset
+              </button>
+            )}
+          </div>
+        } />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <FinStat label="Data Aset" value={0} teks={`${fmtNumber(ringkas.jumlahData)}`} icon={Database} tone="slate" sub="record" />
+        <FinStat label="Total Unit" value={0} teks={`${fmtNumber(ringkas.totalUnit)}`} icon={Building2} tone="blue" sub="unit" />
+        <FinStat label="Total Nilai Pembelian Aset" value={ringkas.totalNilai} icon={Wallet} tone="emerald"
+          hint="Harga beli × kuantitas — belum termasuk penyusutan." />
+        <FinStat label="Data Belum Lengkap" value={0} teks={`${fmtNumber(ringkas.tanpaHarga)}`} icon={AlertCircle}
+          tone={ringkas.tanpaHarga ? 'amber' : 'slate'} sub="aset tanpa harga beli" />
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap mb-4 bg-white rounded-xl border border-slate-200 p-3">
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cari kode, nama, kategori, lokasi…"
+            className="pl-9 pr-3 py-2 rounded-lg border border-slate-300 text-sm w-64 max-w-full" />
+        </div>
+        <select value={filterDiv} onChange={e => setFilterDiv(e.target.value)}
+          className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+          <option value="all">Semua divisi</option>
+          {Object.entries(FIN_DIVISIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <select value={filterKondisi} onChange={e => setFilterKondisi(e.target.value)}
+          className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+          <option value="all">Semua kondisi</option>
+          {Object.entries(Aset.ASET_KONDISI).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <span className="ml-auto text-xs text-slate-500 font-semibold">{tampil.length} aset ditampilkan</span>
+      </div>
+
+      {tampil.length === 0 ? (
+        <EmptyState icon={Building2} text={list.length === 0 ? 'Belum ada aset tercatat. Klik "Tambah Aset" untuk mulai.' : 'Tidak ada aset yang cocok dengan filter ini.'} />
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+          {/* MOBILE */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {tampil.map(a => {
+              const k = Aset.kondisiInfo(a.kondisi);
+              return (
+                <button key={a.id} onClick={() => setDetail(a)} className="w-full text-left p-3.5 hover:bg-slate-50">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-mono text-[11px] font-bold text-blue-700">{a.kode}</div>
+                      <div className="text-sm font-semibold text-slate-900 truncate">{a.nama}</div>
+                      <div className="text-[11px] text-slate-500">{a.kategori} · {FIN_DIVISIONS[a.divisi]?.label || a.divisi}</div>
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex-shrink-0 ${k.badge}`}>{k.label}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mt-2.5">
+                    <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">Jumlah</div>
+                      <div className="text-sm font-bold tabular-nums text-slate-700">{fmtNumber(a.jumlah)}</div>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">Nilai</div>
+                      <div className="text-sm font-bold tabular-nums text-slate-700">{a.hargaSatuan == null ? '–' : fmtRupiah(Aset.nilaiAset(a))}</div>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">Dibeli</div>
+                      <div className="text-[11px] font-bold text-slate-700">{a.tanggalBeli ? Aset.fmtTanggalId(a.tanggalBeli) : '–'}</div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {/* DESKTOP */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm min-w-[860px]">
+              <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="text-left px-4 py-2.5 font-bold">Kode</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Nama Aset</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Kategori</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Divisi</th>
+                  <th className="text-right px-3 py-2.5 font-bold">Jumlah</th>
+                  <th className="text-right px-3 py-2.5 font-bold">Harga/unit</th>
+                  <th className="text-right px-3 py-2.5 font-bold">Total Nilai</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Dibeli</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Kondisi</th>
+                  <th className="text-left px-3 py-2.5 font-bold">Lokasi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tampil.map(a => {
+                  const k = Aset.kondisiInfo(a.kondisi);
+                  return (
+                    <tr key={a.id} onClick={() => setDetail(a)} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50 transition">
+                      <td className="px-4 py-2.5 font-mono text-xs font-bold text-blue-700 whitespace-nowrap">{a.kode}</td>
+                      <td className="px-3 py-2.5 font-semibold text-slate-900">{a.nama}</td>
+                      <td className="px-3 py-2.5 text-slate-600">{a.kategori}</td>
+                      <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{FIN_DIVISIONS[a.divisi]?.label || a.divisi}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-700">{fmtNumber(a.jumlah)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{a.hargaSatuan == null ? <span className="text-slate-300">–</span> : fmtRupiah(a.hargaSatuan)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-bold text-slate-800">{a.hargaSatuan == null ? <span className="text-slate-300 font-normal">–</span> : fmtRupiah(Aset.nilaiAset(a))}</td>
+                      <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{a.tanggalBeli ? Aset.fmtTanggalId(a.tanggalBeli) : <span className="text-slate-300">–</span>}</td>
+                      <td className="px-3 py-2.5"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${k.badge}`}>{k.label}</span></td>
+                      <td className="px-3 py-2.5 text-slate-600">{a.lokasi || <span className="text-slate-300">–</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400">
+            Klik baris untuk melihat detail, barcode, cetak/unduh barcode{canManage ? ', edit & hapus' : ''}.
+          </div>
+        </div>
+      )}
+
+      {showForm && (
+        <AsetFormModal initial={editing} daftar={list}
+          onSave={simpan} onClose={() => { setShowForm(false); setEditing(null); }} />
+      )}
+      {detail && !showForm && (
+        <AsetDetailModal aset={detail} canManage={canManage}
+          onEdit={() => { setEditing(detail); setShowForm(true); }}
+          onDelete={() => hapus(detail)}
+          onClose={() => setDetail(null)} />
+      )}
+      {showScan && (
+        <>
+          <AsetScanModal onFound={cariKode} onClose={() => { setShowScan(false); setScanPesan(''); }} />
+          {scanPesan && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[130] bg-red-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg">
+              {scanPesan}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ============ KEUANGAN (FINANCE) ============
 const FIN_DIVISIONS = {
   mcn:        { label: 'MCN', color: '#10B981' },
@@ -14814,18 +15349,42 @@ function canManageFinance(user) {
   return user.role === 'owner' || user.role === 'manajer' || user.division === 'keuangan' || user.division === 'manajemen';
 }
 
-function FinStat({ label, value, icon: Icon, tone }) {
-  const tones = { emerald: ['#ECFDF5', '#10B981'], rose: ['#FFF1F2', '#F43F5E'], blue: ['#EFF6FF', '#2563EB'], violet: ['#F5F3FF', '#7C3AED'] };
+// Kartu KPI keuangan. Pemakaian lama (label/value/icon/tone) TIDAK berubah.
+// Prop tambahan opsional:
+//   teks   → tampilkan string siap-pakai (mis. persen "21,34%") menggantikan format rupiah
+//   sub    → baris kecil di bawah nilai (mis. "8 unit · 3 data aset")
+//   hint   → keterangan singkat penjelas rumus
+//   onClick→ kartu jadi tombol (mis. Total Aset → buka halaman Aset)
+function FinStat({ label, value, icon: Icon, tone, teks, sub, hint, onClick, negatif }) {
+  const tones = {
+    emerald: ['#ECFDF5', '#10B981'], rose: ['#FFF1F2', '#F43F5E'], blue: ['#EFF6FF', '#2563EB'],
+    violet: ['#F5F3FF', '#7C3AED'], amber: ['#FFFBEB', '#D97706'], slate: ['#F8FAFC', '#475569'],
+  };
   const [bg, fg] = tones[tone] || tones.blue;
-  return (
-    <div className="bg-white rounded-2xl border border-slate-200/70 p-4">
+  const merah = negatif !== undefined ? negatif : (teks === undefined && value < 0);
+  const isi = (
+    <>
       <div className="flex items-center gap-2 mb-2">
-        <span className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: bg }}><Icon className="w-4 h-4" style={{ color: fg }} /></span>
-        <span className="text-xs font-semibold text-slate-500">{label}</span>
+        <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: bg }}><Icon className="w-4 h-4" style={{ color: fg }} /></span>
+        <span className="text-xs font-semibold text-slate-500 leading-tight">{label}</span>
       </div>
-      <div className="text-lg font-extrabold" style={{ color: value < 0 ? '#E11D48' : '#0F172A' }}>{fmtRupiah(value)}</div>
-    </div>
+      <div className="text-lg font-extrabold break-words" style={{ color: merah ? '#E11D48' : '#0F172A' }}>
+        {teks !== undefined ? teks : fmtRupiah(value)}
+      </div>
+      {sub && <div className="text-[11px] font-semibold text-slate-500 mt-0.5">{sub}</div>}
+      {hint && <div className="text-[10px] text-slate-400 mt-1 leading-snug">{hint}</div>}
+    </>
   );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick}
+        className="bg-white rounded-2xl border border-slate-200/70 p-4 text-left w-full hover:border-blue-300 hover:shadow-sm transition group">
+        {isi}
+        <div className="text-[10px] font-bold text-blue-600 mt-1.5 opacity-0 group-hover:opacity-100 transition">Lihat daftar aset →</div>
+      </button>
+    );
+  }
+  return <div className="bg-white rounded-2xl border border-slate-200/70 p-4">{isi}</div>;
 }
 
 function FinBreakdown({ title, data, total, color, empty }) {
@@ -15092,8 +15651,9 @@ const finMonthRange = (mk) => {
   return { id: 'month', label: 'Bulan', start: `${mk}-01`, end: `${mk}-${String(last).padStart(2, '0')}` };
 };
 
-function KeuanganView({ user, allUsers }) {
+function KeuanganView({ user, allUsers, setView }) {
   const [items, setItems] = useState([]);
+  const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('dashboard');
   const [per, setPer] = useState(() => finMonthRange(monthKey()));
@@ -15107,6 +15667,10 @@ function KeuanganView({ user, allUsers }) {
   const load = async () => {
     try { setItems(await storage.getList('keuangan:cashflow')); }
     catch (e) { console.warn('Load keuangan gagal (pertahankan data lama):', e?.message || e); }
+    // Aset dimuat TERPISAH & best-effort: kalau gagal, dashboard keuangan tetap tampil
+    // (kartu Total Aset cuma menunjukkan data yang berhasil dibaca).
+    try { setAssets(await loadAssets()); }
+    catch (e) { console.warn('Load aset gagal (pertahankan data lama):', e?.message || e); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
@@ -15164,6 +15728,14 @@ function KeuanganView({ user, allUsers }) {
   const labaBersih = totalPendapatan - totalBeban;
   const saldoKas = items.filter(e => inDiv(e) && (e.tanggal || '') <= per.end).reduce((s, e) => s + (e.tipe === 'keluar' ? -1 : 1) * (Number(e.jumlah) || 0), 0);
 
+  // NPM = Laba Bersih ÷ Total Pendapatan × 100%. Sumbernya PERSIS dua kartu di atasnya,
+  // jadi otomatis ikut filter bulan & divisi. Pendapatan Rp0 → "Belum dapat dihitung".
+  const npm = Fin.hitungNpm(labaBersih, totalPendapatan);
+
+  // Ringkasan aset ikut filter DIVISI yang sama (bulan tidak dipakai: ini nilai
+  // pembelian kumulatif, bukan arus kas bulanan).
+  const ringkasAset = useMemo(() => Aset.ringkasAset(assets, filterDiv), [assets, filterDiv]);
+
   const breakdown = (tipe) => {
     const m = {};
     monthList.filter(e => e.tipe === tipe && !(tipe === 'masuk' && finIsSaldoAwal(e))).forEach(e => { const k = e.kategori || 'Lainnya'; m[k] = (m[k] || 0) + (Number(e.jumlah) || 0); });
@@ -15205,7 +15777,10 @@ function KeuanganView({ user, allUsers }) {
       return { date: mk + '-01', value: v, day: new Date(mk + '-01T00:00:00').toLocaleDateString('id-ID', { month: 'short' }) };
     });
     const pend = mk2series('masuk'), beb = mk2series('keluar');
-    return { pend, beb, hasData: pend.some(p => p.value) || beb.some(b => b.value) };
+    // Laba Bersih dihitung dari DUA deret di atas (bukan sumber lain), supaya garis
+    // ketiga selalu konsisten dengan kartu Total Pendapatan & Total Beban.
+    const laba = Fin.deretLabaBersih(pend, beb);
+    return { pend, beb, laba, hasData: Fin.adaIsinya(pend, beb, laba) };
   }, [items, per, filterDiv]);
 
   const tableList = items.filter(e => inMonth(e) && inDiv(e) && (!q || (e.keterangan || '').toLowerCase().includes(q.toLowerCase()) || (e.kategori || '').toLowerCase().includes(q.toLowerCase())))
@@ -15233,19 +15808,19 @@ function KeuanganView({ user, allUsers }) {
           <button onClick={() => { setEditing(null); setShowInput(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2"><Plus className="w-4 h-4" /> Input Transaksi</button>
         )} />
 
-      <div className="flex items-center gap-1.5 mb-5 bg-slate-100 p-1 rounded-xl w-fit">
+      <div className="flex items-center gap-1.5 mb-5 bg-slate-100 p-1 rounded-xl w-fit max-w-full overflow-x-auto scroll-thin">
         {TABS.map(([id, label, Icon]) => (
-          <button key={id} onClick={() => setTab(id)} className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition ${tab === id ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          <button key={id} onClick={() => setTab(id)} className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition whitespace-nowrap flex-shrink-0 ${tab === id ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
             <Icon className="w-4 h-4" /> {label}
           </button>
         ))}
       </div>
 
       <div className="flex items-center justify-between gap-3 flex-wrap mb-5">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <button onClick={() => setFilterDiv('all')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${filterDiv === 'all' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>Semua</button>
+        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+          <button onClick={() => setFilterDiv('all')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border whitespace-nowrap ${filterDiv === 'all' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>Semua</button>
           {Object.entries(FIN_DIVISIONS).map(([d, info]) => (
-            <button key={d} onClick={() => setFilterDiv(d)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${filterDiv === d ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`} style={filterDiv === d ? { backgroundColor: info.color } : {}}>{info.label}</button>
+            <button key={d} onClick={() => setFilterDiv(d)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border whitespace-nowrap ${filterDiv === d ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`} style={filterDiv === d ? { backgroundColor: info.color } : {}}>{info.label}</button>
           ))}
         </div>
         <div className="flex items-center gap-2">
@@ -15258,23 +15833,35 @@ function KeuanganView({ user, allUsers }) {
 
       {tab === 'dashboard' && (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             <FinStat label="Total Pendapatan" value={totalPendapatan} icon={TrendingUp} tone="emerald" />
             <FinStat label="Total Beban" value={totalBeban} icon={TrendingDown} tone="rose" />
             <FinStat label={labaBersih < 0 ? 'Rugi Bersih' : 'Laba Bersih'} value={labaBersih} icon={BarChart3} tone={labaBersih < 0 ? 'rose' : 'blue'} />
+            <FinStat label="Net Profit Margin (NPM)" icon={PieChart} tone={!npm.dapatDihitung ? 'slate' : npm.nilai < 0 ? 'rose' : 'amber'}
+              teks={npm.teks} negatif={npm.dapatDihitung && npm.nilai < 0}
+              hint="Persentase laba bersih dari total pendapatan." />
             <FinStat label="Saldo Kas" value={saldoKas} icon={Wallet} tone="violet" />
+            <FinStat label="Total Nilai Pembelian Aset" value={ringkasAset.totalNilai} icon={Building2} tone="blue"
+              sub={`${fmtNumber(ringkasAset.totalUnit)} unit · ${fmtNumber(ringkasAset.jumlahData)} data aset`}
+              hint={ringkasAset.tanpaHarga > 0 ? `${ringkasAset.tanpaHarga} aset belum ada harga pembelian.` : 'Harga beli × kuantitas — belum termasuk penyusutan.'}
+              onClick={setView ? () => setView('aset') : undefined} />
           </div>
           <div className="grid lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/70 p-5">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-display font-bold text-slate-800">Tren 6 Bulan</h3>
-                <div className="flex items-center gap-3 text-xs font-semibold text-slate-600">
+                <h3 className="font-display font-bold text-slate-800">Tren 6 Bulan <span className="text-xs font-semibold text-slate-400">· Pendapatan, Beban &amp; Laba Bersih</span></h3>
+                <div className="flex items-center gap-3 text-xs font-semibold text-slate-600 flex-wrap">
                   <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: '#10B981' }}></span>Pendapatan</span>
                   <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: '#F43F5E' }}></span>Beban</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: '#2563EB' }}></span>Laba Bersih</span>
                 </div>
               </div>
               {trend.hasData ? (
-                <InteractiveLineChart lines={[{ label: 'Pendapatan', color: '#10B981', series: trend.pend }, { label: 'Beban', color: '#F43F5E', series: trend.beb }]} height={170} />
+                <InteractiveLineChart height={170} lines={[
+                  { label: 'Pendapatan', color: '#10B981', series: trend.pend },
+                  { label: 'Beban', color: '#F43F5E', series: trend.beb },
+                  { label: 'Laba Bersih', color: '#2563EB', series: trend.laba },
+                ]} />
               ) : <div className="text-slate-400 text-sm py-12 text-center">Belum ada data untuk ditampilkan.</div>}
             </div>
             <div className="bg-white rounded-2xl border border-slate-200/70 p-5">
