@@ -4,7 +4,7 @@ Catatan pengembangan teknis aplikasi manajemen tim internal Al-Kahfi Corp (MCN T
 
 **Periode:** 13 Jun – 24 Jun 2026
 **Domain:** https://alkahficorp.vercel.app
-**Terakhir diperbarui:** 24 Jun 2026
+**Terakhir diperbarui:** 8 Sep 2026
 
 ---
 
@@ -368,6 +368,43 @@ Fitur BARU: halaman **Catatan Kerja** (`view='catatan'`, menu di grup Operasiona
 **Verifikasi:** `npx vite build` lulus 3,68s. Semua uji unit lulus: catatan 90, tiket 38, keuangan/aset 62, absensi 80, LMS 79, akses 25. **Diuji end-to-end di browser** memakai server tiruan Supabase lokal (scratchpad, database produksi TIDAK disentuh): Setup Pertama → Quick Note (judul otomatis) → Buat Catatan lengkap (rich text + lampiran gambar → jatuh ke brankas `img:` karena bucket tiruan menolak, fallback terbukti jalan) → detail (heading/tebal/butir/nomor/ceklis tampil benar) → pin → favorit → ubah visibilitas → Jadikan Tiket (tiket terbentuk + relasi dua arah tersimpan) → edit → hapus → pencarian ("upload affiliator", "DRM", kata tak ada → empty state) → semua filter + Reset → mode Galeri → responsif mobile 375px (FAB muncul) → **uji hak akses dengan user kedua (Leader MCN): catatan pribadi Owner TIDAK terlihat, catatan divisi terlihat, tombol Edit/Sematkan/Hapus/visibilitas TIDAK dirender** → simulasi koneksi putus (banner "Gagal memuat" + tombol Coba lagi, app tidak blank) lalu pulih → data bertahan setelah reload → auto-backup harian berisi `notes:all` + `notes:favorites:all`.
 
 **Belum dikerjakan (Phase 2):** lampiran dokumen/PDF (butuh bucket privat sendiri seperti `lms-files`; struktur `attachments[].type` sudah disiapkan), relasi ke meeting/project/KPI, dan pencarian lanjutan.
+
+### 8 Sep 2026 — MANAJEMEN SAMPEL V1 (modul baru: `src/sampel/data.js` + `src/sampel/qr.js` + `uji-sampel.mjs`, 184 tes)
+
+**Masalah bisnis:** sampel produk TikTok Affiliate menumpuk berbulan-bulan tanpa ada yang tahu umurnya, siapa saja yang pernah mengontenkannya, dan apakah masih produktif. Sampel dipakai BERSAMA (bukan milik satu Affiliator) — nama penerima awal hanya histori untuk menjawab pertanyaan seller.
+
+**Tiga jenis baris di `kv_store`, semuanya per-record:**
+
+| Baris | Isi | Siapa menulis |
+|---|---|---|
+| `sampel:rec:<kode>` | master sampel; `id` **sama dengan kode sampel** | Leader/Sekretariat ke atas |
+| `sampelpakai:rec:<YYYY-MM-DD>-<acak>` | log pemakaian — **SUMBER KEBENARAN** | semua user |
+| `sampelstat:<kode>` | cache `{total, terakhir, terakhirOleh}` — selalu bisa dibangun ulang | ditulis alur pemakaian |
+
+**Dua keputusan desain yang penting:**
+
+1. **`id` sampel = kode sampel.** Kode wajib unik & tak pernah berubah, jadi memakainya sebagai kunci baris membuat tabrakan ID mustahil disembunyikan (satu baris tak bisa ada dua kali) dan mesin restore per-record (`pfx + it.id`) tetap cocok tanpa perubahan. Pembuatan kode: baca daftar dari server → `urutanBerikutnya()` → cek `storage.get(kunci)` sebelum menulis, naikkan nomor & ulangi s/d 12x kalau keburu dipakai orang lain.
+2. **`id` log pemakaian DIAWALI kunci hari.** Ini yang membuat satu bulan bisa ditarik dengan `LIKE 'sampelpakai:rec:2026-09%'`. Halaman sampel hanya menarik **jendela 4 bulan terakhir** (`Sampel.JENDELA_BULAN`), poll 120 dtk + `pollWhenVisible`. Menarik seluruh riwayat tiap polling adalah persis pola yang dulu membuat egress Supabase jebol (lihat §5). Konsekuensinya angka "total sepanjang masa" & "terakhir dipakai" diambil dari cache `sampelstat:` — nilainya di-`Math.max` dengan hasil hitungan jendela supaya cache basi TIDAK PERNAH menurunkan angka; semua angka berjendela (hari ini/minggu/bulan/30 hari) tetap dihitung LANGSUNG dari log. Tombol **Hitung Ulang** (Owner/Manajer) membangun ulang seluruh cache dari log lengkap.
+
+**QR ditulis sendiri, tanpa dependency baru** — `src/sampel/qr.js`: GF(256) + Reed-Solomon, mode byte, level koreksi M, versi 1–10 (kapasitas 14–213 byte), penempatan zig-zag, 8 topeng + skor penalti N1–N4, BCH untuk info format & versi. Alasannya sama dengan barcode Code 128 di modul Aset: menambah paket npm berarti user non-teknis harus ikut meng-commit `package-lock.json` dan berharap install Vercel mulus. **Diverifikasi lawan decoder pihak ketiga (jsQR, dijalankan di scratchpad — TIDAK ditambahkan ke repo): 213 dari 213 panjang teks 1–213 byte terbaca benar, seluruh versi 1–10, seluruh 8 topeng.** Di dalam repo, `uji-sampel.mjs` §16 memakai **pembaca QR mandiri** yang ditulis ulang di file uji itu (baca info format → cek BCH → buka topeng → telusuri → de-interleave → **sindrom Reed-Solomon wajib nol** → urai byte), jadi kesalahan penempatan/topeng/ECC tidak bisa saling menutupi.
+
+**Deep link QR:** isi QR = `<origin>/s/<token 8 karakter>` (Crockford base32 tanpa I/L/O/U). `vercel.json` sudah me-rewrite semua path ke `/`, jadi tidak perlu router. `tokenDariAlamat()` juga menerima `/sampel/<token>`, `/samples/scan/<token>`, `?s=`, dan `#/sampel/`. Token dibaca **di level modul** (`TOKEN_SAMPEL_AWAL`), lalu alamat dibersihkan `replaceState`.
+
+> **BUG NYATA yang tertangkap saat uji browser (bukan saat build):** versi pertama membaca token di dalam `useState(() => ...)`. `src/main.jsx` memakai `React.StrictMode` → initializer dipanggil DUA KALI; panggilan pertama membersihkan alamat, panggilan kedua membaca alamat kosong → token hilang dan QR seolah tidak berfungsi **di development saja**. Jadi aturan wajib baru no. 8 di CLAUDE.md/AGENTS.md, dan dijaga oleh `uji-sampel.mjs` §18h.
+
+**Hak akses — dipetakan ke role yang SUDAH ADA, tanpa sistem role baru** (pola `canManageCalendar`): semua user boleh pindai/cari/lihat/**Gunakan Sampel**; `bisaKelolaSampel` = owner/manajer/leader/`isSecretariat` (tambah, edit, cetak label, Dashboard & Aging); `bisaUbahLifecycle` = owner/manajer (Jual/Bagikan/Buang, hapus, hitung ulang). Setiap fungsi tulis **memeriksa ulang hak akses sebelum menulis**, bukan sekadar menyembunyikan tombol (dijaga `uji-sampel.mjs` §18i). **Batas jujur:** app ini belum punya backend/RLS (backlog §5 "Supabase Auth + RLS"), jadi pemeriksaannya tetap di sisi aplikasi seperti seluruh modul lain.
+
+**Aging ≠ Lifecycle — sengaja dipisah.** Aging dihitung otomatis (`baru` 0–30 · `monitor` 31–60 · `slow` 61–90 · `review` >90 hari DAN diam ≥30 hari; sampel tua yang masih rutin dipakai TETAP `slow`, bukan `review`). Lifecycle = status nyata barang (`aktif`/`terjual`/`dibagikan`/`dibuang`). Ambang aging terpusat di satu objek `AGING_DEFAULT` + `konfigAging()` yang merapikan nilai terbalik/ngawur — siap ditimpa dari `app:settings` nanti tanpa ubah source.
+
+**Anti-catat-ganda dua lapis:** `useRef` (menahan tap ganda dalam milidetik yang sama, sebelum state sempat berubah) + `pakaiTerlaluCepat()` (user yang sama pada sampel yang sama < 45 dtk). Pemakaian sah berkali-kali dalam sehari TETAP boleh. Scan QR saja TIDAK pernah dihitung sebagai pemakaian.
+
+**Cetak label** lewat `window.open` + `document.write` (pola `cetakBarcode` modul Aset) sehingga sidebar/topbar dijamin tidak ikut tercetak tanpa menambah `@media print` ke `index.css` yang dipakai semua halaman. Ukuran dari `Sampel.UKURAN_LABEL`: 50×30 mm (default), 60×40, 70×50, dan A4 24-label — sistem tidak dikunci ke satu ukuran/merek printer. Label memuat QR + Sample ID + nama + kategori + tanggal datang; **nama Affiliator sengaja TIDAK dicetak** karena sampel dipakai bersama.
+
+**Komponen baru di App.jsx:** `SampelView`, `SampelDetailModal`, `SampelFormModal`, `SampelScanModal`, `SampelSuksesPanel`, `SampelKartu`, `SampelStat`, `QrSvg`. Helper: `loadSamples`, `loadSampleUsages`, `loadSampleStats`, `labelSampelHtml`, `cetakLabelSampel`, `unduhQrSampel`, `tokenBaruUnik`, `acakAman`, `baseUrlApp`, `urlQrSampel`, `tglPendek`, `_escHtml`. Menu: grup sidebar **Sampel** → `Manajemen Sampel` + `Scan Sampel` (keduanya `show: true`). Halaman punya 4 tab: Dashboard · Daftar Sampel · Sample Aging · Riwayat Saya (Dashboard & Aging hanya untuk yang boleh mengelola).
+
+**Verifikasi:** `npx vite build` lulus 4,28s (1.563 modul). Seluruh uji lulus: sampel 184, catatan 90, absensi 80, LMS 79, keuangan/aset 62, tiket 38, akses 25 = **558 tes**. **Diuji end-to-end di browser** memakai server tiruan Supabase lokal (scratchpad; **database production TIDAK disentuh**), 0 error console sepanjang sesi: input sampel → Sample ID `SMP-260908-0001` s/d `-0003` berurutan + token QR unik → **QR hasil render di app didekode balik oleh `BarcodeDetector` bawaan browser** (API yang sama dipakai pemindai app) → `http://localhost:5178/s/MACD60BE` → "Simpan & Tambah Lagi" (form tetap terbuka, kategori/tanggal/seller dipertahankan) → pratinjau label 50×30 mm + **QR dirender ulang pada 17 mm @203 dpi lalu didekode ulang: terbaca** → deep link `/s/A7K2M9QX` saat belum login → login Affiliator → detail langsung terbuka (scan TIDAK menambah pemakaian) → **Gunakan Sampel** (hari ini 2x→3x, minggu 3→4, bulan 5→6, total 8→9, "Terakhir: Naima") → klik kedua ditolak, hanya 1 baris log masuk DB → sampel Terjual: tombol pakai hilang, ganti pesan "sudah tidak aktif" → Affiliator TIDAK melihat tab Dashboard/Aging, tombol Tambah Sampel, QR/cetak, maupun tombol lifecycle → mobile 375 px (kartu, modal, tombol Gunakan Sampel besar, tanpa overflow) → Owner: Aging filter "Perlu Review" → **BAGIKAN** → status Dibagikan, Riwayat Keputusan tercatat ("Bagikan — Kholid • 8 Sep, 17.01 · Dibagikan ke tim MMC"), histori pemakaian tetap utuh → pemindai: izin kamera ditolak → pesan ramah + input manual Sample ID (kode salah → pesan jelas; kode benar huruf kecil → detail terbuka) → Hitung Ulang ("4 sampel dari 14 pemakaian") → Aktivitas Tim di Dashboard utama memuat semua jejak (tambah/gunakan/putuskan). Perbaikan dari temuan uji: Sample ID sempat terpotong dua baris di label 50 mm → font kode 8,5pt→7,5pt + `white-space:nowrap`.
+
+**Sengaja TIDAK dibuat (sesuai brief V1):** kondisi barang masuk/keluar, check-in/out gudang, lokasi rak, kepemilikan per Affiliator, scan pengembalian, WMS, inventory accounting.
 
 ---
 
