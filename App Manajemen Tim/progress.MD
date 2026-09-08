@@ -338,6 +338,37 @@ Halaman Laporan Harian dulunya cuma tumpukan kartu teks + mode Tabel — nol ins
 
 **Verifikasi:** `npx vite build` lulus 2,73s. 40 uji unit mesin analitik lewat harness Node (parsing angka ID, pasangan target↔realisasi, KPI, klasifikasi field, template divisi lain, laporan legacy tanpa `fieldsSnapshot`, data kosong) — semua LULUS. Diuji visual di harness Vite terpisah (scratchpad) dengan 66 laporan tiruan × 3 anggota × 2 template: desktop 1280 & mobile 375 (bug nama anggota terpotong per huruf di header profil mobile ditemukan & diperbaiki: layout jadi `flex-col sm:flex-row`). App asli boot normal, console bersih.
 
+### 8 Sep 2026 — MODUL CATATAN KERJA (Work Notes) — build lulus 3,68s
+
+Fitur BARU: halaman **Catatan Kerja** (`view='catatan'`, menu di grup Operasional, ikon `NotebookPen`). Tujuan: dokumentasi tim (hasil meeting, evaluasi, ide, temuan masalah, instruksi, SOP, screenshot/poster) berhenti tersebar di WhatsApp/galeri/note pribadi. Prinsip: **"Buka → Catat → Simpan"** dalam hitungan detik, **"Cari → Ketemu"** saat dibutuhkan lagi.
+
+**Tidak ada sistem baru yang dibuat.** Semua menumpang yang sudah ada: login/user/role/divisi existing, `storage` kv_store per-record, `putImage` (Supabase Storage + fallback brankas `img:`), `compressImageFile`, `Modal`/`Field`/`FormActions`/`PageHeader`/`EmptyState`/`AsyncImg`/`ImageLightbox`/`DateRangePopover`, dan sistem **Tiket** untuk aksi "Jadikan Tiket".
+
+**Logika murni: `src/catatan/data.js`** (Pengecualian 5, diuji `node uji-catatan.mjs` — 90 tes LULUS). Berisi kategori, visibilitas, hak akses, pencarian, filter, urutan, normalisasi record, dan parser teks berformat. Meng-import `src/absensi/logika.js` (`wibDayKey`, `dalamRentang`) — TIDAK meng-import App.jsx.
+
+**Penyimpanan (dua modul per-record baru, keduanya sudah masuk `BACKUP_KEYS` + `PER_RECORD_LOADERS`/`PREFIX`):**
+- `notes:all` → prefix `note:rec:<id>`. Field: `{id, title, content, category, division, visibility, isPinned, attachments:[{src,name,type}], authorId, authorName, relatedType, relatedId, createdAt, updatedAt}`.
+- `notes:favorites:all` → prefix `notefav:<userId>`, isi `{id:userId, noteIds:[...]}`. **Satu baris per user**, bukan field di record catatan — menandai favorit hanya menulis baris milik sendiri, jadi tidak pernah bentrok dengan orang lain yang sedang mengedit catatan yang sama. `id` = userId supaya mesin restore per-record (`pfx + id`) tetap cocok.
+- `relatedType`/`relatedId` sengaja bebas isi → catatan bisa dikaitkan ke tiket/meeting/SOP/project/KPI nanti TANPA migrasi. Sudah dipakai: "Jadikan Tiket" menulis `relatedType:'task'` + `relatedId` di catatan, dan `noteId` di record tiket (jejak dua arah).
+
+**Hak akses (memakai role & divisi existing, bukan sistem izin baru):** `private` = **HANYA penulis, Owner/Manajer pun tidak** (disengaja — kalau manajemen bisa membaca catatan pribadi, orang berhenti mencatat) · `department` = penulis + anggota divisi sama + Owner/Manajer · `organization` = semua user. Default **private**. Edit/hapus/sematkan: penulis selalu boleh; Owner/Manajer boleh untuk catatan yang DIBAGIKAN saja. Aksi yang tidak berhak **tidak dirender**, bukan sekadar dinonaktifkan.
+
+**Teks berformat sederhana TANPA dependency & tanpa HTML.** Penanda per-baris gaya Markdown yang disimpan sebagai teks biasa: `# ` judul · `- `/`* ` butir · `1. ` nomor · `- [ ]`/`- [x]` ceklis · `**tebal**`. Dirender komponen `IsiCatatan` (semua node = teks, tidak ada `dangerouslySetInnerHTML` → aman dari XSS by design) dan tetap bisa dicari karena isinya teks polos. Toolbar `EditorCatatan` menyisipkan penanda di awal baris tempat kursor (posisi kursor dikembalikan lewat `requestAnimationFrame`, kalau tidak akan loncat ke akhir).
+
+**Pencarian & filter dihitung di frontend** (kv_store tidak punya kolom judul/isi yang bisa di-WHERE, dan `listByPrefix` wajib `ORDER BY key`): seluruh catatan yang boleh dilihat ditarik sekali lalu disaring di memori — hasilnya identik dengan query dan terasa instan. Cari = judul + isi + nama penulis, multi-kata bersifat **AND**. Filter: tab (Semua/Catatan Saya/Favorit/Disematkan), kategori, departemen (termasuk "umum" = tanpa divisi), penulis, rentang tanggal (`DateRangePopover`), urutan. **Catatan disematkan selalu di atas** pada semua mode urut.
+
+**Komponen baru di App.jsx:** `CatatanView`, `KartuCatatan`, `KartuGaleriCatatan`, `QuickNoteModal`, `CatatanFormModal`, `CatatanDetailModal`, `IsiCatatan`, `EditorCatatan`, `LampiranCatatan`. Helper: `loadNotes`, `loadNoteFavorites`, `loadMyNoteFavorites`, `materializeLampiranCatatan`, `ikonKategoriCatatan`, `ikonVisibilitasCatatan`, `OPSI_DIVISI_CATATAN`.
+
+**Refactor kecil (1 sumber aturan):** badan `useMemo assignableUsers` di `TasksView` diangkat jadi fungsi top-level **`penerimaTiket(user, allUsers)`**, dipakai bersama oleh halaman Tiket dan "Jadikan Tiket" di Catatan. `TaskForm` dapat prop opsional **`prefill`** (judul/deskripsi awal untuk tiket BARU; `task` tetap berarti "sedang mengedit"). `uji-akses.mjs` disesuaikan supaya membaca `penerimaTiket` — uji ini memang membaca badan fungsi langsung dari source, jadi rename/pindah fungsi WAJIB diikuti update regex-nya.
+
+**Mobile diprioritaskan:** tombol **+ melayang** (FAB, `lg:hidden`) membuka Quick Note; Quick Note hanya minta isi (judul otomatis dari baris pertama, kategori/divisi/visibilitas pakai default) + lampiran gambar. Toggle `Daftar | Galeri` tersedia di kedua ukuran (posisi berbeda: `hidden sm:inline-flex` di baris pencarian, `sm:hidden` di baris tab). Galeri menampilkan thumbnail; catatan tanpa gambar tetap muncul sebagai kartu berwarna kategori supaya tidak ada yang "hilang".
+
+**Catatan teknis penting:** ikon lucide `Image` **SENGAJA TIDAK di-import** — namanya akan menutupi `Image` bawaan browser yang dipakai `compressImageFile()`. `List` & `Filter` di-import dengan alias (`ListIcon`, `FilterIcon`).
+
+**Verifikasi:** `npx vite build` lulus 3,68s. Semua uji unit lulus: catatan 90, tiket 38, keuangan/aset 62, absensi 80, LMS 79, akses 25. **Diuji end-to-end di browser** memakai server tiruan Supabase lokal (scratchpad, database produksi TIDAK disentuh): Setup Pertama → Quick Note (judul otomatis) → Buat Catatan lengkap (rich text + lampiran gambar → jatuh ke brankas `img:` karena bucket tiruan menolak, fallback terbukti jalan) → detail (heading/tebal/butir/nomor/ceklis tampil benar) → pin → favorit → ubah visibilitas → Jadikan Tiket (tiket terbentuk + relasi dua arah tersimpan) → edit → hapus → pencarian ("upload affiliator", "DRM", kata tak ada → empty state) → semua filter + Reset → mode Galeri → responsif mobile 375px (FAB muncul) → **uji hak akses dengan user kedua (Leader MCN): catatan pribadi Owner TIDAK terlihat, catatan divisi terlihat, tombol Edit/Sematkan/Hapus/visibilitas TIDAK dirender** → simulasi koneksi putus (banner "Gagal memuat" + tombol Coba lagi, app tidak blank) lalu pulih → data bertahan setelah reload → auto-backup harian berisi `notes:all` + `notes:favorites:all`.
+
+**Belum dikerjakan (Phase 2):** lampiran dokumen/PDF (butuh bucket privat sendiri seperti `lms-files`; struktur `attachments[].type` sudah disiapkan), relasi ke meeting/project/KPI, dan pencarian lanjutan.
+
 ---
 
 ## 4. Status Terkini (per 1 Jul 2026)
