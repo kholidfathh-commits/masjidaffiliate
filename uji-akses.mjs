@@ -6,9 +6,13 @@ const mSee = src.match(/canSeeTask:\s*(\(viewer, task\)\s*=>\s*\{[\s\S]*?\n  \})
 if (!mSee) throw new Error('canSeeTask tidak ketemu');
 const canSeeTask = eval('(' + mSee[1] + ')');
 
-// Ambil badan assignableUsers APA ADANYA.
-const mAssign = src.match(/const assignableUsers = useMemo\(\(\) => \{([\s\S]*?)\n  \}, \[user, allUsers\]\);/);
-if (!mAssign) throw new Error('assignableUsers tidak ketemu');
+// Ambil badan aturan "siapa boleh ditugasi tiket" APA ADANYA.
+// Dulu badan ini ada di dalam useMemo `assignableUsers` di TasksView. Sejak halaman
+// Catatan Kerja punya aksi "Jadikan Tiket", aturannya dipindah ke fungsi top-level
+// penerimaTiket() supaya kedua halaman memakai SATU sumber aturan yang sama —
+// dan uji ini tetap membaca sumber aslinya, bukan salinan manual.
+const mAssign = src.match(/function penerimaTiket\(user, allUsers\) \{([\s\S]*?)\n\}/);
+if (!mAssign) throw new Error('penerimaTiket tidak ketemu');
 const assignableUsers = new Function('user','allUsers', mAssign[1]);
 
 // Ambil canAccessFeature + DIVISION_FEATURES.
