@@ -18,7 +18,9 @@ import {
   // umum untuk file sepanjang ini. Ikon bernama `Image` SENGAJA TIDAK di-import —
   // namanya akan menutupi `Image` bawaan browser yang dipakai compressImageFile().
   NotebookPen, StickyNote, Star, LayoutGrid, PinOff, Globe,
-  Bold, Heading, ListOrdered, ListChecks, List as ListIcon, Filter as FilterIcon
+  Bold, Heading, ListOrdered, ListChecks, List as ListIcon, Filter as FilterIcon,
+  // Manajemen Sampel
+  Package, PackageOpen, PackageSearch, QrCode, ScanLine, History, Hourglass, Printer, Video
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -58,6 +60,15 @@ import * as Tiket from './tiket/urutan.js';
 // berformat sederhana ada di src/catatan/data.js supaya bisa diuji lewat
 // `node uji-catatan.mjs`. File itu TIDAK meng-import App.jsx.
 import * as Catatan from './catatan/data.js';
+
+// ============ MODUL MANAJEMEN SAMPEL (logika murni + encoder QR) ============
+// Sama polanya dengan src/aset/: konstanta, hitungan umur/pemakaian/aging, hak akses,
+// dan encoder QR (mode byte, level koreksi M, versi 1-10) dipisah ke file sendiri
+// supaya bisa diuji lewat `node uji-sampel.mjs`. Keduanya TIDAK meng-import App.jsx.
+// QR ditulis sendiri (bukan library npm) dengan alasan yang sama seperti barcode Code 128
+// di modul Aset: tanpa dependency baru, tanpa langkah install tambahan saat deploy.
+import * as Sampel from './sampel/data.js';
+import * as Qr from './sampel/qr.js';
 
 // Halaman LMS dimuat LAZY: anggota yang tidak pernah membuka menu Pembelajaran
 // tidak ikut mengunduh kodenya (bundle utama app sudah ~973 kB).
@@ -620,6 +631,22 @@ async function loadMyNoteFavorites(userId) {
   return Array.isArray(row?.noteIds) ? row.noteIds : [];
 }
 
+// ====== MANAJEMEN SAMPEL ======
+// Tiga jenis baris, semuanya per-record (lihat src/sampel/data.js untuk bentuk datanya):
+//   sampel:rec:<kode>  master · sampelpakai:rec:<tgl>-<acak>  log pemakaian · sampelstat:<kode>  cache ringkasan.
+// Ketiga prefix TIDAK saling tumpang tindih pada pencocokan LIKE ('sampel:' vs 'sampelp' vs 'sampels').
+async function loadSamples() {
+  return await storage.listByPrefix(Sampel.SAMPEL_REC_PREFIX); // throw saat koneksi gagal → pemanggil pertahankan state lama
+}
+// Loader BACKUP: seluruh log pemakaian sepanjang masa. Halaman sampel TIDAK memakai ini —
+// halaman hanya menarik jendela beberapa bulan terakhir per bulan (hemat egress).
+async function loadSampleUsages() {
+  return await storage.listByPrefix(Sampel.PAKAI_REC_PREFIX);
+}
+async function loadSampleStats() {
+  return await storage.listByPrefix(Sampel.STAT_REC_PREFIX);
+}
+
 // ====== LMS: suntik dependensi app ke modul pembelajaran ======
 // Dipanggil SEKALI di sini, tepat sebelum registry di bawah, karena loader LMS butuh
 // `storage`. Perhatikan `log`: logActivity adalah const yang baru dideklarasikan jauh
@@ -641,6 +668,8 @@ const PER_RECORD_LOADERS = {
   [Aset.ASET_BACKUP_KEY]: loadAssets,
   // Catatan Kerja
   [Catatan.CATATAN_BACKUP_KEY]: loadNotes, [Catatan.FAVORIT_BACKUP_KEY]: loadNoteFavorites,
+  // Manajemen Sampel
+  [Sampel.SAMPEL_BACKUP_KEY]: loadSamples, [Sampel.PAKAI_BACKUP_KEY]: loadSampleUsages, [Sampel.STAT_BACKUP_KEY]: loadSampleStats,
   // LMS (Pembelajaran)
   'lms:paths:all': loadLmsPaths, 'lms:courses:all': loadLmsCourses, 'lms:lesson-bodies:all': loadLmsBodies,
   'lms:enrollments:all': loadLmsEnrollments, 'lms:progress:all': loadLmsProgress, 'lms:attempts:all': loadLmsAttempts,
@@ -652,6 +681,8 @@ const PER_RECORD_PREFIX = {
   [Aset.ASET_BACKUP_KEY]: Aset.ASET_REC_PREFIX,
   // Catatan Kerja
   [Catatan.CATATAN_BACKUP_KEY]: Catatan.CATATAN_REC_PREFIX, [Catatan.FAVORIT_BACKUP_KEY]: Catatan.FAVORIT_REC_PREFIX,
+  // Manajemen Sampel
+  [Sampel.SAMPEL_BACKUP_KEY]: Sampel.SAMPEL_REC_PREFIX, [Sampel.PAKAI_BACKUP_KEY]: Sampel.PAKAI_REC_PREFIX, [Sampel.STAT_BACKUP_KEY]: Sampel.STAT_REC_PREFIX,
   // LMS (Pembelajaran)
   'lms:paths:all': LMS_PATH_PREFIX, 'lms:courses:all': LMS_COURSE_PREFIX, 'lms:lesson-bodies:all': LMS_BODY_PREFIX,
   'lms:enrollments:all': LMS_ENROLL_PREFIX, 'lms:progress:all': LMS_PROGRESS_PREFIX, 'lms:attempts:all': LMS_ATTEMPT_PREFIX,
@@ -937,6 +968,8 @@ const BACKUP_KEYS = [
   'keuangan:cashflow', 'division-plans:all',
   Aset.ASET_BACKUP_KEY, // aset/inventaris — WAJIB ikut backup
   Catatan.CATATAN_BACKUP_KEY, Catatan.FAVORIT_BACKUP_KEY, // Catatan Kerja + penanda favorit per user
+  // Manajemen Sampel: master, log pemakaian (SUMBER KEBENARAN, tak tergantikan), cache ringkasan
+  Sampel.SAMPEL_BACKUP_KEY, Sampel.PAKAI_BACKUP_KEY, Sampel.STAT_BACKUP_KEY,
   'img:store', // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
   ...LMS_BACKUP_KEYS // LMS: jalur, kursus, isi materi, enrollment, progres, kuis, tugas, validasi, modul bacaan
 ];
@@ -1368,6 +1401,25 @@ const logActivity = async (text, userName) => {
   await storage.set('activities:all', list.slice(0, 80));
 };
 
+// ====== DEEP LINK QR SAMPEL ======
+// QR pada label sampel berisi '<alamat app>/s/<token>'. vercel.json sudah mengarahkan semua
+// path ke index.html, jadi alamat itu membuka app seperti biasa; token dibaca sekali lalu
+// alamatnya dibersihkan (replaceState) supaya refresh tidak membukanya berulang.
+//
+// PENTING — ini SENGAJA dievaluasi di level modul, BUKAN di dalam useState(() => ...):
+// `React.StrictMode` (lihat src/main.jsx) memanggil initializer useState DUA KALI saat
+// development. Panggilan pertama akan membersihkan alamat, panggilan kedua membaca alamat
+// yang sudah bersih → token HILANG dan QR seolah tidak berfungsi. Di level modul, kode ini
+// hanya jalan sekali seumur pemuatan halaman.
+const TOKEN_SAMPEL_AWAL = (() => {
+  try {
+    if (typeof window === 'undefined') return null;
+    const t = Sampel.tokenDariAlamat(window.location);
+    if (t) window.history.replaceState({}, '', '/');
+    return t;
+  } catch { return null; }
+})();
+
 // ============ MAIN APP ============
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -1383,6 +1435,11 @@ export default function App() {
   // Setup Pertama → owner baru dibuat → users:list (29 akun) tertimpa 1 akun. Flag ini memisahkan
   // "gagal memuat" dari "memang belum ada user". JANGAN dihapus.
   const [loadFailed, setLoadFailed] = useState(false);
+  // Token QR sampel dibaca di luar React (lihat TOKEN_SAMPEL_AWAL di atas). Kalau user
+  // belum login, token tetap tersimpan di state → setelah login selesai, halaman sampel
+  // langsung terbuka pada sampel yang tadi dipindai.
+  const [tokenSampel, setTokenSampel] = useState(TOKEN_SAMPEL_AWAL);
+  useEffect(() => { if (tokenSampel && currentUser) setView('sampel'); }, [tokenSampel, currentUser]);
 
   const refreshAll = async () => {
     const [users, s] = await Promise.all([
@@ -1507,6 +1564,9 @@ export default function App() {
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
             {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'aset' && <AsetView user={currentUser} />}
+            {view === 'sampel' && <SampelView user={currentUser} allUsers={allUsers}
+              deepToken={tokenSampel} onDeepSelesai={() => setTokenSampel(null)} />}
+            {view === 'sampel-scan' && <SampelView user={currentUser} allUsers={allUsers} autoScan />}
             {view === 'affiliate-accounts' && <AffiliateAccountsView user={currentUser} allUsers={allUsers} />}
             {view === 'kpi' && <KpiView user={currentUser} allUsers={allUsers} />}
             {view === 'problems' && <ProblemsView user={currentUser} allUsers={allUsers} />}
@@ -2171,6 +2231,17 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'attendance', label: 'Absensi', icon: MapPin, show: true },
         { id: 'calendar', label: 'Kalender Tim', icon: CalendarDays, show: true },
         { id: 'problems', label: 'Masalah & Solusi', icon: AlertCircle, show: true }
+      ]
+    },
+    {
+      // Sampel dipakai SEMUA orang: Affiliator memindai & mencatat pemakaian, Staf/Leader
+      // menambah & mencetak label. Karena itu menunya tidak digerbangi peran — pembatasan
+      // aksi (tambah/edit/lifecycle) dilakukan di dalam halaman DAN diperiksa ulang
+      // sebelum setiap operasi tulis, bukan sekadar dengan menyembunyikan tombol.
+      label: 'Sampel',
+      items: [
+        { id: 'sampel', label: 'Manajemen Sampel', icon: Package, show: true },
+        { id: 'sampel-scan', label: 'Scan Sampel', icon: ScanLine, show: true }
       ]
     },
     {
@@ -15410,6 +15481,1332 @@ function AsetView({ user }) {
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+// ============ MANAJEMEN SAMPEL ============
+// Modul BARU. Tiga jenis baris di kv_store (lihat src/sampel/data.js untuk bentuknya):
+//   'sampel:rec:<kode>'                  master sampel  — ditulis Leader/Sekretariat ke atas
+//   'sampelpakai:rec:<YYYY-MM-DD>-<acak>' log pemakaian — SUMBER KEBENARAN, ditulis siapa pun
+//   'sampelstat:<kode>'                   cache total & terakhir dipakai (selalu bisa dibangun ulang)
+// Logika murni & encoder QR ada di src/sampel/data.js + src/sampel/qr.js (diuji `node uji-sampel.mjs`).
+
+// Angka acak kriptografis untuk token QR — token tidak boleh gampang ditebak orang luar.
+function acakAman() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296;
+    }
+  } catch { /* lingkungan tanpa crypto → jatuh ke Math.random di bawah */ }
+  return Math.random();
+}
+// Token unik: dicek dulu terhadap sampel yang sudah ada (peluang tabrakan 32^8 sangat kecil,
+// tapi pengecekan ini membuatnya mustahil, bukan sekadar tidak mungkin).
+function tokenBaruUnik(daftar = []) {
+  const dipakai = new Set(daftar.map(s => (s && s.token ? String(s.token).toUpperCase() : '')));
+  for (let i = 0; i < 8; i++) {
+    const t = Sampel.buatToken(acakAman);
+    if (!dipakai.has(t)) return t;
+  }
+  return Sampel.buatToken(acakAman);
+}
+// Alamat yang ditanam di QR. Base URL SELALU dari aplikasi yang sedang jalan (localhost saat
+// dev, alkahficorp.vercel.app saat production) — tidak pernah di-hardcode.
+const baseUrlApp = () => (typeof window !== 'undefined' ? window.location.origin : '');
+const urlQrSampel = (s) => Sampel.urlSampel(baseUrlApp(), s && s.token);
+const tglPendek = (dk) => (Sampel.tanggalValid(dk) ? `${dk.slice(8, 10)}/${dk.slice(5, 7)}/${dk.slice(0, 4)}` : '-');
+
+// QR sebagai SVG React (satu <path>, bukan ribuan <rect> → ringan walau dirender banyak).
+function QrSvg({ teks, ukuran = 160, className = '' }) {
+  const info = useMemo(() => {
+    try { return Qr.qrPath(teks); } catch (e) { return { salah: e?.message || 'QR gagal dibuat.' }; }
+  }, [teks]);
+  if (info.salah) return <div className="text-xs text-red-600 font-semibold">{info.salah}</div>;
+  return (
+    <svg viewBox={`0 0 ${info.total} ${info.total}`} width={ukuran} height={ukuran}
+      className={className} shapeRendering="crispEdges" role="img" aria-label="QR Code sampel">
+      <rect width={info.total} height={info.total} fill="#FFFFFF" />
+      <path d={info.d} fill="#000000" />
+    </svg>
+  );
+}
+
+// ====== CETAK LABEL ======
+// Dicetak lewat JENDELA TERPISAH (sama seperti cetakBarcode di modul Aset): sidebar,
+// topbar, dan seluruh elemen aplikasi dijamin tidak ikut tercetak, tanpa perlu
+// menambah aturan @media print ke index.css yang dipakai semua halaman.
+// Ukuran diambil dari Sampel.UKURAN_LABEL — sistem TIDAK dikunci ke satu ukuran/merek printer.
+const _escHtml = (t) => String(t == null ? '' : t).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+
+function labelSampelHtml(daftar, ukuranKey) {
+  const u = Sampel.ukuranLabel(ukuranKey);
+  const lembar = u.lembar === 'a4';
+  const kartu = daftar.map(s => {
+    let qr = '';
+    try { qr = Qr.qrSvgString(urlQrSampel(s)); } catch { qr = '<div style="font-size:6pt">QR gagal dibuat</div>'; }
+    return `<div class="lbl">`
+      + `<div class="qr">${qr}</div>`
+      + `<div class="txt">`
+      + `<div class="kode">${_escHtml(s.kode)}</div>`
+      + `<div class="nama">${_escHtml(s.nama)}</div>`
+      + `<div class="kat">${_escHtml(String(s.kategori || '').toUpperCase())}</div>`
+      + `<div class="tgl">Datang: ${_escHtml(tglPendek(s.tanggalDatang))}</div>`
+      + `</div></div>`;
+  }).join('');
+  return `<!doctype html><html lang="id"><head><meta charset="utf-8">`
+    + `<title>Label Sampel (${daftar.length})</title><style>`
+    + `@page { size: ${lembar ? 'A4' : `${u.lebarMm}mm ${u.tinggiMm}mm`}; margin: ${lembar ? '8mm' : '0'}; }`
+    + `*{box-sizing:border-box}`
+    + `body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#fff;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}`
+    + `.sheet{${lembar ? `display:grid;grid-template-columns:repeat(${u.kolom},${u.lebarMm}mm);gap:2mm;justify-content:center` : ''}}`
+    + `.lbl{width:${u.lebarMm}mm;height:${u.tinggiMm}mm;padding:1.5mm 2mm;display:flex;align-items:center;gap:2mm;overflow:hidden;background:#fff${lembar ? '' : ';page-break-after:always'}}`
+    + `.lbl:last-child{page-break-after:auto}`
+    + `.qr{flex:0 0 auto}.qr svg{width:${u.qrMm}mm;height:${u.qrMm}mm;display:block}`
+    + `.txt{flex:1;min-width:0;line-height:1.15}`
+    + `.kode{font-family:"Courier New",monospace;font-weight:700;font-size:7.5pt;letter-spacing:0;white-space:nowrap}`
+    + `.nama{font-weight:700;font-size:8pt;margin-top:.7mm;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}`
+    + `.kat{font-size:6pt;letter-spacing:.6px;margin-top:.5mm}`
+    + `.tgl{font-size:6pt;margin-top:.9mm}`
+    + `@media screen{body{background:#F4F7FE;padding:16px}.lbl{border:1px dashed #94A3B8;margin:0 auto 8px}`
+    + `.sheet{justify-content:center}.info{text-align:center;font-size:12px;color:#475569;margin-bottom:12px}}`
+    + `@media print{.info{display:none}}`
+    + `</style></head><body>`
+    + `<div class="info">Jendela cetak — tekan Ctrl/Cmd + P bila dialog cetak tidak muncul otomatis.</div>`
+    + `<div class="sheet">${kartu}</div>`
+    + `<script>window.onload=function(){setTimeout(function(){try{window.print()}catch(e){}},250)}<\/script>`
+    + `</body></html>`;
+}
+
+function cetakLabelSampel(daftar, ukuranKey) {
+  const list = (Array.isArray(daftar) ? daftar : [daftar]).filter(s => s && s.token && s.kode);
+  if (!list.length) { alert('⚠️ Sampel ini belum punya QR. Buka detail sampel lalu klik "Buat Ulang QR".'); return; }
+  const w = window.open('', '_blank', 'width=620,height=520');
+  if (!w) { alert('⚠️ Popup diblokir browser. Izinkan popup untuk mencetak label, atau pakai tombol "Unduh QR".'); return; }
+  w.document.write(labelSampelHtml(list, ukuranKey));
+  w.document.close();
+  w.focus();
+}
+
+function unduhQrSampel(s) {
+  try {
+    const svg = Qr.qrSvgString(urlQrSampel(s), { ukuranPx: 320 });
+    const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `qr-${s.kode}.svg`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) { alert('⚠️ QR gagal dibuat: ' + (e?.message || e)); }
+}
+
+// ====== PEMINDAI QR ======
+// Memakai BarcodeDetector bawaan browser (pola yang sama dengan AsetScanModal) supaya
+// tidak menambah dependency. Kalau browser/kamera tidak tersedia → input manual Sample ID.
+function SampelScanModal({ onFound, pesan, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const aktifRef = useRef(true);
+  const [err, setErr] = useState('');
+  const [manual, setManual] = useState('');
+  const didukung = typeof window !== 'undefined' && 'BarcodeDetector' in window;
+
+  useEffect(() => {
+    aktifRef.current = true;
+    if (!didukung) return undefined;
+    let detector;
+    (async () => {
+      try {
+        detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        streamRef.current = stream;
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+        const loop = async () => {
+          if (!aktifRef.current || !videoRef.current) return;
+          try {
+            const hasil = await detector.detect(videoRef.current);
+            if (hasil && hasil.length) { onFound(hasil[0].rawValue); return; }
+          } catch { /* satu frame gagal dibaca — coba frame berikutnya */ }
+          setTimeout(loop, 300);
+        };
+        loop();
+      } catch (e) {
+        setErr(e?.name === 'NotAllowedError'
+          ? 'Izin kamera ditolak. Aktifkan izin kamera di browser lalu coba lagi — atau ketik Sample ID di bawah.'
+          : 'Kamera tidak bisa dibuka di perangkat ini. Ketik Sample ID di bawah — hasilnya sama.');
+      }
+    })();
+    return () => {
+      aktifRef.current = false;
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    };
+  }, [didukung, onFound]);
+
+  return (
+    <Modal title="Pindai QR Sampel" onClose={onClose}>
+      <div className="space-y-3">
+        {didukung && !err && (
+          <div className="rounded-xl overflow-hidden bg-slate-900 aspect-square sm:aspect-video flex items-center justify-center relative">
+            <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-40 h-40 border-2 border-white/80 rounded-2xl" style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.35)' }} />
+            </div>
+          </div>
+        )}
+        {didukung && !err && <p className="text-xs text-slate-500 text-center">Arahkan kamera ke QR pada label sampel.</p>}
+        {!didukung && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl px-3 py-2.5">
+            Browser ini belum mendukung pemindaian kamera. Ketik Sample ID-nya di bawah — hasilnya sama.
+          </div>
+        )}
+        {err && <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl px-3 py-2.5">{err}</div>}
+        <Field label="Atau masukkan Sample ID">
+          <div className="flex gap-2">
+            <input value={manual} onChange={e => setManual(e.target.value)} autoComplete="off"
+              onKeyDown={e => e.key === 'Enter' && manual.trim() && onFound(manual.trim())}
+              placeholder="mis. SMP-260909-0001"
+              className="flex-1 px-3 py-2.5 border border-slate-300 rounded-lg text-sm uppercase font-mono" />
+            <button onClick={() => manual.trim() && onFound(manual.trim())} disabled={!manual.trim()}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-4 rounded-lg font-semibold text-sm">Cari</button>
+          </div>
+        </Field>
+        {pesan && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2.5 rounded-lg">{pesan}</div>}
+      </div>
+    </Modal>
+  );
+}
+
+// ====== FORM TAMBAH / EDIT SAMPEL ======
+// Dioptimalkan untuk pekerjaan repetitif: fokus otomatis ke Nama Produk, Enter =
+// simpan, dan tombol "Simpan & Tambah Lagi" mengosongkan form tanpa pindah halaman.
+function SampelFormModal({ initial, sellers, allUsers, hariIni, sedangSimpan, suksesTerakhir, onCetakLabel, onSave, onClose }) {
+  const [form, setForm] = useState(() => initial || {
+    nama: '', kategori: 'Fashion', tanggalDatang: hariIni,
+    sellerId: '', sellerNama: '', penerimaId: '', penerimaNama: '', foto: null, catatan: '',
+  });
+  const [error, setError] = useState('');
+  const [fotoPreview, setFotoPreview] = useState(initial?.foto || null);
+  const namaRef = useRef(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  useEffect(() => { if (namaRef.current) namaRef.current.focus(); }, []);
+
+  const pilihSeller = (id) => {
+    const s = sellers.find(x => x.id === id);
+    setForm(f => ({ ...f, sellerId: id, sellerNama: s ? (s.shopName || s.name) : '' }));
+  };
+  const pilihPenerima = (id) => {
+    const u = allUsers.find(x => x.id === id);
+    setForm(f => ({ ...f, penerimaId: id, penerimaNama: u ? u.name : '' }));
+  };
+  const pilihFoto = async (file) => {
+    if (!file) return;
+    try {
+      const b64 = await compressImageFile(file, { maxDim: 800, quality: 0.7 });
+      setFotoPreview(b64); set('foto', b64);
+    } catch { setError('Foto gagal diproses. Coba foto lain atau lewati saja (foto opsional).'); }
+  };
+
+  const kirim = (lagi) => {
+    const pesan = Sampel.validasiSampel(form);
+    if (pesan) { setError(pesan); return; }
+    if (Sampel.tanggalDatangTerlaluJauh(form.tanggalDatang, hariIni)) {
+      setError('Tanggal kedatangan tidak boleh di masa depan.'); return;
+    }
+    setError('');
+    onSave({
+      ...form,
+      nama: String(form.nama).trim(),
+      sellerNama: String(form.sellerNama || '').trim(),
+      catatan: String(form.catatan || '').trim(),
+    }, lagi);
+    if (lagi) {
+      // Reset cepat: kategori, tanggal & seller DIPERTAHANKAN karena satu kiriman
+      // biasanya dari seller & kategori yang sama — staf tinggal ketik nama produk.
+      setForm(f => ({ ...f, nama: '', catatan: '', foto: null }));
+      setFotoPreview(null);
+      if (namaRef.current) namaRef.current.focus();
+    }
+  };
+
+  return (
+    <Modal title={initial ? 'Edit Sampel' : 'Tambah Sampel'} onClose={onClose} wide>
+      <div className="space-y-3">
+        {/* Umpan balik input beruntun: sampel sebelumnya langsung bisa dicetak tanpa menutup form. */}
+        {!initial && suksesTerakhir && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5 flex items-center gap-2.5">
+            <Check className="w-4 h-4 flex-shrink-0" style={{ color: '#059669' }} />
+            <div className="min-w-0 flex-1 text-sm">
+              <b className="text-emerald-800">Sampel berhasil dibuat</b>
+              <span className="block font-mono text-[11px] text-emerald-700 truncate">{suksesTerakhir.kode} · {suksesTerakhir.nama}</span>
+            </div>
+            <button onClick={() => onCetakLabel(suksesTerakhir)}
+              className="flex-shrink-0 bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 px-3 py-1.5 rounded-lg font-semibold text-xs flex items-center gap-1.5">
+              <Printer className="w-3.5 h-3.5" /> Cetak Label
+            </button>
+          </div>
+        )}
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div className="sm:col-span-2">
+            <Field label="Nama Produk *">
+              <input ref={namaRef} value={form.nama} onChange={e => set('nama', e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); kirim(false); } }}
+                placeholder="mis. Gamis Aluna"
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" />
+            </Field>
+          </div>
+          <Field label="Kategori *">
+            <select value={form.kategori} onChange={e => set('kategori', e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white">
+              {Sampel.SAMPEL_KATEGORI.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </Field>
+          <Field label="Tanggal Kedatangan *">
+            <input type="date" max={hariIni} value={form.tanggalDatang} onChange={e => set('tanggalDatang', e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" />
+          </Field>
+          <Field label="Seller (opsional)">
+            <select value={form.sellerId} onChange={e => pilihSeller(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white">
+              <option value="">— Pilih dari Database Seller —</option>
+              {sellers.map(s => <option key={s.id} value={s.id}>{s.shopName || s.name}</option>)}
+            </select>
+            <input value={form.sellerNama} onChange={e => setForm(f => ({ ...f, sellerId: '', sellerNama: e.target.value }))}
+              placeholder="atau ketik nama seller"
+              className="w-full mt-2 px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+          </Field>
+          <Field label="Affiliator Penerima Awal (opsional)">
+            <select value={form.penerimaId} onChange={e => pilihPenerima(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white">
+              <option value="">— Tidak dicatat —</option>
+              {allUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+            <p className="text-[11px] text-slate-400 mt-1.5">Hanya histori. Sampel tetap milik bersama & boleh dipakai siapa pun.</p>
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="Catatan (opsional)">
+              <input value={form.catatan} onChange={e => set('catatan', e.target.value)}
+                placeholder="mis. warna hitam, size M"
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" />
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field label="Foto Produk (opsional)">
+              <div className="flex items-center gap-3">
+                <label className="cursor-pointer bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3.5 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+                  <ImagePlus className="w-4 h-4" /> Pilih Foto
+                  <input type="file" accept="image/*" className="hidden" onChange={e => pilihFoto(e.target.files?.[0])} />
+                </label>
+                {fotoPreview && (
+                  <>
+                    <AsyncImg refId={fotoPreview} alt="" className="w-14 h-14 rounded-lg object-cover border border-slate-200" />
+                    <button onClick={() => { setFotoPreview(null); set('foto', null); }}
+                      className="text-xs text-red-600 font-semibold hover:underline">Hapus foto</button>
+                  </>
+                )}
+              </div>
+            </Field>
+          </div>
+        </div>
+
+        <div className="bg-blue-50/70 border border-blue-100 rounded-xl px-3 py-2.5 text-xs text-blue-800">
+          Sample ID & QR dibuat <b>otomatis</b> setelah disimpan — tidak perlu diketik manual.
+        </div>
+
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
+
+        <div className="flex flex-col sm:flex-row gap-2 pt-1">
+          <button onClick={() => kirim(false)} disabled={sedangSimpan}
+            className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-semibold py-2.5 rounded-lg transition">
+            {sedangSimpan ? 'Menyimpan…' : (initial ? 'Simpan Perubahan' : 'Simpan')}
+          </button>
+          {!initial && (
+            <button onClick={() => kirim(true)} disabled={sedangSimpan}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2">
+              <Plus className="w-4 h-4" /> Simpan &amp; Tambah Lagi
+            </button>
+          )}
+          <button onClick={onClose} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg font-semibold">Tutup</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ====== KONFIRMASI SUKSES + CETAK LABEL ======
+function SampelSuksesPanel({ sampel, ukuranLabel, onUkuran, onTambahLagi, onLihat, onTutup }) {
+  return (
+    <div className="bg-white rounded-2xl border border-emerald-200 shadow-sm p-4 mb-5" style={{ boxShadow: '0 10px 30px -18px rgba(16,185,129,0.6)' }}>
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#ECFDF5' }}>
+          <Check className="w-5 h-5" style={{ color: '#059669' }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-display font-bold text-slate-900">Sampel berhasil dibuat</div>
+          <div className="text-sm text-slate-500 mt-0.5 truncate">{sampel.nama}</div>
+          <div className="font-mono text-sm font-bold text-blue-700 mt-1">{sampel.kode}</div>
+        </div>
+        <div className="hidden sm:block flex-shrink-0 bg-white p-1 rounded-lg border border-slate-200">
+          <QrSvg teks={urlQrSampel(sampel)} ukuran={72} />
+        </div>
+        <button onClick={onTutup} className="text-slate-400 hover:text-slate-700 p-1"><X className="w-4 h-4" /></button>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 mt-3.5">
+        <button onClick={() => cetakLabelSampel(sampel, ukuranLabel)}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-semibold text-sm flex items-center gap-2">
+          <Printer className="w-4 h-4" /> Cetak Label
+        </button>
+        <button onClick={onTambahLagi}
+          className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-lg font-semibold text-sm flex items-center gap-2">
+          <Plus className="w-4 h-4" /> Tambah Sampel Lagi
+        </button>
+        <button onClick={onLihat} className="text-sm font-semibold text-blue-700 hover:underline px-2">Lihat detail</button>
+        <select value={ukuranLabel} onChange={e => onUkuran(e.target.value)}
+          className="ml-auto px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+          {Object.entries(Sampel.UKURAN_LABEL).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+// ====== DETAIL SAMPEL (mobile-first) ======
+function SampelDetailModal({
+  sampel, stat, riwayat, user, hariIni, ukuranLabel, sedangPakai,
+  onPakai, onEdit, onHapus, onKeputusan, onQrUlang, onClose,
+}) {
+  const s = Sampel.normalisasiSampel(sampel);
+  const [tabRiwayat, setTabRiwayat] = useState(false);
+  const [konfirmasi, setKonfirmasi] = useState(null); // keputusan yang menunggu konfirmasi
+  const [catatanKeputusan, setCatatanKeputusan] = useState('');
+  if (!s) return null;
+
+  const umur = Sampel.umurSampel(s.tanggalDatang, hariIni);
+  const life = Sampel.lifecycleInfo(s.lifecycle);
+  const bucket = Sampel.agingSampel(s, stat, hariIni);
+  const ag = Sampel.agingInfo(bucket);
+  const aktif = Sampel.masihAktif(s);
+  const alasan = Sampel.alasanTidakBisaPakai(user, s);
+  const kelola = Sampel.bisaKelolaSampel(user);
+  const lifecycleBoleh = Sampel.bisaUbahLifecycle(user);
+
+  const Angka = ({ label, nilai, kuat }) => (
+    <div className={`rounded-xl px-2 py-2 text-center ${kuat ? 'bg-blue-50 border border-blue-100' : 'bg-slate-50'}`}>
+      <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">{label}</div>
+      <div className={`font-display font-bold text-lg tabular-nums ${kuat ? 'text-blue-700' : 'text-slate-700'}`}>{nilai}x</div>
+    </div>
+  );
+  const Baris = ({ k, v }) => (
+    <div className="flex items-start justify-between gap-3 py-1.5 border-b border-slate-100">
+      <span className="text-xs font-semibold text-slate-500 flex-shrink-0">{k}</span>
+      <span className="text-sm text-slate-800 text-right min-w-0">{v}</span>
+    </div>
+  );
+
+  return (
+    <Modal title="Detail Sampel" onClose={onClose} wide>
+      <div className="space-y-4">
+        {/* Identitas — paling atas, terbaca sekali lihat di HP */}
+        <div className="flex items-start gap-3">
+          {s.foto && <AsyncImg refId={s.foto} alt="" className="w-16 h-16 rounded-xl object-cover border border-slate-200 flex-shrink-0" />}
+          <div className="min-w-0 flex-1">
+            <h3 className="font-display font-bold text-xl text-slate-900 leading-tight break-words">{s.nama}</h3>
+            <div className="font-mono text-sm font-bold text-blue-700 mt-1">{s.kode}</div>
+            <div className="flex flex-wrap items-center gap-1.5 mt-2">
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${life.badge}`}>{life.label}</span>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${ag.badge}`}>{ag.label}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-100 text-slate-600">{s.kategori}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Tombol utama Affiliator — besar & mudah ditekan satu tangan */}
+        {aktif ? (
+          <button onClick={onPakai} disabled={sedangPakai || !!alasan}
+            className="w-full text-white font-bold text-base py-4 rounded-2xl transition flex items-center justify-center gap-2.5 disabled:opacity-60"
+            style={{ background: 'linear-gradient(135deg,#2563EB,#1D4ED8)', boxShadow: '0 12px 28px -12px rgba(37,99,235,0.85)' }}>
+            <Video className="w-5 h-5" />
+            {sedangPakai ? 'Mencatat…' : 'Gunakan Sampel'}
+          </button>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-3.5 py-3 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>Sampel ini sudah tidak aktif ({life.label}). Pemakaian baru tidak bisa dicatat, tetapi seluruh histori tetap tersimpan.</span>
+          </div>
+        )}
+
+        {/* Angka pemakaian */}
+        <div>
+          <div className="text-[10px] uppercase font-bold text-slate-400 mb-1.5">Penggunaan</div>
+          <div className="grid grid-cols-4 gap-2">
+            <Angka label="Hari ini" nilai={stat.hariIni} kuat />
+            <Angka label="Minggu ini" nilai={stat.minggu} />
+            <Angka label="Bulan ini" nilai={stat.bulan} />
+            <Angka label="Total" nilai={stat.total} />
+          </div>
+          <div className="mt-2 text-xs text-slate-500">
+            {stat.terakhir
+              ? <>Terakhir digunakan: <b className="text-slate-700">{fmtDateTime(stat.terakhir)}</b>{stat.terakhirOleh ? <> • {stat.terakhirOleh}</> : null}
+                {stat.sejakTerakhir != null && <> <span className="text-slate-400">({stat.sejakTerakhir === 0 ? 'hari ini' : `${stat.sejakTerakhir} hari lalu`})</span></>}</>
+              : <span className="text-slate-400 italic">Belum pernah digunakan untuk konten.</span>}
+          </div>
+        </div>
+
+        {/* Data sampel */}
+        <div className="grid sm:grid-cols-2 gap-x-4">
+          <Baris k="Kategori" v={s.kategori} />
+          <Baris k="Tanggal datang" v={Sampel.fmtTanggalId(s.tanggalDatang)} />
+          <Baris k="Umur sampel" v={<b>{Sampel.labelUmurPanjang(umur)}</b>} />
+          <Baris k="Seller" v={s.sellerNama || <span className="text-slate-300">–</span>} />
+          <Baris k="Penerima awal" v={s.penerimaNama || <span className="text-slate-300">–</span>} />
+          <Baris k="Status aging" v={<span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${ag.badge}`}>{ag.label}</span>} />
+          {s.catatan && <div className="sm:col-span-2"><Baris k="Catatan" v={s.catatan} /></div>}
+        </div>
+
+        {/* QR & label — hanya untuk yang berhak mengelola */}
+        {kelola && (
+          <div className="bg-white border border-slate-200 rounded-xl p-4 text-center">
+            <div className="text-[10px] uppercase font-bold text-slate-400 mb-2">QR Sampel</div>
+            {s.token ? (
+              <>
+                <div className="flex justify-center"><QrSvg teks={urlQrSampel(s)} ukuran={148} /></div>
+                <div className="text-[10px] text-slate-400 mt-2 break-all">{urlQrSampel(s)}</div>
+              </>
+            ) : (
+              <div className="text-sm text-amber-700">Sampel ini belum punya QR (data lama).</div>
+            )}
+            <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
+              <button onClick={() => cetakLabelSampel(s, ukuranLabel)}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center gap-1.5">
+                <Printer className="w-3.5 h-3.5" /> Cetak Label
+              </button>
+              <button onClick={() => unduhQrSampel(s)}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center gap-1.5">
+                <Download className="w-3.5 h-3.5" /> Unduh QR
+              </button>
+              {!s.token && (
+                <button onClick={onQrUlang}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 flex items-center gap-1.5">
+                  <QrCode className="w-3.5 h-3.5" /> Buat QR
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Riwayat pemakaian */}
+        <div>
+          <button onClick={() => setTabRiwayat(v => !v)}
+            className="w-full flex items-center justify-between px-3 py-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl transition">
+            <span className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              <History className="w-4 h-4 text-slate-400" /> Riwayat Penggunaan ({riwayat.length})
+            </span>
+            <ChevronDown className={`w-4 h-4 text-slate-400 transition ${tabRiwayat ? 'rotate-180' : ''}`} />
+          </button>
+          {tabRiwayat && (
+            riwayat.length === 0 ? (
+              <p className="text-sm text-slate-400 italic px-3 py-4 text-center">Belum pernah digunakan untuk konten.</p>
+            ) : (
+              <div className="mt-2 max-h-64 overflow-y-auto scroll-thin divide-y divide-slate-100 border border-slate-100 rounded-xl">
+                {riwayat.map(r => (
+                  <div key={r.id} className="px-3 py-2.5 flex items-start gap-3">
+                    <Clapperboard className="w-4 h-4 text-slate-300 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-800">{r.userName}</div>
+                      <div className="text-[11px] text-slate-500">{fmtDateTime(r.usedAt)} • Digunakan untuk konten</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+          {riwayat.length > 0 && (
+            <p className="text-[10px] text-slate-400 mt-1.5">
+              Riwayat yang ditampilkan mencakup {Sampel.JENDELA_BULAN} bulan terakhir. Angka “Total” sudah termasuk pemakaian lebih lama.
+            </p>
+          )}
+        </div>
+
+        {/* Riwayat keputusan review */}
+        {s.riwayatKeputusan.length > 0 && (
+          <div className="bg-slate-50 rounded-xl p-3">
+            <div className="text-[10px] uppercase font-bold text-slate-400 mb-1.5">Riwayat Keputusan</div>
+            <div className="space-y-1.5">
+              {s.riwayatKeputusan.slice().reverse().map((k, i) => (
+                <div key={i} className="text-xs text-slate-600">
+                  <b className="text-slate-800">{Sampel.KEPUTUSAN[k.keputusan]?.label || k.keputusan}</b> — {k.oleh} • {fmtDateTime(k.at)}
+                  {k.catatan ? <span className="text-slate-500"> · {k.catatan}</span> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Keputusan review / disposal — Owner & Manajer */}
+        {lifecycleBoleh && (
+          <div className="border-t border-slate-100 pt-3">
+            <div className="text-[10px] uppercase font-bold text-slate-400 mb-2">Keputusan Sampel</div>
+            {konfirmasi ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5">
+                <p className="text-sm text-slate-700">
+                  Ubah keputusan menjadi <b>{Sampel.KEPUTUSAN[konfirmasi].label}</b>
+                  {konfirmasi !== 'simpan' && <> — status berubah jadi <b>{Sampel.lifecycleInfo(Sampel.lifecycleDariKeputusan(konfirmasi)).label}</b> dan sampel tidak bisa dipakai lagi.</>}
+                  {' '}Histori pemakaian tetap tersimpan.
+                </p>
+                <input value={catatanKeputusan} onChange={e => setCatatanKeputusan(e.target.value)}
+                  placeholder="Catatan keputusan (opsional)"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                <div className="flex gap-2">
+                  <button onClick={() => { onKeputusan(konfirmasi, catatanKeputusan.trim()); setKonfirmasi(null); setCatatanKeputusan(''); }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg text-sm">Ya, simpan keputusan</button>
+                  <button onClick={() => { setKonfirmasi(null); setCatatanKeputusan(''); }}
+                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-semibold text-sm">Batal</button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {Object.entries(Sampel.KEPUTUSAN).map(([k, v]) => (
+                  <button key={k} onClick={() => setKonfirmasi(k)}
+                    className="px-3 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700">
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Kelola metadata */}
+        {kelola && (
+          <div className="flex gap-2">
+            <button onClick={onEdit} className="flex-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2">
+              <Edit2 className="w-4 h-4" /> Edit Data
+            </button>
+            {lifecycleBoleh && (
+              <button onClick={onHapus} className="px-4 py-2.5 border border-red-200 text-red-600 hover:bg-red-50 rounded-lg font-semibold flex items-center gap-2">
+                <Trash2 className="w-4 h-4" /> Hapus
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ====== KARTU & BARIS DAFTAR ======
+function SampelKartu({ s, stat, hariIni, onBuka }) {
+  const umur = Sampel.umurSampel(s.tanggalDatang, hariIni);
+  const life = Sampel.lifecycleInfo(s.lifecycle);
+  const ag = Sampel.agingInfo(Sampel.agingSampel(s, stat, hariIni));
+  return (
+    <button onClick={onBuka} className="w-full text-left p-3.5 hover:bg-slate-50 transition">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-mono text-[11px] font-bold text-blue-700">{s.kode}</div>
+          <div className="text-sm font-semibold text-slate-900 truncate">{s.nama}</div>
+          <div className="text-[11px] text-slate-500 truncate">{s.kategori}{s.sellerNama ? ` · ${s.sellerNama}` : ''}</div>
+        </div>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${life.badge}`}>{life.label}</span>
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${ag.badge}`}>{ag.label}</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mt-2.5">
+        <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
+          <div className="text-[9px] font-bold text-slate-400 uppercase">Umur</div>
+          <div className="text-sm font-bold text-slate-700 tabular-nums">{umur == null ? '–' : `${umur}h`}</div>
+        </div>
+        <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
+          <div className="text-[9px] font-bold text-slate-400 uppercase">30 hari</div>
+          <div className="text-sm font-bold text-slate-700 tabular-nums">{stat.hari30}x</div>
+        </div>
+        <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
+          <div className="text-[9px] font-bold text-slate-400 uppercase">Terakhir</div>
+          <div className="text-[11px] font-bold text-slate-700">
+            {stat.sejakTerakhir == null ? 'belum' : stat.sejakTerakhir === 0 ? 'hari ini' : `${stat.sejakTerakhir}h lalu`}
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// Kartu angka pada Dashboard Sampel. Sengaja komponen TOP-LEVEL (bukan didefinisikan
+// di dalam SampelView): komponen yang dibuat ulang tiap render akan melepas & memasang
+// ulang seluruh subtree-nya setiap kali state halaman berubah.
+function SampelStat({ label, nilai, sub, icon: Icon, tone = 'slate', onClick }) {
+  const warna = {
+    slate: ['#F1F5F9', '#475569'], blue: ['#EFF6FF', '#2563EB'],
+    emerald: ['#ECFDF5', '#059669'], amber: ['#FFFBEB', '#D97706'], red: ['#FEF2F2', '#DC2626'],
+  }[tone] || ['#F1F5F9', '#475569'];
+  return (
+    <button onClick={onClick} disabled={!onClick}
+      className={`bg-white rounded-2xl border border-slate-200/70 p-3.5 shadow-sm text-left w-full ${onClick ? 'hover:border-blue-300 transition' : 'cursor-default'}`}>
+      <div className="flex items-center gap-2">
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: warna[0] }}>
+          <Icon className="w-4 h-4" style={{ color: warna[1] }} />
+        </div>
+        <div className="text-[10px] uppercase tracking-wide font-bold text-slate-400 leading-tight">{label}</div>
+      </div>
+      <div className="font-display font-bold text-2xl mt-2 text-slate-800 tabular-nums">{fmtNumber(nilai)}</div>
+      {sub && <div className="text-[11px] text-slate-400 mt-0.5">{sub}</div>}
+    </button>
+  );
+}
+
+// ====== HALAMAN UTAMA MANAJEMEN SAMPEL ======
+function SampelView({ user, allUsers, deepToken, onDeepSelesai, autoScan }) {
+  const [samples, setSamples] = useState([]);
+  const [usages, setUsages] = useState([]);
+  const [statRows, setStatRows] = useState([]);
+  const [sellers, setSellers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [hariIni, setHariIni] = useState(() => wibDayKey());
+
+  const kelola = Sampel.bisaKelolaSampel(user);
+  const lifecycleBoleh = Sampel.bisaUbahLifecycle(user);
+  const [tab, setTab] = useState(kelola ? 'dashboard' : 'daftar');
+
+  // Filter & urutan daftar
+  const [cari, setCari] = useState('');
+  const [fKategori, setFKategori] = useState('all');
+  const [fLifecycle, setFLifecycle] = useState('all');
+  const [fUmur, setFUmur] = useState('all');
+  const [fPakai, setFPakai] = useState('all');
+  const [fAging, setFAging] = useState('all');
+  const [urut, setUrut] = useState('baru');
+  const [batasTampil, setBatasTampil] = useState(30);
+
+  // Modal & umpan balik
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [detailId, setDetailId] = useState(null);
+  const [showScan, setShowScan] = useState(false);
+  const [scanPesan, setScanPesan] = useState('');
+  const [sukses, setSukses] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [sedangSimpan, setSedangSimpan] = useState(false);
+  const [sedangPakai, setSedangPakai] = useState(false);
+  const [ukuranLabel, setUkuranLabel] = useState(Sampel.UKURAN_LABEL_DEFAULT);
+  const kunciPakai = useRef(false); // penjaga klik ganda yang bekerja seketika (sebelum state sempat berubah)
+
+  const beriToast = (pesan, jenis = 'ok') => setToast({ pesan, jenis, k: Date.now() });
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  // ====== MUAT DATA ======
+  // Log pemakaian sengaja HANYA ditarik beberapa bulan terakhir (satu query per bulan,
+  // memanfaatkan awalan tanggal pada id log). Menarik seluruh riwayat setiap polling
+  // adalah persis pola yang dulu membuat kuota egress Supabase jebol.
+  const muat = async () => {
+    try {
+      const hk = wibDayKey();
+      const bulan = Sampel.bulanTerakhir(hk, Sampel.JENDELA_BULAN);
+      const hasil = await Promise.all([
+        storage.listByPrefix(Sampel.SAMPEL_REC_PREFIX),
+        storage.listByPrefix(Sampel.STAT_REC_PREFIX),
+        storage.getList('sellers:all'),
+        ...bulan.map(mk => storage.listByPrefix(Sampel.prefixBulanPakai(mk))),
+      ]);
+      setHariIni(hk);
+      setSamples(hasil[0] || []);
+      setStatRows(hasil[1] || []);
+      setSellers(hasil[2] || []);
+      setUsages(hasil.slice(3).flat());
+    } catch (e) {
+      console.warn('Muat data sampel gagal (data lama dipertahankan):', e?.message || e);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { muat(); const iv = setInterval(pollWhenVisible(muat), 120000); return () => clearInterval(iv); }, []);
+
+  const daftar = useMemo(() => samples.map(Sampel.normalisasiSampel).filter(Boolean), [samples]);
+  const statMap = useMemo(() => Sampel.petaStatistik(daftar, usages, statRows, hariIni), [daftar, usages, statRows, hariIni]);
+  const statDari = (s) => (s && statMap.get(s.id)) || Sampel.STAT_KOSONG;
+  const detail = useMemo(() => daftar.find(s => s.id === detailId) || null, [daftar, detailId]);
+
+  // ====== DEEP LINK DARI QR ======
+  useEffect(() => {
+    if (!deepToken || loading) return;
+    const hit = daftar.find(s => s.token && s.token === deepToken);
+    if (hit) { setTab('daftar'); setDetailId(hit.id); }
+    else beriToast('QR tidak dikenali — sampel tidak ditemukan. Coba cari Sample ID-nya secara manual.', 'error');
+    if (onDeepSelesai) onDeepSelesai();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepToken, loading, daftar.length]);
+
+  useEffect(() => { if (autoScan) { setScanPesan(''); setShowScan(true); } }, [autoScan]);
+
+  // ====== SIMPAN SAMPEL ======
+  // Sample ID dibuat di sini, bukan di form: nomor urut diambil dari server tepat sebelum
+  // menulis, lalu barisnya ditulis pada kunci 'sampel:rec:<kode>'. Kalau kode itu ternyata
+  // sudah ada (staf lain menyimpan lebih dulu dalam hitungan detik), nomornya dinaikkan dan
+  // dicoba lagi — jadi dua orang yang input bersamaan tidak pernah menimpa data satu sama lain.
+  const simpanBaru = async (data, tambahLagi) => {
+    if (sedangSimpan) return;
+    setSedangSimpan(true);
+    try {
+      const foto = await putImage(data.foto);
+      const terbaru = await storage.listByPrefix(Sampel.SAMPEL_REC_PREFIX);
+      const dasar = Sampel.urutanBerikutnya(terbaru, data.tanggalDatang);
+      let rec = null;
+      for (let coba = 0; coba < 12; coba++) {
+        const kode = Sampel.kodeSampel(data.tanggalDatang, dasar + coba);
+        if (!kode) throw new Error('Tanggal kedatangan tidak valid.');
+        const kunci = Sampel.SAMPEL_REC_PREFIX + kode;
+        const sudahAda = await storage.get(kunci);
+        if (sudahAda) continue; // nomor ini keburu dipakai orang lain → naikkan
+        const calon = {
+          id: kode, kode, token: tokenBaruUnik(terbaru),
+          nama: data.nama, kategori: data.kategori, tanggalDatang: data.tanggalDatang,
+          sellerId: data.sellerId || '', sellerNama: data.sellerNama || '',
+          penerimaId: data.penerimaId || '', penerimaNama: data.penerimaNama || '',
+          foto: foto || null, catatan: data.catatan || '',
+          lifecycle: 'aktif', riwayatKeputusan: [],
+          createdAt: new Date().toISOString(), createdById: user.id, createdByName: user.name,
+        };
+        const ok = await storage.set(kunci, calon);
+        if (!ok) throw new Error('Gagal menyimpan ke server. Cek koneksi lalu coba lagi.');
+        rec = calon;
+        break;
+      }
+      if (!rec) throw new Error('Gagal membuat Sample ID yang unik. Coba lagi sebentar.');
+      await logActivity(`menambah sampel ${rec.kode} — ${rec.nama}`, user.name);
+      setSamples(prev => [...prev, rec]);
+      setSukses(rec);
+      if (!tambahLagi) setShowForm(false);
+      beriToast(`Sampel ${rec.kode} berhasil dibuat.`);
+    } catch (e) {
+      alert('⚠️ ' + (e?.message || e));
+    } finally { setSedangSimpan(false); }
+  };
+
+  const simpanEdit = async (data) => {
+    if (!editing || sedangSimpan) return;
+    setSedangSimpan(true);
+    try {
+      const foto = await putImage(data.foto);
+      // Baca ulang barisnya dulu supaya perubahan orang lain (mis. lifecycle) tidak tertimpa.
+      let terbaru = null;
+      try { terbaru = await storage.get(Sampel.SAMPEL_REC_PREFIX + editing.id); } catch { terbaru = null; }
+      const rec = {
+        ...(terbaru || editing),
+        nama: data.nama, kategori: data.kategori, tanggalDatang: data.tanggalDatang,
+        sellerId: data.sellerId || '', sellerNama: data.sellerNama || '',
+        penerimaId: data.penerimaId || '', penerimaNama: data.penerimaNama || '',
+        foto: foto || null, catatan: data.catatan || '',
+        updatedAt: new Date().toISOString(), updatedById: user.id, updatedByName: user.name,
+      };
+      const ok = await storage.set(Sampel.SAMPEL_REC_PREFIX + editing.id, rec);
+      if (!ok) throw new Error('Gagal menyimpan perubahan. Cek koneksi lalu coba lagi.');
+      await logActivity(`mengubah data sampel ${rec.kode} — ${rec.nama}`, user.name);
+      setSamples(prev => prev.map(s => (s && s.id === rec.id ? rec : s)));
+      setShowForm(false); setEditing(null);
+      beriToast('Perubahan tersimpan.');
+    } catch (e) {
+      alert('⚠️ ' + (e?.message || e));
+    } finally { setSedangSimpan(false); }
+  };
+
+  // ====== CATAT PEMAKAIAN ======
+  const gunakan = async (s) => {
+    const alasan = Sampel.alasanTidakBisaPakai(user, s);
+    if (alasan) { beriToast(alasan, 'error'); return; }
+    if (kunciPakai.current) return; // tap ganda dalam milidetik yang sama
+    kunciPakai.current = true;
+    setSedangPakai(true);
+    try {
+      const sebelumnya = Sampel.riwayatSampel(usages, s.id, 10);
+      if (Sampel.pakaiTerlaluCepat(sebelumnya, user.id)) {
+        beriToast('Pemakaian barusan sudah tercatat — tidak dicatat dua kali.');
+        return;
+      }
+      const now = new Date().toISOString();
+      const rec = {
+        id: Sampel.idPakai(wibDayKey(now), uid()),
+        sampelId: s.id, sampelKode: s.kode,
+        userId: user.id, userName: user.name,
+        usedAt: now, createdAt: now,
+      };
+      const ok = await storage.set(Sampel.PAKAI_REC_PREFIX + rec.id, rec);
+      if (!ok) throw new Error('Gagal mencatat pemakaian. Cek koneksi lalu coba lagi.');
+      setUsages(prev => [...prev, rec]); // umpan balik seketika, tak menunggu polling
+
+      // Perbarui cache ringkasan. Ini BUKAN sumber kebenaran — kalau gagal, angka
+      // berjendela tetap benar dan cache bisa dibangun ulang lewat "Hitung Ulang".
+      try {
+        let cur = null;
+        try { cur = await storage.get(Sampel.STAT_REC_PREFIX + s.id); } catch { cur = null; }
+        const barisStat = {
+          id: s.id,
+          total: (Number(cur && cur.total) || 0) + 1,
+          terakhir: now, terakhirOleh: user.name,
+        };
+        await storage.set(Sampel.STAT_REC_PREFIX + s.id, barisStat);
+        setStatRows(prev => [...prev.filter(r => r && r.id !== s.id), barisStat]);
+      } catch (e) { console.warn('Cache statistik sampel gagal diperbarui (tidak fatal):', e?.message || e); }
+
+      await logActivity(`menggunakan sampel ${s.kode} — ${s.nama}`, user.name);
+      beriToast('Penggunaan berhasil dicatat');
+    } catch (e) {
+      beriToast(e?.message || 'Gagal mencatat pemakaian.', 'error');
+    } finally {
+      setSedangPakai(false);
+      setTimeout(() => { kunciPakai.current = false; }, 800);
+    }
+  };
+
+  // ====== KEPUTUSAN REVIEW / DISPOSAL ======
+  const putuskan = async (s, keputusan, catatan) => {
+    if (!Sampel.bisaUbahLifecycle(user)) { beriToast('Hanya Owner & Manajer yang boleh mengubah status sampel.', 'error'); return; }
+    const life = Sampel.lifecycleDariKeputusan(keputusan);
+    if (!life) return;
+    try {
+      let terbaru = null;
+      try { terbaru = await storage.get(Sampel.SAMPEL_REC_PREFIX + s.id); } catch { terbaru = null; }
+      const dasar = terbaru || s;
+      const now = new Date().toISOString();
+      const rec = {
+        ...dasar,
+        lifecycle: life,
+        riwayatKeputusan: [...(Array.isArray(dasar.riwayatKeputusan) ? dasar.riwayatKeputusan : []),
+          { keputusan, lifecycle: life, oleh: user.name, olehId: user.id, catatan: catatan || '', at: now }],
+        updatedAt: now, updatedById: user.id, updatedByName: user.name,
+      };
+      const ok = await storage.set(Sampel.SAMPEL_REC_PREFIX + s.id, rec);
+      if (!ok) throw new Error('Gagal menyimpan keputusan. Cek koneksi lalu coba lagi.');
+      await logActivity(`memutuskan sampel ${s.kode} → ${Sampel.KEPUTUSAN[keputusan].label} (${Sampel.lifecycleInfo(life).label})`, user.name);
+      setSamples(prev => prev.map(x => (x && x.id === rec.id ? rec : x)));
+      beriToast(`Keputusan tersimpan — status sampel: ${Sampel.lifecycleInfo(life).label}.`);
+    } catch (e) { beriToast(e?.message || 'Gagal menyimpan keputusan.', 'error'); }
+  };
+
+  const hapus = async (s) => {
+    if (!Sampel.bisaUbahLifecycle(user)) { beriToast('Hanya Owner & Manajer yang boleh menghapus sampel.', 'error'); return; }
+    if (!confirm(`Hapus sampel "${s.nama}" (${s.kode})?\n\nRiwayat pemakaiannya TIDAK ikut terhapus, tetapi data sampelnya hilang permanen.\nUntuk barang yang keluar gudang, sebaiknya pakai keputusan JUAL / BAGIKAN / BUANG supaya histori tetap utuh.`)) return;
+    const ok = await storage.delete(Sampel.SAMPEL_REC_PREFIX + s.id);
+    if (!ok) { beriToast('Gagal menghapus sampel. Coba lagi.', 'error'); return; }
+    await logActivity(`menghapus sampel ${s.kode} — ${s.nama}`, user.name);
+    setSamples(prev => prev.filter(x => x && x.id !== s.id));
+    setDetailId(null);
+    beriToast('Sampel dihapus.');
+  };
+
+  // QR untuk record lama yang belum punya token.
+  const buatQrUlang = async (s) => {
+    try {
+      const rec = { ...s, token: tokenBaruUnik(daftar), updatedAt: new Date().toISOString() };
+      const ok = await storage.set(Sampel.SAMPEL_REC_PREFIX + s.id, rec);
+      if (!ok) throw new Error('Gagal menyimpan QR baru.');
+      setSamples(prev => prev.map(x => (x && x.id === rec.id ? rec : x)));
+      beriToast('QR berhasil dibuat.');
+    } catch (e) { beriToast(e?.message || 'Gagal membuat QR.', 'error'); }
+  };
+
+  // Bangun ulang seluruh cache 'sampelstat:' dari log LENGKAP (Owner/Manajer).
+  const hitungUlang = async () => {
+    if (!Sampel.bisaUbahLifecycle(user)) return;
+    if (!confirm('Hitung ulang statistik total & terakhir dipakai dari seluruh riwayat?\n\nProses ini membaca semua log pemakaian, jadi bisa memakan waktu bila datanya sudah banyak.')) return;
+    try {
+      const semuaLog = await storage.listByPrefix(Sampel.PAKAI_REC_PREFIX);
+      const baris = Sampel.hitungUlangStat(semuaLog);
+      for (const b of baris) await storage.set(Sampel.STAT_REC_PREFIX + b.id, b);
+      setStatRows(baris);
+      await logActivity(`menghitung ulang statistik sampel (${baris.length} sampel, ${semuaLog.length} pemakaian)`, user.name);
+      beriToast(`Statistik dihitung ulang: ${baris.length} sampel dari ${semuaLog.length} pemakaian.`);
+    } catch (e) { beriToast(e?.message || 'Gagal menghitung ulang.', 'error'); }
+  };
+
+  // ====== PENCARIAN DARI PEMINDAI / INPUT MANUAL ======
+  const cariDariScan = (teks) => {
+    const t = String(teks || '').trim();
+    if (!t) return;
+    const tokenUrl = Sampel.tokenDariAlamat({ pathname: t, search: t, hash: t });
+    const tokenLangsung = Sampel.tokenValid(t.toUpperCase()) ? t.toUpperCase() : null;
+    const tok = tokenUrl || tokenLangsung;
+    let hit = tok ? daftar.find(s => s.token === tok) : null;
+    if (!hit) { const k = Sampel.rapikanKode(t); hit = daftar.find(s => s.kode === k); }
+    if (!hit) { const k = t.toLowerCase(); hit = daftar.find(s => s.nama.toLowerCase() === k); }
+    if (hit) { setShowScan(false); setScanPesan(''); setTab('daftar'); setDetailId(hit.id); }
+    else setScanPesan(`Sampel "${t.slice(0, 40)}" tidak ditemukan. Periksa kembali Sample ID-nya.`);
+  };
+
+  // ====== TURUNAN TAMPILAN ======
+  const tersaring = useMemo(() => Sampel.saringSampel(daftar, statMap, {
+    cari, kategori: fKategori, lifecycle: fLifecycle, umur: fUmur, pakai: fPakai, aging: fAging, hariIni,
+  }), [daftar, statMap, cari, fKategori, fLifecycle, fUmur, fPakai, fAging, hariIni]);
+  const terurut = useMemo(() => Sampel.urutkanSampel(tersaring, urut, statMap), [tersaring, urut, statMap]);
+  const ringkas = useMemo(() => Sampel.ringkasDashboard(daftar, statMap, hariIni), [daftar, statMap, hariIni]);
+  const top30 = useMemo(() => Sampel.topSampel(daftar, statMap, 5), [daftar, statMap]);
+  const perluDiperiksa = useMemo(() => Sampel.prioritasReview(daftar, statMap, hariIni, Sampel.AGING_DEFAULT, 5), [daftar, statMap, hariIni]);
+  const riwayatSaya = useMemo(() => Sampel.riwayatUser(usages, user.id, 100), [usages, user.id]);
+  const riwayatDetail = useMemo(() => (detail ? Sampel.riwayatSampel(usages, detail.id) : []), [usages, detail]);
+
+  useEffect(() => { setBatasTampil(30); }, [cari, fKategori, fLifecycle, fUmur, fPakai, fAging, urut]);
+
+  const adaFilter = cari || fKategori !== 'all' || fLifecycle !== 'all' || fUmur !== 'all' || fPakai !== 'all' || fAging !== 'all';
+  const resetFilter = () => { setCari(''); setFKategori('all'); setFLifecycle('all'); setFUmur('all'); setFPakai('all'); setFAging('all'); };
+
+  const bukaAging = (pakai) => { resetFilter(); setFAging('review'); if (pakai) setFPakai(pakai); setTab('aging'); };
+
+  const TABS = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: kelola },
+    { id: 'daftar', label: 'Daftar Sampel', icon: Package, show: true },
+    { id: 'aging', label: 'Sample Aging', icon: Hourglass, show: kelola },
+    { id: 'riwayat', label: 'Riwayat Saya', icon: History, show: true },
+  ].filter(t => t.show);
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat data sampel…</div>;
+
+  return (
+    <div className="max-w-6xl">
+      <PageHeader title="Manajemen Sampel" subtitle="Identitas · umur · pemakaian · histori · keputusan sampel produk"
+        action={
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setScanPesan(''); setShowScan(true); }}
+              className="text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2"
+              style={{ background: 'linear-gradient(135deg,#2563EB,#1D4ED8)', boxShadow: '0 8px 20px -10px rgba(37,99,235,0.9)' }}>
+              <ScanLine className="w-4 h-4" /> Scan Sampel
+            </button>
+            {kelola && (
+              <button onClick={() => { setEditing(null); setShowForm(true); }}
+                className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+                <Plus className="w-4 h-4" /> Tambah Sampel
+              </button>
+            )}
+          </div>
+        } />
+
+      {sukses && (
+        <SampelSuksesPanel sampel={sukses} ukuranLabel={ukuranLabel} onUkuran={setUkuranLabel}
+          onTambahLagi={() => { setSukses(null); setEditing(null); setShowForm(true); }}
+          onLihat={() => { setSukses(null); setTab('daftar'); setDetailId(sukses.id); }}
+          onTutup={() => setSukses(null)} />
+      )}
+
+      {/* Tab */}
+      <div className="flex gap-1.5 mb-5 overflow-x-auto scroll-thin pb-1">
+        {TABS.map(t => {
+          const Icon = t.icon;
+          const aktif = tab === t.id;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              style={aktif ? { backgroundColor: '#2563EB', color: '#FFFFFF' } : undefined}
+              className={`px-3.5 py-2 rounded-xl text-sm font-semibold whitespace-nowrap flex items-center gap-2 transition ${aktif ? '' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+              <Icon className="w-4 h-4" /> {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ====== DASHBOARD ====== */}
+      {tab === 'dashboard' && kelola && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <SampelStat label="Sampel Aktif" nilai={ringkas.totalAktif} sub={`dari ${fmtNumber(ringkas.totalSemua)} sampel`} icon={Package} tone="blue" />
+            <SampelStat label="Baru Bulan Ini" nilai={ringkas.baruBulanIni} sub="sampel masuk" icon={PackageOpen} tone="emerald" />
+            <SampelStat label="Dipakai 30 Hari" nilai={ringkas.dipakai30} sub="sampel produktif" icon={Clapperboard} tone="emerald"
+              onClick={() => { resetFilter(); setFPakai('all'); setTab('daftar'); setUrut('sering'); }} />
+            <SampelStat label="Tak Dipakai >30 Hari" nilai={ringkas.tanpaPakai30} sub="perlu diperhatikan" icon={Hourglass}
+              tone={ringkas.tanpaPakai30 ? 'amber' : 'slate'}
+              onClick={() => { resetFilter(); setFPakai('tanpa30'); setFLifecycle('aktif'); setTab('daftar'); }} />
+            <SampelStat label="Perlu Review" nilai={ringkas.review} sub="layak dievaluasi" icon={AlertCircle}
+              tone={ringkas.review ? 'red' : 'slate'} onClick={() => bukaAging()} />
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4">
+            <div className="text-[10px] uppercase font-bold text-slate-400 mb-3">Ringkasan Penggunaan</div>
+            <div className="grid grid-cols-3 gap-3">
+              {[['Hari ini', ringkas.pakaiHariIni], ['Minggu ini', ringkas.pakaiMinggu], ['Bulan ini', ringkas.pakaiBulan]].map(([l, v]) => (
+                <div key={l} className="bg-slate-50 rounded-xl px-3 py-3 text-center">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">{l}</div>
+                  <div className="font-display font-bold text-2xl text-blue-700 tabular-nums mt-0.5">{fmtNumber(v)}</div>
+                  <div className="text-[10px] text-slate-400">penggunaan</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-bold text-slate-700">Top Sampel — 30 Hari</div>
+                <Trophy className="w-4 h-4 text-amber-400" />
+              </div>
+              {top30.length === 0 ? (
+                <p className="text-sm text-slate-400 italic py-6 text-center">Belum ada pemakaian dalam 30 hari terakhir.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {top30.map((t, i) => (
+                    <button key={t.sampel.id} onClick={() => { setTab('daftar'); setDetailId(t.sampel.id); }}
+                      className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg hover:bg-slate-50 text-left transition">
+                      <span className="w-6 h-6 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-semibold text-slate-800 truncate">{t.sampel.nama}</span>
+                        <span className="block font-mono text-[10px] text-slate-400">{t.sampel.kode}</span>
+                      </span>
+                      <span className="font-display font-bold text-blue-700 tabular-nums flex-shrink-0">{t.jumlah}x</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-bold text-slate-700">Sampel Perlu Review</div>
+                <button onClick={() => bukaAging()} className="text-xs font-semibold text-blue-700 hover:underline">Lihat Semua</button>
+              </div>
+              {perluDiperiksa.length === 0 ? (
+                <p className="text-sm text-slate-400 italic py-6 text-center">Tidak ada sampel yang perlu dievaluasi saat ini.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {perluDiperiksa.map(r => (
+                    <button key={r.sampel.id} onClick={() => { setTab('daftar'); setDetailId(r.sampel.id); }}
+                      className="w-full px-2.5 py-2 rounded-lg hover:bg-slate-50 text-left transition">
+                      <div className="text-sm font-semibold text-slate-800 truncate">{r.sampel.nama}</div>
+                      <div className="text-[11px] text-slate-500">
+                        <span className="font-mono">{r.sampel.kode}</span> · umur {r.umur} hari ·
+                        {r.diam == null ? ' belum pernah dipakai' : ` diam ${r.diam} hari`} · 30 hari: {r.hari30}x
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {lifecycleBoleh && (
+            <div className="flex items-center justify-between bg-white rounded-2xl border border-slate-200/70 p-3.5">
+              <div className="text-xs text-slate-500">
+                Angka <b>Total</b> & <b>Terakhir dipakai</b> memakai ringkasan tersimpan. Bangun ulang dari seluruh log bila terasa tidak cocok.
+              </div>
+              <button onClick={hitungUlang}
+                className="flex-shrink-0 ml-3 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 flex items-center gap-1.5">
+                <RefreshCw className="w-3.5 h-3.5" /> Hitung Ulang
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ====== DAFTAR & AGING ====== */}
+      {(tab === 'daftar' || tab === 'aging') && (
+        <div>
+          {tab === 'aging' && (
+            <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4 mb-4">
+              <div className="text-sm font-bold text-slate-700 mb-1">Sample Aging</div>
+              <p className="text-xs text-slate-500 mb-3">
+                Cari sampel lama yang sudah tidak produktif. Status aging dihitung otomatis dari umur &amp; pemakaian —
+                berbeda dari status barang (Aktif / Terjual / Dibagikan / Dibuang).
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(Sampel.AGING).map(([k, v]) => (
+                  <button key={k} onClick={() => setFAging(fAging === k ? 'all' : k)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${fAging === k ? 'border-slate-400 ' + v.badge : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}>
+                    {v.label}
+                  </button>
+                ))}
+                <button onClick={resetFilter} className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-slate-500 hover:bg-slate-50">
+                  Bersihkan filter
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input value={cari} onChange={e => setCari(e.target.value)}
+                  placeholder="Cari Sample ID, nama produk, seller…"
+                  className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-300 text-sm" />
+              </div>
+              <select value={fKategori} onChange={e => setFKategori(e.target.value)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                <option value="all">Semua kategori</option>
+                {Sampel.SAMPEL_KATEGORI.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+              <select value={fLifecycle} onChange={e => setFLifecycle(e.target.value)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                <option value="all">Semua status</option>
+                {Object.entries(Sampel.LIFECYCLE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+              <select value={fUmur} onChange={e => setFUmur(e.target.value)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                {Sampel.FILTER_UMUR.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+              <select value={fPakai} onChange={e => setFPakai(e.target.value)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                {Sampel.FILTER_PAKAI.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+              <select value={urut} onChange={e => setUrut(e.target.value)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                {Sampel.URUT_SAMPEL.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+              {adaFilter && (
+                <button onClick={resetFilter} className="px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-800">Bersihkan</button>
+              )}
+              <span className="ml-auto text-xs text-slate-500 font-semibold whitespace-nowrap">{terurut.length} sampel</span>
+            </div>
+          </div>
+
+          {terurut.length === 0 ? (
+            daftar.length === 0 ? (
+              <div className="bg-white rounded-xl border border-slate-200 text-center py-14">
+                <Package className="w-12 h-12 mx-auto mb-3 text-slate-200" />
+                <p className="text-sm text-slate-500">Belum ada sampel yang terdaftar.</p>
+                {kelola && (
+                  <button onClick={() => { setEditing(null); setShowForm(true); }}
+                    className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm inline-flex items-center gap-2">
+                    <Plus className="w-4 h-4" /> Tambah Sampel
+                  </button>
+                )}
+              </div>
+            ) : (
+              <EmptyState icon={PackageSearch} text={tab === 'aging'
+                ? 'Tidak ada sampel yang perlu dievaluasi dengan filter ini.'
+                : 'Tidak ada sampel yang cocok dengan pencarian/filter ini.'} />
+            )
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+              {/* MOBILE */}
+              <div className="md:hidden divide-y divide-slate-100">
+                {terurut.slice(0, batasTampil).map(s => (
+                  <SampelKartu key={s.id} s={s} stat={statDari(s)} hariIni={hariIni} onBuka={() => setDetailId(s.id)} />
+                ))}
+              </div>
+              {/* DESKTOP */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm min-w-[900px]">
+                  <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 font-bold">Sample ID</th>
+                      <th className="text-left px-3 py-2.5 font-bold">Produk</th>
+                      <th className="text-left px-3 py-2.5 font-bold">Kategori</th>
+                      <th className="text-left px-3 py-2.5 font-bold">Datang</th>
+                      <th className="text-right px-3 py-2.5 font-bold">Umur</th>
+                      <th className="text-right px-3 py-2.5 font-bold">30 Hari</th>
+                      <th className="text-left px-3 py-2.5 font-bold">Terakhir Dipakai</th>
+                      <th className="text-left px-3 py-2.5 font-bold">Aging</th>
+                      <th className="text-left px-3 py-2.5 font-bold">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {terurut.slice(0, batasTampil).map(s => {
+                      const st = statDari(s);
+                      const umur = Sampel.umurSampel(s.tanggalDatang, hariIni);
+                      const life = Sampel.lifecycleInfo(s.lifecycle);
+                      const ag = Sampel.agingInfo(Sampel.agingSampel(s, st, hariIni));
+                      return (
+                        <tr key={s.id} onClick={() => setDetailId(s.id)}
+                          className="border-t border-slate-100 cursor-pointer hover:bg-slate-50 transition">
+                          <td className="px-4 py-2.5 font-mono text-xs font-bold text-blue-700 whitespace-nowrap">{s.kode}</td>
+                          <td className="px-3 py-2.5 font-semibold text-slate-900">
+                            {s.nama}
+                            {s.sellerNama && <span className="block text-[11px] font-normal text-slate-400">{s.sellerNama}</span>}
+                          </td>
+                          <td className="px-3 py-2.5 text-slate-600">{s.kategori}</td>
+                          <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{tglPendek(s.tanggalDatang)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-slate-700">{umur == null ? '–' : `${umur} hr`}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-bold text-slate-800">{st.hari30}x</td>
+                          <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">
+                            {st.sejakTerakhir == null
+                              ? <span className="text-slate-300">belum pernah</span>
+                              : st.sejakTerakhir === 0 ? 'hari ini' : `${st.sejakTerakhir} hari lalu`}
+                          </td>
+                          <td className="px-3 py-2.5"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${ag.badge}`}>{ag.label}</span></td>
+                          <td className="px-3 py-2.5"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${life.badge}`}>{life.label}</span></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {terurut.length > batasTampil && (
+                <button onClick={() => setBatasTampil(n => n + 50)}
+                  className="w-full py-3 text-sm font-semibold text-blue-700 hover:bg-slate-50 border-t border-slate-100">
+                  Tampilkan {Math.min(50, terurut.length - batasTampil)} sampel lagi ({terurut.length - batasTampil} tersisa)
+                </button>
+              )}
+              <div className="px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400">
+                Klik baris untuk melihat detail, riwayat pemakaian{kelola ? ', QR & cetak label' : ''}.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ====== RIWAYAT SAYA ====== */}
+      {tab === 'riwayat' && (
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100">
+            <div className="text-sm font-bold text-slate-700">Riwayat Penggunaan Saya</div>
+            <p className="text-xs text-slate-500 mt-0.5">{Sampel.JENDELA_BULAN} bulan terakhir · {riwayatSaya.length} pemakaian</p>
+          </div>
+          {riwayatSaya.length === 0 ? (
+            <p className="text-sm text-slate-400 italic py-12 text-center">Belum ada sampel yang kamu gunakan untuk konten.</p>
+          ) : (
+            <div className="divide-y divide-slate-100 max-h-[70vh] overflow-y-auto scroll-thin">
+              {riwayatSaya.map(r => (
+                <button key={r.id} onClick={() => { setTab('daftar'); setDetailId(r.sampelId); }}
+                  className="w-full px-4 py-3 text-left hover:bg-slate-50 flex items-center gap-3 transition">
+                  <Clapperboard className="w-4 h-4 text-slate-300 flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-slate-800 truncate">
+                      {daftar.find(s => s.id === r.sampelId)?.nama || r.sampelKode}
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono">{r.sampelKode}</div>
+                  </div>
+                  <div className="text-[11px] text-slate-500 whitespace-nowrap flex-shrink-0">{fmtDateTime(r.usedAt)}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ====== MODAL ====== */}
+      {showForm && (
+        <SampelFormModal
+          initial={editing ? {
+            nama: editing.nama, kategori: editing.kategori, tanggalDatang: editing.tanggalDatang || hariIni,
+            sellerId: editing.sellerId, sellerNama: editing.sellerNama,
+            penerimaId: editing.penerimaId, penerimaNama: editing.penerimaNama,
+            foto: editing.foto, catatan: editing.catatan,
+          } : null}
+          sellers={sellers} allUsers={allUsers} hariIni={hariIni} sedangSimpan={sedangSimpan}
+          suksesTerakhir={editing ? null : sukses} onCetakLabel={(rec) => cetakLabelSampel(rec, ukuranLabel)}
+          onSave={(data, lagi) => (editing ? simpanEdit(data) : simpanBaru(data, lagi))}
+          onClose={() => { setShowForm(false); setEditing(null); }} />
+      )}
+
+      {detail && !showForm && (
+        <SampelDetailModal
+          sampel={detail} stat={statDari(detail)} riwayat={riwayatDetail} user={user}
+          hariIni={hariIni} ukuranLabel={ukuranLabel} sedangPakai={sedangPakai}
+          onPakai={() => gunakan(detail)}
+          onEdit={() => { setEditing(detail); setShowForm(true); }}
+          onHapus={() => hapus(detail)}
+          onKeputusan={(k, c) => putuskan(detail, k, c)}
+          onQrUlang={() => buatQrUlang(detail)}
+          onClose={() => setDetailId(null)} />
+      )}
+
+      {showScan && (
+        <SampelScanModal onFound={cariDariScan} pesan={scanPesan}
+          onClose={() => { setShowScan(false); setScanPesan(''); }} />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[130] px-4 py-3 rounded-xl shadow-lg text-sm font-semibold text-white flex items-center gap-2 max-w-[92vw]"
+          style={{ backgroundColor: toast.jenis === 'error' ? '#DC2626' : '#059669' }}>
+          {toast.jenis === 'error' ? <AlertCircle className="w-4 h-4 flex-shrink-0" /> : <Check className="w-4 h-4 flex-shrink-0" />}
+          <span>{toast.pesan}</span>
+        </div>
       )}
     </div>
   );
