@@ -13,7 +13,12 @@ import {
   Clapperboard, CheckCircle2, GripHorizontal, Eye as EyeIcon, Settings2, BarChart2,
   Database, Camera, Paperclip, Presentation, Calculator, Heart, Cloud, CloudUpload, Wallet, Receipt, Scale, Building2,
   ChevronLeft, ChevronRight, PieChart,
-  GraduationCap, BookOpen, ClipboardCheck // LMS (Pembelajaran)
+  GraduationCap, BookOpen, ClipboardCheck, // LMS (Pembelajaran)
+  // Catatan Kerja. `List` & `Filter` sengaja DIBERI ALIAS: nama aslinya terlalu
+  // umum untuk file sepanjang ini. Ikon bernama `Image` SENGAJA TIDAK di-import —
+  // namanya akan menutupi `Image` bawaan browser yang dipakai compressImageFile().
+  NotebookPen, StickyNote, Star, LayoutGrid, PinOff, Globe,
+  Bold, Heading, ListOrdered, ListChecks, List as ListIcon, Filter as FilterIcon
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -47,6 +52,12 @@ import { wibDayKey } from './absensi/logika.js';
 import * as Fin from './keuangan/hitung.js';
 import * as Aset from './aset/data.js';
 import * as Tiket from './tiket/urutan.js';
+
+// ============ MODUL CATATAN KERJA (logika murni) ============
+// Hak akses (pribadi/divisi/organisasi), pencarian, filter, urutan, dan teks
+// berformat sederhana ada di src/catatan/data.js supaya bisa diuji lewat
+// `node uji-catatan.mjs`. File itu TIDAK meng-import App.jsx.
+import * as Catatan from './catatan/data.js';
 
 // Halaman LMS dimuat LAZY: anggota yang tidak pernah membuka menu Pembelajaran
 // tidak ikut mengunduh kodenya (bundle utama app sudah ~973 kB).
@@ -581,6 +592,34 @@ async function loadAssets() {
   return await storage.listByPrefix(Aset.ASET_REC_PREFIX); // throw saat koneksi gagal → pemanggil pertahankan state lama
 }
 
+// ====== CATATAN KERJA ======
+// Catatan (notes:all) — per-record, prefix 'note:rec:'. Modul BARU sejak awal
+// per-record → tidak ada array legacy yang perlu diserap.
+// Field: {id, title, content, category, division, visibility(private|department|organization),
+//         isPinned, attachments:[{src,name,type}], authorId, authorName,
+//         relatedType, relatedId, createdAt, updatedAt}.
+// `relatedType`/`relatedId` sengaja dibiarkan bebas isi supaya catatan bisa dikaitkan
+// ke tiket/meeting/SOP/project/KPI nanti TANPA migrasi bentuk data.
+async function loadNotes() {
+  const recs = await storage.listByPrefix(Catatan.CATATAN_REC_PREFIX); // throw saat koneksi gagal → pemanggil pertahankan state lama
+  return recs.map(Catatan.normalisasiCatatan).filter(Boolean);
+}
+
+// Favorit catatan (notes:favorites:all) — per-record, SATU BARIS PER USER
+// ('notefav:<userId>' berisi {id:userId, noteIds:[...]}). Dipilih begini supaya
+// menandai favorit hanya menulis baris milik sendiri: tidak pernah menyentuh record
+// catatan (yang bisa sedang diedit orang lain) dan tidak pernah menimpa favorit
+// orang lain. `id` = userId, jadi mesin restore per-record (pfx + id) tetap cocok.
+async function loadNoteFavorites() {
+  return await storage.listByPrefix(Catatan.FAVORIT_REC_PREFIX);
+}
+// Daftar id catatan favorit milik SATU user (1 baris, bukan seluruh prefix).
+async function loadMyNoteFavorites(userId) {
+  if (!userId) return [];
+  const row = await storage.get(Catatan.FAVORIT_REC_PREFIX + userId);
+  return Array.isArray(row?.noteIds) ? row.noteIds : [];
+}
+
 // ====== LMS: suntik dependensi app ke modul pembelajaran ======
 // Dipanggil SEKALI di sini, tepat sebelum registry di bawah, karena loader LMS butuh
 // `storage`. Perhatikan `log`: logActivity adalah const yang baru dideklarasikan jauh
@@ -600,6 +639,8 @@ initLms({
 const PER_RECORD_LOADERS = {
   'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar, 'division-plans:all': loadDivisionPlans, 'img:store': loadImageStore,
   [Aset.ASET_BACKUP_KEY]: loadAssets,
+  // Catatan Kerja
+  [Catatan.CATATAN_BACKUP_KEY]: loadNotes, [Catatan.FAVORIT_BACKUP_KEY]: loadNoteFavorites,
   // LMS (Pembelajaran)
   'lms:paths:all': loadLmsPaths, 'lms:courses:all': loadLmsCourses, 'lms:lesson-bodies:all': loadLmsBodies,
   'lms:enrollments:all': loadLmsEnrollments, 'lms:progress:all': loadLmsProgress, 'lms:attempts:all': loadLmsAttempts,
@@ -609,6 +650,8 @@ const PER_RECORD_LOADERS = {
 const PER_RECORD_PREFIX = {
   'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX, 'division-plans:all': DIVPLAN_REC_PREFIX, 'img:store': IMG_PREFIX,
   [Aset.ASET_BACKUP_KEY]: Aset.ASET_REC_PREFIX,
+  // Catatan Kerja
+  [Catatan.CATATAN_BACKUP_KEY]: Catatan.CATATAN_REC_PREFIX, [Catatan.FAVORIT_BACKUP_KEY]: Catatan.FAVORIT_REC_PREFIX,
   // LMS (Pembelajaran)
   'lms:paths:all': LMS_PATH_PREFIX, 'lms:courses:all': LMS_COURSE_PREFIX, 'lms:lesson-bodies:all': LMS_BODY_PREFIX,
   'lms:enrollments:all': LMS_ENROLL_PREFIX, 'lms:progress:all': LMS_PROGRESS_PREFIX, 'lms:attempts:all': LMS_ATTEMPT_PREFIX,
@@ -893,6 +936,7 @@ const BACKUP_KEYS = [
   'drive:auto-backup', 'backup:drive-last',
   'keuangan:cashflow', 'division-plans:all',
   Aset.ASET_BACKUP_KEY, // aset/inventaris — WAJIB ikut backup
+  Catatan.CATATAN_BACKUP_KEY, Catatan.FAVORIT_BACKUP_KEY, // Catatan Kerja + penanda favorit per user
   'img:store', // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
   ...LMS_BACKUP_KEYS // LMS: jalur, kursus, isi materi, enrollment, progres, kuis, tugas, validasi, modul bacaan
 ];
@@ -1456,6 +1500,7 @@ export default function App() {
             {view === 'division-review' && <DivisionReviewView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'tasks' && <TasksView user={currentUser} allUsers={allUsers} />}
             {view === 'todos' && <TodosView user={currentUser} allUsers={allUsers} />}
+            {view === 'catatan' && <CatatanView user={currentUser} allUsers={allUsers} />}
             {view === 'sellers' && <SellersView user={currentUser} allUsers={allUsers} />}
             {view === 'tap-commission' && <TapCommissionView user={currentUser} />}
             {view === 'partner-feedback' && <PartnerFeedbackView user={currentUser} />}
@@ -2121,6 +2166,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       items: [
         { id: 'tasks', label: 'Tiket', icon: CheckSquare, show: true },
         { id: 'todos', label: 'To-Do Pribadi', icon: KanbanSquare, show: true },
+        { id: 'catatan', label: 'Catatan Kerja', icon: NotebookPen, show: true },
         { id: 'daily-reports', label: 'Laporan Harian', icon: ClipboardList, show: true },
         { id: 'attendance', label: 'Absensi', icon: MapPin, show: true },
         { id: 'calendar', label: 'Kalender Tim', icon: CalendarDays, show: true },
@@ -5540,6 +5586,20 @@ function ResetPasswordModal({ target, onSave, onClose }) {
 }
 
 // ============ TASKS ============
+// Siapa saja yang boleh DITUGASI tiket oleh `user`. Dipakai halaman Tiket dan
+// juga "Jadikan Tiket" di Catatan Kerja — sengaja SATU sumber aturan supaya
+// keduanya tidak bisa berbeda diam-diam.
+function penerimaTiket(user, allUsers) {
+  // Owner & Manajer: ke siapa saja.
+  if (user.role === 'manajer' || user.role === 'owner') return allUsers;
+  // Leader: HANYA ke bawahannya langsung (yang "Leader Pengawas"-nya dia) + dirinya.
+  // Dipakai relasi leaderId, bukan divisi — itu mekanisme yang dipakai seluruh app
+  // (absensi, KPI, laporan, cuti), dan leaderId tidak dijamin sedivisi dengan leader.
+  if (user.role === 'leader') return allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
+  // Karyawan: hanya untuk dirinya sendiri.
+  return [user];
+}
+
 function TasksView({ user, allUsers }) {
   const [tasks, setTasks] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -5693,16 +5753,7 @@ function TasksView({ user, allUsers }) {
   // Visibility
   const visibleTasks = tasks.filter(t => can.canSeeTask(user, t));
   // Assignable users
-  const assignableUsers = useMemo(() => {
-    // Owner & Manajer: ke siapa saja.
-    if ((user.role === 'manajer' || user.role === 'owner')) return allUsers;
-    // Leader: HANYA ke bawahannya langsung (yang "Leader Pengawas"-nya dia) + dirinya.
-    // Dipakai relasi leaderId, bukan divisi — itu mekanisme yang dipakai seluruh app
-    // (absensi, KPI, laporan, cuti), dan leaderId tidak dijamin sedivisi dengan leader.
-    if (user.role === 'leader') return allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
-    // Karyawan: hanya untuk dirinya sendiri.
-    return [user];
-  }, [user, allUsers]);
+  const assignableUsers = useMemo(() => penerimaTiket(user, allUsers), [user, allUsers]);
 
   // Saring dulu (status / PIC / pencarian), BARU diurutkan — supaya filter dan
   // sortir bisa dipakai bersamaan. Default `sort` = 'terbaru', jadi tiket yang baru
@@ -6186,7 +6237,11 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Ketik untuk
   );
 }
 
-function TaskForm({ task, user, assignableUsers, onSave, onClose }) {
+// `prefill` = isian awal untuk tiket BARU (dipakai "Jadikan Tiket" di Catatan Kerja).
+// Sengaja terpisah dari `task`: `task` berarti sedang MENGEDIT tiket yang sudah ada
+// (judul modal jadi "Edit Tiket" dan pemberi tugasnya dipertahankan), sedangkan
+// prefill hanya mengisi kolom untuk tiket yang belum pernah tersimpan.
+function TaskForm({ task, prefill, user, assignableUsers, onSave, onClose }) {
   // Saat mengedit tiket lama, PIC-nya bisa saja di luar wewenang penugasan sekarang
   // (aturan diperketat setelah tiket itu dibuat). Kalau tidak dimasukkan ke daftar
   // opsi, SearchableSelect menampilkan kolom KOSONG padahal PIC-nya ada — dan
@@ -6199,8 +6254,8 @@ function TaskForm({ task, user, assignableUsers, onSave, onClose }) {
     return dasar;
   }, [assignableUsers, task]);
   const [form, setForm] = useState({
-    title: task?.title || '',
-    description: task?.description || '',
+    title: task?.title || prefill?.title || '',
+    description: task?.description || prefill?.description || '',
     assigneeId: task?.assigneeId || (assignableUsers[0]?.id || ''),
     deadline: task?.deadline || '',
     priority: task?.priority || 'medium',
@@ -16036,6 +16091,843 @@ function KeuanganView({ user, allUsers, setView }) {
 
       {showInput && <FinanceInputModal user={user} editing={editing} onClose={() => { setShowInput(false); setEditing(null); }} onSave={saveItem} />}
     </div>
+  );
+}
+
+// ============ CATATAN KERJA (Work Notes) ============
+// Tempat tim mendokumentasikan apa pun yang selama ini tersebar di WhatsApp,
+// galeri HP, dan catatan pribadi: hasil meeting, evaluasi, ide, temuan masalah,
+// instruksi, SOP, sampai screenshot/poster.
+//
+// Dua prinsip yang dipegang seluruh halaman ini:
+//   1. "Buka -> Catat -> Simpan" dalam hitungan detik  -> Quick Note & tombol + melayang.
+//   2. "Cari -> Ketemu" saat catatan dibutuhkan lagi    -> pencarian judul/isi/penulis.
+//
+// Data disimpan PER-RECORD ('note:rec:<id>') sehingga dua orang yang mencatat
+// bersamaan tidak saling menimpa. Hak akses, filter, urutan, dan teks berformat
+// dihitung di src/catatan/data.js (fungsi murni, diuji `node uji-catatan.mjs`).
+
+const IKON_KATEGORI_CATATAN = {
+  meeting: Users, evaluasi: BarChart3, ide: Lightbulb, masalah: AlertCircle,
+  instruksi: Megaphone, dokumentasi: FileText, sop: ClipboardList,
+  pembelajaran: GraduationCap, lainnya: StickyNote
+};
+// Fallback WAJIB: kategori bisa saja dihapus dari daftar sementara record lama masih memakainya.
+const ikonKategoriCatatan = (k) => IKON_KATEGORI_CATATAN[k] || StickyNote;
+const IKON_VISIBILITAS_CATATAN = { private: Lock, department: Users, organization: Globe };
+const ikonVisibilitasCatatan = (v) => IKON_VISIBILITAS_CATATAN[v] || Lock;
+// Pilihan divisi untuk catatan: TIDAK di-hardcode — diambil dari DIVISIONS yang
+// sudah dipakai seluruh app. '' = tidak dikaitkan ke divisi manapun.
+const OPSI_DIVISI_CATATAN = () => [['', 'Umum / Al-Kahfi Corp'], ...Object.keys(DIVISIONS).map(k => [k, divLabel(k)])];
+
+// Lampiran -> Supabase Storage / brankas gambar sebelum record disimpan.
+// Pola sama persis dengan lampiran Laporan Harian & Masukan: yang masuk ke record
+// hanya URL/ref, jadi daftar catatan tetap ringan saat di-polling.
+async function materializeLampiranCatatan(arr) {
+  const out = [];
+  for (const a of Catatan.normalisasiLampiran(arr)) out.push({ ...a, src: await putImage(a.src) });
+  return out;
+}
+
+// Penampil isi catatan berformat sederhana. Semua yang dirender adalah TEKS —
+// tidak ada HTML mentah yang pernah disimpan atau dimasukkan ke DOM.
+function IsiCatatan({ content, className = '' }) {
+  const blok = useMemo(() => Catatan.parseIsi(content), [content]);
+  const baris = (b) => Catatan.potongTebal(b.teks).map((p, i) =>
+    p.tebal ? <strong key={i} className="font-bold text-slate-900">{p.teks}</strong> : <span key={i}>{p.teks}</span>);
+  if (!blok.length) return <p className="text-sm text-slate-400 italic">Catatan ini belum ada isinya.</p>;
+  return (
+    <div className={`text-sm text-slate-700 leading-relaxed space-y-1.5 break-words ${className}`}>
+      {blok.map(b => {
+        if (b.tipe === 'kosong') return <div key={b.id} className="h-2" />;
+        if (b.tipe === 'heading') return (
+          <h4 key={b.id} className={`font-display font-bold text-slate-900 mt-4 first:mt-0 ${b.level === 1 ? 'text-base' : 'text-sm'}`}>{baris(b)}</h4>
+        );
+        if (b.tipe === 'butir') return (
+          <div key={b.id} className="flex gap-2"><span className="text-blue-500 leading-relaxed">&bull;</span><span className="flex-1">{baris(b)}</span></div>
+        );
+        if (b.tipe === 'nomor') return (
+          <div key={b.id} className="flex gap-2"><span className="text-slate-400 font-semibold">{b.nomor}.</span><span className="flex-1">{baris(b)}</span></div>
+        );
+        if (b.tipe === 'centang') return (
+          <div key={b.id} className="flex gap-2 items-start">
+            <span className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${b.ceklis ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 bg-white'}`}>
+              {b.ceklis && <Check className="w-3 h-3 text-white" />}
+            </span>
+            <span className={`flex-1 ${b.ceklis ? 'line-through text-slate-400' : ''}`}>{baris(b)}</span>
+          </div>
+        );
+        return <p key={b.id}>{baris(b)}</p>;
+      })}
+    </div>
+  );
+}
+
+// Editor teks sederhana: textarea biasa + tombol yang menyisipkan penanda format.
+// Sengaja BUKAN editor rich-text sungguhan — itu berarti dependency baru dan data
+// HTML yang harus dibersihkan dari XSS. Isinya tetap teks biasa yang bisa dicari.
+function EditorCatatan({ value, onChange, rows = 8, placeholder, autoFocus = false }) {
+  const ref = useRef(null);
+  const teks = value || '';
+  // Sisipkan penanda di AWAL BARIS tempat kursor berada (untuk # , - , 1. , - [ ] ).
+  const sisipAwalBaris = (awalan) => {
+    const el = ref.current; if (!el) return;
+    const pos = el.selectionStart ?? teks.length;
+    const awalBaris = teks.lastIndexOf('\n', Math.max(0, pos - 1)) + 1;
+    onChange(teks.slice(0, awalBaris) + awalan + teks.slice(awalBaris));
+    // Kursor dikembalikan SETELAH React me-render nilai baru, kalau tidak posisinya loncat ke akhir.
+    requestAnimationFrame(() => { el.focus(); const p = pos + awalan.length; el.setSelectionRange(p, p); });
+  };
+  // Tebal membungkus teks yang sedang disorot (atau menyisipkan contoh bila tidak ada sorotan).
+  const bungkusTebal = () => {
+    const el = ref.current; if (!el) return;
+    const a = el.selectionStart ?? 0, b = el.selectionEnd ?? 0;
+    const pilih = teks.slice(a, b) || 'teks tebal';
+    onChange(teks.slice(0, a) + '**' + pilih + '**' + teks.slice(b));
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(a + 2, a + 2 + pilih.length); });
+  };
+  const TOMBOL = [
+    { label: 'Judul', icon: Heading, aksi: () => sisipAwalBaris('# ') },
+    { label: 'Tebal', icon: Bold, aksi: bungkusTebal },
+    { label: 'Butir', icon: ListIcon, aksi: () => sisipAwalBaris('- ') },
+    { label: 'Nomor', icon: ListOrdered, aksi: () => sisipAwalBaris('1. ') },
+    { label: 'Ceklis', icon: ListChecks, aksi: () => sisipAwalBaris('- [ ] ') },
+  ];
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1 mb-1.5">
+        {TOMBOL.map(t => (
+          <button key={t.label} type="button" onClick={t.aksi} title={`Sisipkan ${t.label}`}
+            className="px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition inline-flex items-center gap-1 text-[11px] font-semibold">
+            <t.icon className="w-3.5 h-3.5" /> {t.label}
+          </button>
+        ))}
+      </div>
+      <textarea ref={ref} value={teks} onChange={e => onChange(e.target.value)} rows={rows} placeholder={placeholder} autoFocus={autoFocus}
+        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm leading-relaxed" />
+      <div className="text-[10px] text-slate-400 mt-1">
+        Format sederhana: <b>#</b> judul &middot; <b>-</b> butir &middot; <b>1.</b> nomor &middot; <b>- [ ]</b> ceklis &middot; <b>**tebal**</b>
+      </div>
+    </div>
+  );
+}
+
+// Pemilih lampiran gambar (screenshot, poster, foto dokumentasi).
+// Kompresi memakai compressImageFile yang sudah dipakai laporan/absensi — dimensi
+// dinaikkan ke 1400px karena poster & screenshot harus tetap terbaca tulisannya.
+function LampiranCatatan({ items, onChange, maks = 5 }) {
+  const [busy, setBusy] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
+  const ref = useRef();
+  const tambah = async (files) => {
+    setBusy(true);
+    try {
+      const sisa = Math.max(0, maks - items.length);
+      const dipilih = Array.from(files).slice(0, sisa);
+      if (!dipilih.length) { setBusy(false); return; }
+      const hasil = [];
+      for (const f of dipilih) {
+        hasil.push({ src: await compressImageFile(f, { maxDim: 1400, quality: 0.75 }), name: f.name || 'Gambar', type: 'image' });
+      }
+      onChange([...items, ...hasil].slice(0, maks));
+    } catch (e) { alert(e.message || 'Gagal memproses gambar.'); }
+    setBusy(false);
+  };
+  return (
+    <div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {items.map((a, i) => (
+          <div key={i} className="relative group">
+            <AsyncImg refId={a.src} alt={a.name} onClick={() => setLightbox(a)}
+              className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer"
+              fallback={<div className="w-16 h-16 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-[9px] text-slate-400">memuat</div>} />
+            <button type="button" onClick={() => onChange(items.filter((_, x) => x !== i))} title="Hapus lampiran"
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow">
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        ))}
+        {items.length < maks && (
+          <button type="button" onClick={() => ref.current?.click()} disabled={busy}
+            className="w-16 h-16 border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-blue-600 transition disabled:opacity-50">
+            <ImagePlus className="w-5 h-5" />
+            <span className="text-[9px] font-semibold mt-0.5">{busy ? '...' : 'Gambar'}</span>
+          </button>
+        )}
+        <input ref={ref} type="file" accept="image/*" multiple className="hidden"
+          onChange={e => { tambah(e.target.files); e.target.value = ''; }} />
+      </div>
+      <div className="text-[10px] text-slate-400 mt-1">Screenshot, poster, atau foto dokumentasi (maks. {maks} gambar).</div>
+      {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.name} onClose={() => setLightbox(null)} />}
+    </div>
+  );
+}
+
+function CatatanView({ user, allUsers }) {
+  const [notes, setNotes] = useState([]);
+  const [favorit, setFavorit] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [gagalMuat, setGagalMuat] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [showQuick, setShowQuick] = useState(false);
+  const [viewing, setViewing] = useState(null);
+  const [konversi, setKonversi] = useState(null); // catatan yang sedang dijadikan tiket
+  const [mode, setMode] = useState('list');       // 'list' | 'galeri'
+  const [showFilter, setShowFilter] = useState(false);
+  const [filter, setFilter] = useState({
+    tab: 'semua', kategori: 'all', divisi: 'all', penulis: 'all',
+    cari: '', rentang: { id: 'all', label: 'Semua tanggal', start: '', end: '' },
+    urut: 'terbaru'
+  });
+
+  // Muat catatan + daftar favorit milik user ini. Kegagalan baca TIDAK mengosongkan
+  // layar (pola yang sama dengan modul lain): state lama dipertahankan + banner peringatan.
+  const load = async () => {
+    try {
+      const [semua, fav] = await Promise.all([loadNotes(), loadMyNoteFavorites(user.id)]);
+      setNotes(semua); setFavorit(fav); setGagalMuat(false);
+    } catch (e) {
+      console.error('Gagal memuat catatan:', e?.message || e);
+      setGagalMuat(true);
+    }
+    setLoading(false);
+  };
+  useEffect(() => {
+    load();
+    const iv = setInterval(pollWhenVisible(load), 60000); // hemat egress: 60 dtk & hanya saat tab dilihat
+    return () => clearInterval(iv);
+  }, []);
+
+  // Catatan yang sedang dibuka ikut menyegarkan diri saat data baru masuk,
+  // supaya perubahan orang lain (mis. pin oleh Manajer) langsung terlihat.
+  useEffect(() => {
+    if (!viewing) return;
+    const fresh = notes.find(n => n.id === viewing.id);
+    if (fresh) setViewing(fresh);
+    else setViewing(null); // sudah dihapus orang lain
+  }, [notes]);
+
+  const terlihat = useMemo(() => Catatan.catatanTerlihat(user, notes), [notes, user]);
+  const tersaring = useMemo(
+    () => Catatan.urutkanCatatan(Catatan.saringCatatan(terlihat, { ...filter, user, favorit }), filter.urut),
+    [terlihat, filter, favorit, user]
+  );
+  const ringkas = useMemo(() => Catatan.ringkasanCatatan(terlihat), [terlihat]);
+  // Daftar penulis untuk filter — hanya dari catatan yang memang boleh dilihat user ini.
+  const opsiPenulis = useMemo(() => {
+    const map = new Map();
+    terlihat.forEach(n => { if (n.authorId && !map.has(n.authorId)) map.set(n.authorId, n.authorName || '-'); });
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], 'id'));
+  }, [terlihat]);
+  const jumlahFilterAktif =
+    (filter.kategori !== 'all' ? 1 : 0) + (filter.divisi !== 'all' ? 1 : 0) +
+    (filter.penulis !== 'all' ? 1 : 0) + (filter.rentang?.start ? 1 : 0) + (filter.urut !== 'terbaru' ? 1 : 0);
+  const resetFilter = () => setFilter(f => ({
+    ...f, kategori: 'all', divisi: 'all', penulis: 'all', urut: 'terbaru',
+    rentang: { id: 'all', label: 'Semua tanggal', start: '', end: '' }
+  }));
+
+  // ====== SIMPAN / UBAH / HAPUS ======
+  const simpan = async (data) => {
+    try {
+      const lampiran = await materializeLampiranCatatan(data.attachments);
+      const now = new Date().toISOString();
+      let rec;
+      if (editing) {
+        rec = Catatan.normalisasiCatatan({
+          ...editing, ...data, attachments: lampiran,
+          // Penulis & waktu dibuat TIDAK pernah berubah saat catatan diedit —
+          // keduanya jejak asal catatan (dipakai filter penulis & urutan).
+          authorId: editing.authorId, authorName: editing.authorName,
+          createdAt: editing.createdAt, updatedAt: now
+        });
+      } else {
+        rec = Catatan.normalisasiCatatan({
+          id: uid(), ...data, attachments: lampiran, isPinned: false,
+          authorId: user.id, authorName: user.name,
+          createdAt: now, updatedAt: now
+        });
+      }
+      const ok = await storage.set(Catatan.CATATAN_REC_PREFIX + rec.id, rec);
+      if (!ok) throw new Error('Gagal menyimpan ke server.');
+      // Judul SENGAJA tidak ikut ke feed aktivitas: feed itu terbuka untuk semua
+      // orang, sedangkan catatan bisa berstatus pribadi/divisi.
+      if (!editing) await logActivity(`menulis 1 catatan kerja (${Catatan.labelKategori(rec.category)})`, user.name);
+      setShowForm(false); setShowQuick(false); setEditing(null);
+      if (viewing) setViewing(rec);
+      await load();
+    } catch (e) {
+      alert('Gagal menyimpan catatan: ' + (e?.message || e) + '\n\nCoba lagi saat koneksi stabil.');
+    }
+  };
+
+  // Ubah sebagian field 1 catatan (pin / visibilitas / relasi) — baca-segar dulu
+  // supaya perubahan orang lain pada field LAIN tidak ikut tertimpa.
+  const patchCatatan = async (id, patch) => {
+    try {
+      const cur = await storage.get(Catatan.CATATAN_REC_PREFIX + id);
+      if (!cur) { await load(); return false; }
+      const rec = Catatan.normalisasiCatatan({ ...cur, ...patch, updatedAt: new Date().toISOString() });
+      const ok = await storage.set(Catatan.CATATAN_REC_PREFIX + id, rec);
+      if (!ok) throw new Error('gagal simpan');
+      if (viewing?.id === id) setViewing(rec);
+      await load();
+      return true;
+    } catch (e) {
+      alert('Gagal menyimpan perubahan catatan (koneksi). Coba lagi.');
+      return false;
+    }
+  };
+
+  const togglePin = (n) => patchCatatan(n.id, { isPinned: !n.isPinned });
+  const ubahVisibilitas = (n, visibility) => {
+    // Catatan divisi wajib punya divisi — kalau belum diisi, pakai divisi penulisnya.
+    const patch = { visibility };
+    if (visibility === 'department' && !n.division) patch.division = user.division || '';
+    if (visibility === 'department' && !patch.division && !n.division) {
+      alert('Catatan ini belum punya divisi. Buka Edit lalu pilih divisinya dulu.');
+      return;
+    }
+    return patchCatatan(n.id, patch);
+  };
+
+  const hapus = async (n) => {
+    if (!confirm(`Hapus catatan "${n.title || 'tanpa judul'}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+    const ok = await storage.delete(Catatan.CATATAN_REC_PREFIX + n.id);
+    if (!ok) { alert('Gagal menghapus catatan. Coba lagi.'); return; }
+    if (viewing?.id === n.id) setViewing(null);
+    await load();
+  };
+
+  // Favorit ditulis ke baris MILIK SENDIRI ('notefav:<userId>') — tidak pernah
+  // menyentuh record catatan, jadi tidak bisa bentrok dengan orang lain.
+  const toggleFavorit = async (n) => {
+    const sebelum = favorit;
+    const sesudah = Catatan.toggleFavorit(favorit, n.id);
+    setFavorit(sesudah); // optimistis: bintang langsung berubah, terasa instan
+    const ok = await storage.set(Catatan.FAVORIT_REC_PREFIX + user.id, {
+      id: user.id, noteIds: sesudah, updatedAt: new Date().toISOString()
+    });
+    if (!ok) { setFavorit(sebelum); alert('Gagal menyimpan favorit. Coba lagi.'); }
+  };
+
+  // ====== JADIKAN TIKET (Catatan -> sistem Tiket yang sudah ada) ======
+  const penerima = useMemo(() => penerimaTiket(user, allUsers), [user, allUsers]);
+  const buatTiketDariCatatan = async (form) => {
+    try {
+      const assignee = allUsers.find(u => u.id === form.assigneeId);
+      const rec = {
+        id: uid(), ...form,
+        assigneeName: assignee?.name || '-',
+        createdById: user.id, createdByName: user.name,
+        createdAt: new Date().toISOString(), comments: [],
+        // Jejak asal tiket. Disimpan di KEDUA sisi supaya hubungannya tetap
+        // ketemu dari mana pun nanti dibutuhkan (tiket -> catatan, catatan -> tiket).
+        noteId: konversi.id
+      };
+      const ok = await storage.set(TASK_REC_PREFIX + rec.id, rec);
+      if (!ok) throw new Error('Gagal menyimpan tiket ke server.');
+      await patchCatatan(konversi.id, { relatedType: 'task', relatedId: rec.id });
+      await logActivity(`memberi 1 tiket baru ke ${rec.assigneeName}`, user.name);
+      setKonversi(null);
+      alert(`Tiket dibuat untuk ${rec.assigneeName}. Buka menu Tiket untuk memantaunya.`);
+    } catch (e) {
+      alert('Gagal membuat tiket: ' + (e?.message || e));
+    }
+  };
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat catatan...</div>;
+
+  // Selalu bersihkan `editing` sebelum membuka jalur "buat baru" — kalau tidak,
+  // penyimpanan dari Quick Note bisa salah menimpa catatan yang tadi dibuka Edit.
+  const bukaBaru = () => { setShowQuick(false); setEditing(null); setShowForm(true); };
+  const bukaQuick = () => { setShowForm(false); setEditing(null); setShowQuick(true); };
+  const bukaEdit = (n) => { setEditing(n); setShowForm(true); setViewing(null); };
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="Catatan Kerja"
+        subtitle="Dokumentasikan informasi, ide, evaluasi, dan pekerjaan tim."
+        action={
+          <div className="flex gap-2">
+            <button onClick={bukaQuick}
+              className="border border-slate-300 bg-white hover:border-blue-400 hover:text-blue-700 text-slate-600 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              <Zap className="w-4 h-4" /> Quick Note
+            </button>
+            <button onClick={bukaBaru}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Buat Catatan
+            </button>
+          </div>
+        } />
+
+      {gagalMuat && (
+        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span className="flex-1">Gagal memuat catatan terbaru dari server. Yang tampil adalah data terakhir yang berhasil dimuat.</span>
+          <button onClick={load} className="font-semibold underline whitespace-nowrap">Coba lagi</button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div className="bg-white rounded-2xl border border-slate-200/70 p-3 shadow-sm"><div className="text-xs font-semibold text-slate-500 uppercase">Total</div><div className="font-display font-bold text-2xl text-slate-800 mt-0.5">{ringkas.total}</div></div>
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3"><div className="text-xs font-semibold text-amber-600 uppercase">Disematkan</div><div className="font-display font-bold text-2xl text-amber-700 mt-0.5">{ringkas.pinned}</div></div>
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3"><div className="text-xs font-semibold text-blue-600 uppercase">Favorit</div><div className="font-display font-bold text-2xl text-blue-700 mt-0.5">{favorit.length}</div></div>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3"><div className="text-xs font-semibold text-emerald-600 uppercase">Bergambar</div><div className="font-display font-bold text-2xl text-emerald-700 mt-0.5">{ringkas.bergambar}</div></div>
+      </div>
+
+      {/* Pencarian + tab + filter */}
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-3 mb-4">
+        <div className="flex gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input type="text" value={filter.cari} onChange={e => setFilter({ ...filter, cari: e.target.value })}
+              placeholder="Cari judul, isi catatan, atau nama penulis..."
+              className="w-full pl-9 pr-9 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            {filter.cari && (
+              <button onClick={() => setFilter({ ...filter, cari: '' })} title="Bersihkan pencarian"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"><X className="w-4 h-4" /></button>
+            )}
+          </div>
+          <button onClick={() => setShowFilter(v => !v)} title="Filter"
+            className={`px-3 py-2 rounded-lg border text-sm font-semibold flex items-center gap-1.5 flex-shrink-0 transition ${showFilter || jumlahFilterAktif ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-300 text-slate-600 hover:border-slate-400'}`}>
+            <FilterIcon className="w-4 h-4" />
+            <span className="hidden sm:inline">Filter</span>
+            {jumlahFilterAktif > 0 && <span className="bg-blue-600 text-white rounded-full text-[10px] font-bold w-4 h-4 flex items-center justify-center">{jumlahFilterAktif}</span>}
+          </button>
+          <div className="hidden sm:inline-flex bg-slate-100 rounded-lg p-0.5 flex-shrink-0">
+            <button onClick={() => setMode('list')} title="Tampilan daftar"
+              className={`px-2.5 py-1.5 rounded-md transition ${mode === 'list' ? 'bg-white shadow text-blue-700' : 'text-slate-500'}`}><ListIcon className="w-4 h-4" /></button>
+            <button onClick={() => setMode('galeri')} title="Tampilan galeri"
+              className={`px-2.5 py-1.5 rounded-md transition ${mode === 'galeri' ? 'bg-white shadow text-blue-700' : 'text-slate-500'}`}><LayoutGrid className="w-4 h-4" /></button>
+          </div>
+        </div>
+
+        {/* Tab: bisa digeser di layar HP supaya tidak memenuhi halaman */}
+        <div className="flex gap-1 mt-2.5 overflow-x-auto scroll-thin -mx-1 px-1">
+          {Catatan.TAB_CATATAN.map(t => (
+            <button key={t.id} onClick={() => setFilter({ ...filter, tab: t.id })}
+              className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap transition ${filter.tab === t.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+              {t.label}
+            </button>
+          ))}
+          <div className="sm:hidden inline-flex bg-slate-100 rounded-lg p-0.5 ml-auto flex-shrink-0">
+            <button onClick={() => setMode('list')} className={`px-2.5 py-1 rounded-md ${mode === 'list' ? 'bg-white shadow text-blue-700' : 'text-slate-500'}`}><ListIcon className="w-4 h-4" /></button>
+            <button onClick={() => setMode('galeri')} className={`px-2.5 py-1 rounded-md ${mode === 'galeri' ? 'bg-white shadow text-blue-700' : 'text-slate-500'}`}><LayoutGrid className="w-4 h-4" /></button>
+          </div>
+        </div>
+
+        {showFilter && (
+          <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-2 lg:grid-cols-3 gap-2.5">
+            <div>
+              <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Kategori</label>
+              <select value={filter.kategori} onChange={e => setFilter({ ...filter, kategori: e.target.value })}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                <option value="all">Semua kategori</option>
+                {Object.entries(Catatan.KATEGORI).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Departemen</label>
+              <select value={filter.divisi} onChange={e => setFilter({ ...filter, divisi: e.target.value })}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                <option value="all">Semua departemen</option>
+                <option value="umum">Umum / Al-Kahfi Corp</option>
+                {Object.keys(DIVISIONS).map(k => <option key={k} value={k}>{divLabel(k)}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Penulis</label>
+              <select value={filter.penulis} onChange={e => setFilter({ ...filter, penulis: e.target.value })}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                <option value="all">Semua penulis</option>
+                {opsiPenulis.map(([id, nama]) => <option key={id} value={id}>{nama}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Tanggal</label>
+              <DateRangePopover compact allowClear clearLabel="Semua tanggal" placeholder="Semua tanggal"
+                value={filter.rentang}
+                onChange={p => setFilter({ ...filter, rentang: p })} />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Urutkan</label>
+              <select value={filter.urut} onChange={e => setFilter({ ...filter, urut: e.target.value })}
+                className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                {Catatan.URUT_CATATAN.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
+              </select>
+            </div>
+            <div className="flex items-end">
+              <button onClick={resetFilter} disabled={!jumlahFilterAktif}
+                className="w-full px-2.5 py-1.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                Reset Filter
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Daftar / galeri */}
+      {tersaring.length === 0 ? (
+        <EmptyState icon={StickyNote} text={
+          terlihat.length === 0
+            ? 'Belum ada catatan. Mulai dari "Quick Note" — cukup tulis dan simpan.'
+            : 'Tidak ada catatan yang cocok dengan pencarian/filter ini.'
+        } />
+      ) : mode === 'galeri' ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {tersaring.map(n => (
+            <KartuGaleriCatatan key={n.id} n={n} favorit={favorit.includes(n.id)}
+              onBuka={() => setViewing(n)} onFavorit={() => toggleFavorit(n)} />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {tersaring.map(n => (
+            <KartuCatatan key={n.id} n={n} user={user} favorit={favorit.includes(n.id)}
+              onBuka={() => setViewing(n)} onFavorit={() => toggleFavorit(n)} onPin={() => togglePin(n)} />
+          ))}
+        </div>
+      )}
+
+      {/* Tombol Quick Note melayang — jalur tercepat mencatat lewat HP */}
+      <button onClick={bukaQuick} title="Quick Note"
+        className="lg:hidden fixed bottom-5 right-5 z-30 w-14 h-14 rounded-full text-white flex items-center justify-center"
+        style={{ background: 'linear-gradient(135deg, #2563EB, #1D4ED8)', boxShadow: '0 12px 28px -6px rgba(37,99,235,0.65)' }}>
+        <Plus className="w-7 h-7" />
+      </button>
+
+      {showQuick && <QuickNoteModal user={user} onSave={simpan} onClose={() => setShowQuick(false)} />}
+      {showForm && (
+        <CatatanFormModal catatan={editing} user={user}
+          onSave={simpan} onClose={() => { setShowForm(false); setEditing(null); }} />
+      )}
+      {viewing && (
+        <CatatanDetailModal n={viewing} user={user} favorit={favorit.includes(viewing.id)}
+          onEdit={() => bukaEdit(viewing)}
+          onPin={() => togglePin(viewing)}
+          onFavorit={() => toggleFavorit(viewing)}
+          onVisibilitas={(v) => ubahVisibilitas(viewing, v)}
+          onJadikanTiket={() => { setKonversi(viewing); setViewing(null); }}
+          onHapus={() => hapus(viewing)}
+          onClose={() => setViewing(null)} />
+      )}
+      {konversi && (
+        <TaskForm task={null} user={user} assignableUsers={penerima}
+          prefill={{ title: konversi.title, description: Catatan.isiPolos(konversi.content) }}
+          onSave={buatTiketDariCatatan} onClose={() => setKonversi(null)} />
+      )}
+    </div>
+  );
+}
+
+// Kartu catatan (tampilan daftar).
+function KartuCatatan({ n, user, favorit, onBuka, onFavorit, onPin }) {
+  const Ikon = ikonKategoriCatatan(n.category);
+  const IkonVis = ikonVisibilitasCatatan(n.visibility);
+  const gambar = Catatan.gambarPertama(n);
+  const jumlahGambar = Catatan.lampiranGambar(n).length;
+  const preview = Catatan.ringkasIsi(n.content, 170);
+  const bolehUbah = Catatan.bisaUbahCatatan(user, n);
+  return (
+    <div onClick={onBuka}
+      className={`bg-white rounded-2xl border shadow-sm p-4 cursor-pointer transition hover:border-blue-300 hover:shadow-md ${n.isPinned ? 'border-amber-300' : 'border-slate-200/70'}`}>
+      <div className="flex gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start gap-2">
+            {n.isPinned && <Pin className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />}
+            <h3 className="font-semibold text-slate-900 leading-snug flex-1 min-w-0 break-words">{n.title || 'Tanpa judul'}</h3>
+          </div>
+          {preview && <p className="text-sm text-slate-600 mt-1 line-clamp-3 break-words">{preview}</p>}
+          <div className="flex items-center gap-1.5 flex-wrap mt-2">
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold inline-flex items-center gap-1 ${Catatan.warnaKategori(n.category)}`}>
+              <Ikon className="w-3 h-3" /> {Catatan.labelKategori(n.category)}
+            </span>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full ${n.division && DIVISIONS[n.division] ? DIVISIONS[n.division].color : 'bg-slate-100 text-slate-600'}`}>
+              {n.division ? divLabel(n.division) : 'Umum'}
+            </span>
+            <span className="text-[10px] text-slate-400 inline-flex items-center gap-1"><IkonVis className="w-3 h-3" /> {Catatan.labelVisibilitas(n.visibility)}</span>
+            {jumlahGambar > 0 && <span className="text-[10px] text-slate-400 inline-flex items-center gap-1"><Paperclip className="w-3 h-3" /> {jumlahGambar}</span>}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1.5">{n.authorName} &middot; {fmtDateTime(n.createdAt)}</div>
+        </div>
+
+        {gambar && (
+          <AsyncImg refId={gambar.src} alt={gambar.name}
+            className="w-20 h-20 sm:w-24 sm:h-24 object-cover rounded-xl border border-slate-200 flex-shrink-0"
+            fallback={<div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-slate-100 flex-shrink-0" />} />
+        )}
+
+        <div className="flex flex-col gap-1 flex-shrink-0">
+          <button onClick={e => { e.stopPropagation(); onFavorit(); }} title={favorit ? 'Hapus dari favorit' : 'Tandai favorit'}
+            className={`p-1.5 rounded-lg transition ${favorit ? 'text-amber-500 hover:bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`}>
+            <Star className="w-4 h-4" fill={favorit ? 'currentColor' : 'none'} />
+          </button>
+          {bolehUbah && (
+            <button onClick={e => { e.stopPropagation(); onPin(); }} title={n.isPinned ? 'Lepas sematan' : 'Sematkan di atas'}
+              className={`p-1.5 rounded-lg transition ${n.isPinned ? 'text-amber-600 hover:bg-amber-50' : 'text-slate-300 hover:text-amber-600 hover:bg-amber-50'}`}>
+              {n.isPinned ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Kartu catatan (tampilan galeri) — thumbnail besar + judul, untuk dokumentasi
+// berbentuk poster/screenshot. Catatan tanpa gambar tetap tampil sebagai kartu
+// warna kategori supaya tidak ada catatan yang "hilang" saat mode ini dipakai.
+function KartuGaleriCatatan({ n, favorit, onBuka, onFavorit }) {
+  const gambar = Catatan.gambarPertama(n);
+  const Ikon = ikonKategoriCatatan(n.category);
+  return (
+    <div onClick={onBuka} className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden cursor-pointer hover:border-blue-300 hover:shadow-md transition">
+      <div className="relative aspect-square bg-slate-100">
+        {gambar
+          ? <AsyncImg refId={gambar.src} alt={gambar.name} className="w-full h-full object-cover"
+              fallback={<div className="w-full h-full flex items-center justify-center text-slate-300 text-xs">memuat</div>} />
+          : <div className={`w-full h-full flex items-center justify-center ${Catatan.warnaKategori(n.category)}`}><Ikon className="w-10 h-10 opacity-60" /></div>}
+        {n.isPinned && (
+          <span className="absolute top-2 left-2 bg-amber-500 text-white rounded-full p-1 shadow"><Pin className="w-3 h-3" /></span>
+        )}
+        <button onClick={e => { e.stopPropagation(); onFavorit(); }} title={favorit ? 'Hapus dari favorit' : 'Tandai favorit'}
+          className={`absolute top-2 right-2 rounded-full p-1.5 shadow transition ${favorit ? 'bg-amber-500 text-white' : 'bg-white/90 text-slate-400 hover:text-amber-500'}`}>
+          <Star className="w-3.5 h-3.5" fill={favorit ? 'currentColor' : 'none'} />
+        </button>
+      </div>
+      <div className="p-2.5">
+        <div className="font-semibold text-sm text-slate-900 line-clamp-2 leading-snug break-words">{n.title || 'Tanpa judul'}</div>
+        <div className="text-[10px] text-slate-400 mt-1 truncate">{Catatan.labelKategori(n.category)} &middot; {fmtDate(n.createdAt)}</div>
+      </div>
+    </div>
+  );
+}
+
+// Quick Note: jalur tercepat. Hanya minta isi catatan; judul dibuat otomatis dari
+// baris pertama, kategori & visibilitas memakai default. Lampiran gambar tetap
+// disediakan karena banyak dokumentasi tim berbentuk screenshot.
+function QuickNoteModal({ user, onSave, onClose }) {
+  const [isi, setIsi] = useState('');
+  const [lampiran, setLampiran] = useState([]);
+  const [kategori, setKategori] = useState(Catatan.KATEGORI_DEFAULT);
+  const [busy, setBusy] = useState(false);
+  const simpan = async () => {
+    if (!isi.trim() && lampiran.length === 0) return;
+    setBusy(true);
+    await onSave({
+      title: Catatan.judulOtomatis(isi),
+      content: isi.trim(),
+      category: kategori,
+      division: user.division || '',         // default: divisi penulis, bisa diubah nanti lewat Edit
+      visibility: Catatan.VISIBILITAS_DEFAULT, // default PRIBADI — dibagikan hanya bila sengaja diubah
+      attachments: lampiran
+    });
+    setBusy(false);
+  };
+  return (
+    <Modal title="Quick Note" onClose={onClose}>
+      <div className="space-y-3">
+        <textarea value={isi} onChange={e => setIsi(e.target.value)} rows={5} autoFocus
+          placeholder="Tulis catatan..."
+          className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        <LampiranCatatan items={lampiran} onChange={setLampiran} maks={3} />
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-semibold text-slate-500 uppercase">Kategori</span>
+          <select value={kategori} onChange={e => setKategori(e.target.value)}
+            className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+            {Object.entries(Catatan.KATEGORI).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </div>
+        <div className="text-[11px] text-slate-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+          Judul dibuat otomatis dari baris pertama. Catatan tersimpan sebagai <b>Pribadi</b> &mdash;
+          bisa dibagikan ke divisi atau seluruh tim kapan saja lewat tombol Edit.
+        </div>
+        <FormActions onCancel={onClose} onSave={simpan}
+          disabled={busy || (!isi.trim() && lampiran.length === 0)}
+          saveLabel={busy ? 'Menyimpan...' : 'Simpan'} />
+      </div>
+    </Modal>
+  );
+}
+
+// Form lengkap: judul, isi berformat, kategori, departemen, visibilitas, lampiran.
+function CatatanFormModal({ catatan, user, onSave, onClose }) {
+  const [form, setForm] = useState({
+    title: catatan?.title || '',
+    content: catatan?.content || '',
+    category: catatan?.category || Catatan.KATEGORI_DEFAULT,
+    division: catatan?.division ?? (user.division || ''),
+    visibility: catatan?.visibility || Catatan.VISIBILITAS_DEFAULT,
+    attachments: Catatan.normalisasiLampiran(catatan?.attachments)
+  });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!form.title.trim()) return setError('Judul catatan wajib diisi.');
+    // Catatan divisi tanpa divisi tidak akan pernah bisa dilihat siapa pun selain penulisnya.
+    if (form.visibility === 'department' && !form.division) return setError('Pilih departemen dulu untuk catatan bervisibilitas Divisi.');
+    setError(''); setBusy(true);
+    await onSave({ ...form, title: form.title.trim(), content: form.content });
+    setBusy(false);
+  };
+  return (
+    <Modal wide title={catatan ? 'Edit Catatan' : 'Buat Catatan'} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Judul *">
+          <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+            placeholder="Mis. Evaluasi DRM 8 September"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </Field>
+        <Field label="Isi Catatan">
+          <EditorCatatan value={form.content} onChange={v => setForm({ ...form, content: v })} rows={9}
+            placeholder={'Tulis hasil meeting, evaluasi, ide, atau dokumentasi di sini...\n\nContoh:\n# Hasil Meeting\n- Upload affiliator sering terlambat\n- [ ] Tindak lanjut: atur jadwal upload'} />
+        </Field>
+        <Field label="Lampiran Gambar">
+          <LampiranCatatan items={form.attachments} onChange={v => setForm({ ...form, attachments: v })} maks={5} />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Kategori">
+            <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
+              {Object.entries(Catatan.KATEGORI).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Departemen / Area Kerja">
+            <select value={form.division} onChange={e => setForm({ ...form, division: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
+              {OPSI_DIVISI_CATATAN().map(([k, label]) => <option key={k || 'umum'} value={k}>{label}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Siapa yang boleh melihat">
+          <div className="space-y-1.5">
+            {Object.entries(Catatan.VISIBILITAS).map(([k, v]) => {
+              const IkonVis = ikonVisibilitasCatatan(k);
+              const aktif = form.visibility === k;
+              return (
+                <button key={k} type="button" onClick={() => setForm({ ...form, visibility: k })}
+                  className={`w-full text-left px-3 py-2 rounded-lg border flex items-center gap-2.5 transition ${aktif ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                  <IkonVis className={`w-4 h-4 flex-shrink-0 ${aktif ? 'text-blue-600' : 'text-slate-400'}`} />
+                  <span className="flex-1 min-w-0">
+                    <span className={`block text-sm font-semibold ${aktif ? 'text-blue-800' : 'text-slate-700'}`}>{v.label}</span>
+                    <span className="block text-[11px] text-slate-500">
+                      {k === 'department' && form.division ? `Anggota ${divLabel(form.division)} bisa melihat` : v.sub}
+                    </span>
+                  </span>
+                  {aktif && <Check className="w-4 h-4 text-blue-600 flex-shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+        {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
+        <FormActions onCancel={onClose} onSave={submit} disabled={busy || !form.title.trim()}
+          saveLabel={busy ? 'Menyimpan...' : 'Simpan Catatan'} />
+      </div>
+    </Modal>
+  );
+}
+
+// Detail catatan + seluruh aksi. Aksi yang tidak boleh dilakukan user ini
+// TIDAK ditampilkan sama sekali (bukan sekadar dinonaktifkan).
+function CatatanDetailModal({ n, user, favorit, onEdit, onPin, onFavorit, onVisibilitas, onJadikanTiket, onHapus, onClose }) {
+  const [lightbox, setLightbox] = useState(null);
+  const Ikon = ikonKategoriCatatan(n.category);
+  const IkonVis = ikonVisibilitasCatatan(n.visibility);
+  const gambar = Catatan.lampiranGambar(n);
+  const bolehUbah = Catatan.bisaUbahCatatan(user, n);
+  return (
+    <Modal wide title="Catatan Kerja" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <div className="flex items-start gap-2">
+            {n.isPinned && <Pin className="w-5 h-5 text-amber-500 flex-shrink-0 mt-1" />}
+            <h2 className="font-display font-bold text-xl text-slate-900 leading-snug break-words">{n.title || 'Tanpa judul'}</h2>
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap mt-2">
+            <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold inline-flex items-center gap-1 ${Catatan.warnaKategori(n.category)}`}>
+              <Ikon className="w-3 h-3" /> {Catatan.labelKategori(n.category)}
+            </span>
+            <span className={`text-[11px] px-2 py-0.5 rounded-full ${n.division && DIVISIONS[n.division] ? DIVISIONS[n.division].color : 'bg-slate-100 text-slate-600'}`}>
+              {n.division ? divLabel(n.division) : 'Umum / Al-Kahfi Corp'}
+            </span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 inline-flex items-center gap-1">
+              <IkonVis className="w-3 h-3" /> {Catatan.labelVisibilitas(n.visibility)}
+            </span>
+          </div>
+          <div className="text-xs text-slate-500 mt-2">
+            {n.authorName} &middot; {fmtDateTime(n.createdAt)}
+            {n.updatedAt && n.updatedAt !== n.createdAt && <span className="text-slate-400"> &middot; diubah {fmtDateTime(n.updatedAt)}</span>}
+          </div>
+        </div>
+
+        <div className="border-t border-slate-100 pt-3">
+          <IsiCatatan content={n.content} />
+        </div>
+
+        {gambar.length > 0 && (
+          <div className="border-t border-slate-100 pt-3">
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Lampiran ({gambar.length})</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {gambar.map((a, i) => (
+                <AsyncImg key={i} refId={a.src} alt={a.name} title={a.name} onClick={() => setLightbox(a)}
+                  className="w-full h-28 object-cover rounded-xl border border-slate-200 cursor-pointer hover:opacity-90"
+                  fallback={<div className="w-full h-28 rounded-xl bg-slate-100 flex items-center justify-center text-xs text-slate-400">memuat</div>} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {n.relatedType === 'task' && n.relatedId && (
+          <div className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 inline-flex items-center gap-1.5">
+            <CheckSquare className="w-3.5 h-3.5" /> Catatan ini sudah dijadikan tiket. Pantau di menu <b>Tiket</b>.
+          </div>
+        )}
+
+        {/* Ubah visibilitas cepat — hanya untuk yang berhak mengubah catatan ini */}
+        {bolehUbah && (
+          <div className="border-t border-slate-100 pt-3">
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Siapa yang boleh melihat</div>
+            <select value={n.visibility} onChange={e => onVisibilitas(e.target.value)}
+              className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg bg-white text-sm">
+              {Object.entries(Catatan.VISIBILITAS).map(([k, v]) => <option key={k} value={k}>{v.label} &mdash; {v.sub}</option>)}
+            </select>
+          </div>
+        )}
+
+        <div className="border-t border-slate-100 pt-3 flex flex-wrap gap-2">
+          <button onClick={onFavorit}
+            className={`text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5 border transition ${favorit ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-slate-300 text-slate-600 hover:border-amber-300 hover:text-amber-700'}`}>
+            <Star className="w-4 h-4" fill={favorit ? 'currentColor' : 'none'} /> {favorit ? 'Favorit' : 'Tandai Favorit'}
+          </button>
+          {bolehUbah && (
+            <>
+              <button onClick={onPin}
+                className={`text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5 border transition ${n.isPinned ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-slate-300 text-slate-600 hover:border-amber-300 hover:text-amber-700'}`}>
+                {n.isPinned ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />} {n.isPinned ? 'Lepas Sematan' : 'Sematkan'}
+              </button>
+              <button onClick={onEdit}
+                className="text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5 border border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-700">
+                <Edit2 className="w-4 h-4" /> Edit
+              </button>
+            </>
+          )}
+          <button onClick={onJadikanTiket}
+            className="text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5 bg-blue-600 text-white hover:bg-blue-700">
+            <CheckSquare className="w-4 h-4" /> Jadikan Tiket
+          </button>
+          {bolehUbah && (
+            <button onClick={onHapus}
+              className="text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 ml-auto">
+              <Trash2 className="w-4 h-4" /> Hapus
+            </button>
+          )}
+        </div>
+      </div>
+      {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.name} onClose={() => setLightbox(null)} />}
+    </Modal>
   );
 }
 
