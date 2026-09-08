@@ -15,6 +15,7 @@ Sistem manajemen tim internal **Al-Kahfi Corp (MCN TAP + Masjid Affiliate)**. Li
 ## Stack
 - React 18 + Vite 5 + Tailwind 3. `src/App.jsx` (~14.900 baris — hampir semua komponen di sini) + `src/index.css`.
 - **Pengecualian: modul LMS ada di `src/lms/` (6 file), dimuat `React.lazy`.** App.jsx hanya menyimpan import + 3 baris rute + registry. Detail: `PANDUAN-LMS.md`. Modul di `src/lms/` TIDAK BOLEH meng-import App.jsx (circular import → layar putih); dependensi disuntik lewat `initLms()`.
+- **Pengecualian 2: fungsi MURNI dipisah ke file sendiri supaya bisa diuji tanpa React** — `src/absensi/logika.js` (tanggal WIB, status harian, rentang izin), `src/keuangan/hitung.js` (NPM & deret Laba Bersih), `src/aset/data.js` (Aset/Inventaris + barcode Code 128-B), `src/tiket/urutan.js` (urutan halaman Tiket), `src/catatan/data.js` (CATATAN KERJA: hak akses pribadi/divisi/organisasi, pencarian, filter, urutan, teks berformat sederhana). Semuanya TIDAK BOLEH meng-import App.jsx.
 - Data: **Supabase** (tabel `kv_store`, key-value) dengan fallback localStorage. Region Tokyo. Password di-hash PBKDF2.
 - Deploy: push ke `main` → Vercel auto-deploy.
 - 4 role: owner / manajer / leader / operasional (+ flag `isSecretariat`). Divisi (struktur 2026-2029): manajemen, keuangan, mabit, mcn, tap, event (= MMC "Malam Mabit Cuan"), internal. Divisi `media` sudah dihapus — label key dinamis WAJIB via helper `divLabel()`.
@@ -30,6 +31,8 @@ Sistem manajemen tim internal **Al-Kahfi Corp (MCN TAP + Masjid Affiliate)**. Li
 
 ## Verifikasi (WAJIB sebelum anggap selesai)
 - `npx vite build --outDir /tmp/dist-verif --emptyOutDir` harus lulus (rm di folder ini kadang ditolak, makanya build ke /tmp).
+- Jalankan uji yang relevan: `node uji-tiket.mjs` (38 tes), `node uji-keuangan-aset.mjs` (62), `node uji-absensi.mjs` (80), `node uji-lms.mjs` (79), `node uji-akses.mjs` (25), `node uji-catatan.mjs` (90).
+- **`uji-akses.mjs` membaca badan fungsi LANGSUNG dari `src/App.jsx` lewat regex** (`canSeeTask`, `penerimaTiket`, `DIVISION_FEATURES`, `canAccessFeature`). Kalau salah satu diganti nama / dipindah, uji ini gagal dengan pesan "... tidak ketemu" — perbaiki regex-nya, jangan menyalin fungsinya.
 - Pastikan brace/bracket balance = 0.
 - Untuk perubahan besar: cek app tidak blank (bukan cuma build lulus).
 
