@@ -217,6 +217,156 @@ export function tokenDariAlamat({ pathname = '', search = '', hash = '' } = {}) 
   return null;
 }
 
+// ====== LINK PRODUK (opsional) ======
+// Disimpan sebagai ARRAY `linkProduk: [{platform, url, label}]`, bukan dua kolom
+// tiktokUrl/shopeeUrl, supaya platform baru cukup ditambah di PLATFORM_LINK tanpa
+// mengubah bentuk data yang sudah tersimpan. Sepenuhnya OPSIONAL: sampel tanpa link
+// tetap normal, dan record lama (yang belum punya field ini sama sekali) tetap jalan.
+
+export const PLATFORM_LINK = {
+  tiktok:  { label: 'TikTok Shop', tombol: 'Buka di TikTok Shop', warna: '#111827' },
+  shopee:  { label: 'Shopee',      tombol: 'Buka di Shopee',      warna: '#EE4D2D' },
+  lainnya: { label: 'Link Produk', tombol: 'Buka Link Produk',    warna: '#2563EB' },
+};
+export const platformInfo = (k) => PLATFORM_LINK[k] || PLATFORM_LINK.lainnya;
+/** Platform yang punya kolom sendiri di form Tambah/Edit Sampel. */
+export const PLATFORM_FORM = ['tiktok', 'shopee'];
+
+// Domain per platform. Sengaja LONGGAR (cocok sufiks host) supaya short link resmi
+// seperti vt.tiktok.com atau shope.ee tetap dikenali. Deteksi ini HANYA menentukan
+// label/ikon tombol — URL di luar daftar TIDAK ditolak, cuma jadi platform 'lainnya'.
+const DOMAIN_PLATFORM = {
+  tiktok: ['tiktok.com', 'tiktokshop.com', 'tiktokv.com', 'tiktokglobalshop.com'],
+  shopee: ['shopee.co.id', 'shopee.com', 'shopee.sg', 'shope.ee', 'shp.ee'],
+};
+
+/** Skema yang boleh dibuka. `javascript:`, `data:`, `vbscript:`, dll DITOLAK. */
+const SKEMA_AMAN = ['http:', 'https:'];
+
+/**
+ * Rapikan URL yang diketik user → URL absolut, atau null bila tidak masuk akal.
+ * Tanpa skema dianggap https (staf biasanya menyalin "shopee.co.id/xxx").
+ */
+export function rapikanUrl(teks) {
+  const t = String(teks == null ? '' : teks).trim();
+  if (!t) return null;
+  // Tolak lebih dulu skema berbahaya SEBELUM menambah https:// — supaya
+  // "javascript:alert(1)" tidak berubah jadi "https://javascript:alert(1)".
+  if (/^[a-z][a-z0-9+.-]*:/i.test(t)) {
+    let u;
+    try { u = new URL(t); } catch { return null; }
+    if (!SKEMA_AMAN.includes(u.protocol)) return null;
+    return u.href;
+  }
+  if (/\s/.test(t) || !t.includes('.')) return null; // bukan alamat, cuma teks biasa
+  try {
+    const u = new URL('https://' + t);
+    return u.hostname.includes('.') ? u.href : null;
+  } catch { return null; }
+}
+
+/** true bila URL boleh dipasang di href (sudah absolut & skemanya aman). */
+export function urlAman(url) {
+  const t = String(url == null ? '' : url).trim();
+  if (!t) return false;
+  try { return SKEMA_AMAN.includes(new URL(t).protocol); } catch { return false; }
+}
+
+/** Tebak platform dari domain. Tidak dikenali → 'lainnya' (tetap boleh dipakai). */
+export function deteksiPlatform(url) {
+  let host = '';
+  try { host = new URL(String(url || '')).hostname.toLowerCase(); } catch { return 'lainnya'; }
+  for (const [platform, domain] of Object.entries(DOMAIN_PLATFORM)) {
+    if (domain.some(d => host === d || host.endsWith('.' + d))) return platform;
+  }
+  return 'lainnya';
+}
+
+/**
+ * Validasi satu isian link. Kosong = SAH (field opsional).
+ * @returns {string|null} pesan error, atau null bila lolos.
+ */
+export function validasiLinkProduk(teks, namaField = 'Link produk') {
+  const t = String(teks == null ? '' : teks).trim();
+  if (!t) return null;
+  if (t.length > 500) return `${namaField} terlalu panjang (maksimal 500 karakter).`;
+  const rapi = rapikanUrl(t);
+  if (!rapi) return `${namaField} tidak valid. Contoh: https://shopee.co.id/produk-abc`;
+  return null;
+}
+
+/**
+ * Bersihkan array link produk dari record: buang yang kosong/tidak aman/duplikat,
+ * lengkapi platform & label. SELALU mengembalikan array (record lama → array kosong).
+ * Menerima juga bentuk `productLinks`/`product_links` supaya data dari sumber lain
+ * (mis. impor) tidak hilang diam-diam.
+ */
+export function normalisasiLinkProduk(nilai) {
+  const sumber = Array.isArray(nilai) ? nilai : [];
+  const keluar = [];
+  const sudah = new Set();
+  for (const item of sumber) {
+    if (!item) continue;
+    const mentah = typeof item === 'string' ? item : item.url;
+    const url = rapikanUrl(mentah);
+    if (!url || !urlAman(url) || sudah.has(url)) continue;
+    sudah.add(url);
+    const platform = (typeof item === 'object' && PLATFORM_LINK[item.platform] && deteksiPlatform(url) === 'lainnya')
+      ? item.platform            // hormati pilihan user bila domainnya tak dikenali (short link)
+      : deteksiPlatform(url);    // domain dikenali → domain yang menang
+    const label = (typeof item === 'object' && String(item.label || '').trim()) || platformInfo(platform).label;
+    keluar.push({ platform, url, label: label.slice(0, 40) });
+  }
+  return keluar;
+}
+
+/** Ambil array link produk dari record apa pun bentuknya (aman untuk data lama). */
+export const linkProdukDari = (s) =>
+  normalisasiLinkProduk((s && (s.linkProduk || s.productLinks || s.product_links)) || []);
+
+/** URL untuk satu platform pada sebuah sampel ('' bila tidak ada). Dipakai form Edit. */
+export function urlPlatform(s, platform) {
+  const hit = linkProdukDari(s).find(l => l.platform === platform);
+  return hit ? hit.url : '';
+}
+
+/**
+ * Link yang TIDAK terwakili kolom form Tambah/Edit Sampel, yaitu:
+ *   (a) platform di luar PLATFORM_FORM (mis. Tokopedia, link pendek pihak ketiga), dan
+ *   (b) link KE-2 dan seterusnya pada platform yang sama — form hanya punya SATU kolom
+ *       per platform, jadi tanpa aturan (b) link kedua akan hilang diam-diam begitu staf
+ *       menyimpan perubahan apa pun.
+ * Dipakai bersama oleh gabungLinkProduk() (agar dipertahankan) dan form (untuk memberi
+ * tahu staf bahwa ada link lain yang tetap tersimpan walau tidak ditampilkan).
+ */
+export function linkDiluarForm(linkProduk = [], platformForm = PLATFORM_FORM) {
+  const dikelola = new Set(platformForm);
+  const terwakili = new Set();
+  return normalisasiLinkProduk(linkProduk).filter(l => {
+    if (!dikelola.has(l.platform)) return true;
+    if (terwakili.has(l.platform)) return true;
+    terwakili.add(l.platform);
+    return false;
+  });
+}
+
+/**
+ * Susun array link produk dari isian form (peta platform → url) sambil MEMPERTAHANKAN
+ * link yang tidak terwakili kolom form (lihat linkDiluarForm).
+ */
+export function gabungLinkProduk(isianForm = {}, linkLama = []) {
+  const hasil = linkDiluarForm(linkLama, Object.keys(isianForm));
+  for (const platform of Object.keys(isianForm)) {
+    const url = rapikanUrl(isianForm[platform]);
+    if (!url) continue; // dikosongkan user = link dihapus
+    // Platform & label FINAL ditentukan normalisasiLinkProduk() dari domainnya.
+    // Kalau staf salah tempel (link Shopee di kolom TikTok), domain yang menang —
+    // `platform` di sini cuma tebakan cadangan untuk short link yang tak dikenali.
+    hasil.push({ platform, url });
+  }
+  return normalisasiLinkProduk(hasil);
+}
+
 // ====== NORMALISASI (aman untuk data lama / field yang belum ada) ======
 export function normalisasiSampel(s) {
   if (!s || typeof s !== 'object') return null;
@@ -238,6 +388,8 @@ export function normalisasiSampel(s) {
     catatan: String(s.catatan || '').trim(),
     lifecycle: LIFECYCLE[s.lifecycle] ? s.lifecycle : LIFECYCLE_DEFAULT,
     riwayatKeputusan: Array.isArray(s.riwayatKeputusan) ? s.riwayatKeputusan : [],
+    // Selalu array — sampel lama yang belum punya field ini tetap aman dirender.
+    linkProduk: linkProdukDari(s),
   };
 }
 
