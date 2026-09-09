@@ -548,6 +548,145 @@ cek('17k. qrPath memberi zona sunyi 4 modul di tiap sisi',
   Q.qrPath('SMP-260909-0001').total === Q.matriksQr('SMP-260909-0001').ukuran + 8);
 
 // ============================================================================
+judul('19. Link produk (opsional)');
+// ============================================================================
+cek('19a. URL tanpa skema dilengkapi https://', S.rapikanUrl('shopee.co.id/produk-abc') === 'https://shopee.co.id/produk-abc');
+cek('19b. Spasi di ujung dirapikan', S.rapikanUrl('  https://vt.tiktok.com/ZSabc  ') === 'https://vt.tiktok.com/ZSabc');
+cek('19c. http:// tetap diterima apa adanya', S.rapikanUrl('http://contoh.test/x') === 'http://contoh.test/x');
+cek('19d. Skema BERBAHAYA ditolak',
+  ['javascript:alert(1)', 'JavaScript:alert(1)', 'data:text/html,<script>x</script>', 'vbscript:msgbox', 'file:///etc/passwd']
+    .every(u => S.rapikanUrl(u) === null));
+cek('19e. Teks biasa (bukan alamat) ditolak',
+  S.rapikanUrl('lihat di toko sebelah') === null && S.rapikanUrl('produk') === null);
+cek('19f. Kosong/null tidak error', S.rapikanUrl('') === null && S.rapikanUrl(null) === null && S.rapikanUrl(undefined) === null);
+cek('19g. urlAman hanya meloloskan http/https',
+  S.urlAman('https://a.test/x') === true && S.urlAman('javascript:alert(1)') === false
+  && S.urlAman('') === false && S.urlAman(null) === false && S.urlAman('bukan url') === false);
+
+cek('19h. Domain TikTok dikenali (termasuk subdomain & short link)',
+  ['https://shop.tiktok.com/x', 'https://vt.tiktok.com/ZSabc', 'https://www.tiktok.com/@a/video/1', 'https://tiktok.com/x']
+    .every(u => S.deteksiPlatform(u) === 'tiktok'));
+cek('19i. Domain Shopee dikenali (termasuk shope.ee & shp.ee)',
+  ['https://shopee.co.id/x', 'https://shope.ee/abc', 'https://id.shp.ee/abc', 'https://shopee.com/x']
+    .every(u => S.deteksiPlatform(u) === 'shopee'));
+cek('19j. Domain lain TIDAK ditolak, hanya jadi platform "lainnya"',
+  S.deteksiPlatform('https://bit.ly/xyz') === 'lainnya' && S.deteksiPlatform('https://tokopedia.com/x') === 'lainnya');
+cek('19k. Domain penipu tidak lolos sebagai TikTok/Shopee',
+  S.deteksiPlatform('https://tiktok.com.penipu.test/x') === 'lainnya'
+  && S.deteksiPlatform('https://notshopee.co.id.evil.test/x') === 'lainnya');
+
+cek('19l. Link KOSONG itu sah (field opsional)',
+  S.validasiLinkProduk('') === null && S.validasiLinkProduk(null) === null && S.validasiLinkProduk('   ') === null);
+cek('19m. Link ngawur ditolak dengan pesan yang bisa dimengerti',
+  /tidak valid/i.test(S.validasiLinkProduk('javascript:alert(1)', 'Link TikTok Shop'))
+  && /Link TikTok Shop/.test(S.validasiLinkProduk('bukan alamat', 'Link TikTok Shop')));
+cek('19n. Link kepanjangan ditolak', /terlalu panjang/.test(S.validasiLinkProduk('https://a.test/' + 'x'.repeat(600))));
+
+const campuran = S.normalisasiLinkProduk([
+  { platform: 'tiktok', url: 'https://vt.tiktok.com/ZSabc' },
+  { platform: 'tiktok', url: 'https://shopee.co.id/produk-abc' },   // domain menang → shopee
+  { platform: 'tiktok', url: 'https://bit.ly/pendek' },             // domain tak dikenal → pilihan user dipakai
+  { platform: 'shopee', url: 'javascript:alert(1)' },               // dibuang
+  { platform: 'shopee', url: '' },                                  // dibuang
+  'https://tokopedia.com/x',                                        // bentuk string juga diterima
+  { platform: 'tiktok', url: 'https://vt.tiktok.com/ZSabc' },       // duplikat dibuang
+  null,
+]);
+cek('19o. Link tidak aman & duplikat dibuang, bentuk string diterima', campuran.length === 4, campuran);
+cek('19p. Domain yang dikenali MENANG atas platform yang diketik user',
+  campuran.find(l => l.url.includes('shopee.co.id')).platform === 'shopee');
+cek('19q. Short link tak dikenal memakai platform pilihan user',
+  campuran.find(l => l.url.includes('bit.ly')).platform === 'tiktok');
+cek('19r. Setiap link punya label siap tampil', campuran.every(l => l.label && l.platform && l.url));
+cek('19r2. Salah tempel kolom: label IKUT domain, bukan kolom yang diisi',
+  (() => {
+    // Link Shopee sengaja diketik di kolom TikTok.
+    const g = S.gabungLinkProduk({ tiktok: 'https://shopee.co.id/salah-kolom', shopee: '' }, []);
+    return g.length === 1 && g[0].platform === 'shopee' && g[0].label === 'Shopee';
+  })());
+
+cek('19s. Record LAMA tanpa link tetap aman (selalu array kosong)',
+  Array.isArray(S.normalisasiSampel({ id: 'SMP-250101-0001' }).linkProduk)
+  && S.normalisasiSampel({ id: 'SMP-250101-0001' }).linkProduk.length === 0);
+cek('19t. Bentuk productLinks / product_links juga terbaca',
+  S.linkProdukDari({ productLinks: [{ platform: 'shopee', url: 'https://shopee.co.id/a' }] }).length === 1
+  && S.linkProdukDari({ product_links: ['https://shop.tiktok.com/a'] }).length === 1);
+cek('19u. linkProduk rusak (bukan array) tidak bikin crash',
+  S.normalisasiSampel({ id: 'SMP-250101-0001', linkProduk: 'ngawur' }).linkProduk.length === 0
+  && S.linkProdukDari(null).length === 0);
+
+const dgnLink = { ...gamis, linkProduk: [
+  { platform: 'tiktok', url: 'https://vt.tiktok.com/ZSabc' },
+  { platform: 'shopee', url: 'https://shopee.co.id/produk-abc' },
+] };
+cek('19v. urlPlatform mengambil link per platform',
+  S.urlPlatform(dgnLink, 'tiktok') === 'https://vt.tiktok.com/ZSabc'
+  && S.urlPlatform(dgnLink, 'shopee') === 'https://shopee.co.id/produk-abc'
+  && S.urlPlatform(dgnLink, 'lainnya') === '' && S.urlPlatform(gamis, 'tiktok') === '');
+
+// ====== gabungLinkProduk: yang dipakai form Tambah/Edit ======
+const lamaTiga = [
+  { platform: 'tiktok', url: 'https://vt.tiktok.com/LAMA' },
+  { platform: 'shopee', url: 'https://shopee.co.id/lama' },
+  { platform: 'lainnya', url: 'https://tokopedia.com/lama' },
+];
+const gantiTt = S.gabungLinkProduk({ tiktok: 'https://vt.tiktok.com/BARU', shopee: 'https://shopee.co.id/lama' }, lamaTiga);
+cek('19w. Ganti link TikTok: URL berubah, jumlah tetap', gantiTt.length === 3 && S.urlPlatform({ linkProduk: gantiTt }, 'tiktok') === 'https://vt.tiktok.com/BARU');
+cek('19x. Platform LAIN yang tidak ada di form TIDAK ikut terhapus',
+  gantiTt.some(l => l.url === 'https://tokopedia.com/lama'), gantiTt);
+// Kasus tepi: DUA link pada platform yang sama. Form cuma punya satu kolom per
+// platform, jadi link kedua HARUS ikut dipertahankan (kalau tidak, hilang diam-diam).
+const duaShopee = [
+  { platform: 'shopee', url: 'https://shopee.co.id/satu' },
+  { platform: 'shopee', url: 'https://shopee.co.id/dua' },
+  { platform: 'tiktok', url: 'https://vt.tiktok.com/LAMA' },
+];
+cek('19w2. linkDiluarForm menyisakan link ke-2 platform yang sama + platform lain',
+  S.linkDiluarForm(duaShopee).map(l => l.url).join() === 'https://shopee.co.id/dua');
+const simpanUlang = S.gabungLinkProduk({ tiktok: 'https://vt.tiktok.com/LAMA', shopee: 'https://shopee.co.id/satu' }, duaShopee);
+cek('19w3. Menyimpan ulang TIDAK menghilangkan link kedua', simpanUlang.length === 3, simpanUlang.map(l => l.url));
+const hapusSp = S.gabungLinkProduk({ tiktok: 'https://vt.tiktok.com/LAMA', shopee: '' }, lamaTiga);
+cek('19y. Mengosongkan kolom = menghapus link platform itu',
+  hapusSp.length === 2 && S.urlPlatform({ linkProduk: hapusSp }, 'shopee') === '');
+cek('19z. Sampel baru tanpa link menghasilkan array kosong',
+  S.gabungLinkProduk({ tiktok: '', shopee: '' }, []).length === 0);
+cek('19aa. Link ngawur tidak pernah tersimpan',
+  S.gabungLinkProduk({ tiktok: 'javascript:alert(1)', shopee: 'bukan alamat' }, []).length === 0);
+
+// ====== Skenario penerimaan (brief §10) ======
+const kasus = (tt, sp) => S.normalisasiSampel({ ...gamis, linkProduk: S.gabungLinkProduk({ tiktok: tt, shopee: sp }, []) }).linkProduk;
+cek('19ab. CASE 1 — TikTok + Shopee → dua tombol', kasus('https://vt.tiktok.com/a', 'https://shopee.co.id/a').length === 2);
+cek('19ac. CASE 2 — hanya TikTok → satu tombol TikTok',
+  (() => { const l = kasus('https://vt.tiktok.com/a', ''); return l.length === 1 && l[0].platform === 'tiktok'; })());
+cek('19ad. CASE 3 — hanya Shopee → satu tombol Shopee',
+  (() => { const l = kasus('', 'https://shopee.co.id/a'); return l.length === 1 && l[0].platform === 'shopee'; })());
+cek('19ae. CASE 4 — tanpa link, sampel tetap bisa dipakai',
+  kasus('', '').length === 0 && S.bisaPakaiSampel(staf, { ...gamis, linkProduk: [] }) === true);
+cek('19af. CASE 5 — link BUKAN pemakaian: tidak ada fungsi link yang menyentuh log',
+  typeof S.gabungLinkProduk === 'function'
+  && S.statistikPakai(idx.get(gamis.id), HARI_INI).total === 7); // angka sama seperti §4, tak terpengaruh link
+cek('19ag. CASE 7 — mengubah link tidak menyentuh kode maupun token QR',
+  (() => {
+    const sebelum = S.normalisasiSampel(dgnLink);
+    const sesudah = S.normalisasiSampel({ ...dgnLink, linkProduk: S.gabungLinkProduk({ tiktok: 'https://vt.tiktok.com/BARU', shopee: '' }, dgnLink.linkProduk) });
+    return sesudah.kode === sebelum.kode && sesudah.token === sebelum.token && sesudah.lifecycle === sebelum.lifecycle;
+  })());
+cek('19ah. CASE 8 — sampel lama: seluruh fungsi lama tetap jalan',
+  (() => {
+    const lawas = { id: 'SMP-260101-0001', kode: 'SMP-260101-0001', nama: 'Sampel Lawas', tanggalDatang: '2026-01-01' };
+    const n = S.normalisasiSampel(lawas);
+    return n.linkProduk.length === 0 && S.umurSampel(n.tanggalDatang, HARI_INI) === 288
+      && S.bisaPakaiSampel(staf, n) === true && S.agingSampel(n, S.STAT_KOSONG, HARI_INI) === 'review';
+  })());
+cek('19ai. Validasi sampel TIDAK pernah mewajibkan link',
+  S.validasiSampel({ nama: 'Produk X', kategori: 'Fashion', tanggalDatang: '2026-09-09' }) === null);
+cek('19aj. Konstanta platform siap pakai',
+  S.PLATFORM_FORM.join() === 'tiktok,shopee'
+  && S.platformInfo('tiktok').tombol === 'Buka di TikTok Shop'
+  && S.platformInfo('shopee').tombol === 'Buka di Shopee'
+  && S.platformInfo('ngawur').tombol === 'Buka Link Produk');
+
+// ============================================================================
 judul('18. Integrasi ke App.jsx (penjaga aturan wajib repo)');
 // ============================================================================
 // Dibaca LANGSUNG dari sumbernya, bukan salinan manual — pola yang sama dengan
@@ -593,6 +732,25 @@ cek('18i. Setiap penulisan penting memeriksa ulang hak akses (bukan cuma menyemb
   && /const gunakan = async[\s\S]{0,200}alasanTidakBisaPakai\(user, s\)/.test(src));
 cek('18j. Label dicetak di jendela terpisah (elemen aplikasi tidak ikut tercetak)',
   /function cetakLabelSampel[\s\S]{0,600}window\.open\(''/.test(src) && /@page \{ size: \$\{lembar \? 'A4'/.test(src));
+// --- Link produk ---
+const blokLink = src.slice(src.indexOf('{linkProduk.length > 0 ? ('), src.indexOf('{linkProduk.length > 0 ? (') + 1400);
+cek('18k. Link produk dibuka sebagai tautan eksternal yang aman',
+  /target="_blank"/.test(blokLink) && /rel="noopener noreferrer nofollow"/.test(blokLink));
+cek('18l. Membuka link TIDAK menyentuh pencatatan pemakaian',
+  !/onPakai|gunakan\(|PAKAI_REC_PREFIX/.test(blokLink), blokLink.slice(0, 120));
+// Hierarki visual dijaga: "Gunakan Sampel" = tombol PENUH bergradien biru + bayangan,
+// link produk = tombol BERGARIS berlatar putih. Kalau nanti seseorang membuat tombol
+// link jadi tombol penuh, uji ini gagal — sesuai brief §4 (link = aksi sekunder).
+cek('18m. "Gunakan Sampel" tetap CTA utama; link produk hanya tombol bergaris',
+  /rounded-xl border border-slate-300 bg-white/.test(blokLink)
+  && !/linear-gradient/.test(blokLink)
+  && /onClick=\{onPakai\}[\s\S]{0,320}linear-gradient\(135deg,#2563EB,#1D4ED8\)/.test(src));
+const blokEdit = src.slice(src.indexOf('const simpanEdit = async'), src.indexOf('const simpanEdit = async') + 1800);
+cek('18n. Edit sampel TIDAK menulis ulang kode/token/lifecycle (QR lama tetap berlaku)',
+  /linkProduk: Sampel\.gabungLinkProduk/.test(blokEdit)
+  && !/\bkode:/.test(blokEdit) && !/\btoken:/.test(blokEdit) && !/\blifecycle:/.test(blokEdit), blokEdit.slice(0, 80));
+cek('18o. Daftar sampel hanya menampilkan JUMLAH link, bukan URL panjang',
+  /function LencanaLink\(\{ jumlah \}\)/.test(src) && /<LencanaLink jumlah=\{s\.linkProduk\.length\} \/>/.test(src));
 
 // ============================================================================
 console.log(`\n${'='.repeat(52)}`);
