@@ -406,6 +406,28 @@ Fitur BARU: halaman **Catatan Kerja** (`view='catatan'`, menu di grup Operasiona
 
 **Sengaja TIDAK dibuat (sesuai brief V1):** kondisi barang masuk/keluar, check-in/out gudang, lokasi rak, kepemilikan per Affiliator, scan pengembalian, WMS, inventory accounting.
 
+#### 8 Sep 2026 (lanjutan) — LINK PRODUK pada Manajemen Sampel (perluasan kecil, 228 tes)
+
+**Kebutuhan:** setelah scan QR, Affiliator bisa langsung membuka link produk (TikTok Shop / Shopee) tanpa mencari manual. Sepenuhnya OPSIONAL — sampel tanpa link tetap normal.
+
+**Bentuk data: ARRAY, bukan dua kolom.** `linkProduk: [{platform, url, label}]` di record sampel. `tiktokUrl`/`shopeeUrl` sengaja DIHINDARI supaya platform baru cukup ditambah di `PLATFORM_LINK` tanpa mengubah bentuk data yang sudah tersimpan. Tidak ada migration & tidak ada tabel baru — record lama yang tidak punya field ini tetap jalan (`normalisasiSampel` selalu mengembalikan array). `linkProdukDari()` juga menerima `productLinks`/`product_links` supaya data dari sumber lain tak hilang diam-diam.
+
+**Keamanan URL:** `rapikanUrl()` menolak skema berbahaya SEBELUM melengkapi `https://` — kalau urutannya dibalik, `javascript:alert(1)` akan berubah jadi `https://javascript:alert(1)` dan lolos. Hanya `http:`/`https:` yang diterima. Tautan dirender `<a target="_blank" rel="noopener noreferrer nofollow">`. Teks biasa (tanpa titik / mengandung spasi) ditolak sebagai "bukan alamat".
+
+**Deteksi platform dari domain, bukan dari kolom.** Daftar domain sengaja LONGGAR (cocok sufiks host) supaya short link resmi `vt.tiktok.com`, `shope.ee`, `shp.ee` tetap dikenali; domain di luar daftar TIDAK ditolak, hanya jadi platform `lainnya`. Domain penipu seperti `tiktok.com.penipu.test` tidak lolos karena pencocokannya sufiks, bukan `includes`. Kalau staf salah tempel (link Shopee di kolom TikTok), **domain yang menang** — tombolnya tetap "Buka di Shopee". Untuk short link yang domainnya tak dikenal, platform pilihan staf dipakai sebagai cadangan.
+
+**UX (brief §4):** urutan di detail = identitas → angka penggunaan → **LINK PRODUK** → **GUNAKAN SAMPEL**. Hirarki dijaga: CTA = tombol PENUH bergradien biru (tinggi 54–56 px), link = tombol BERGARIS putih (41–42 px). Di bawah breakpoint `sm`, grid link jadi satu kolom (bertumpuk). Ada uji regresi (`§18m`) yang GAGAL kalau tombol link nanti diubah jadi tombol penuh. Tanpa link: TIDAK ada section kosong besar — hanya baris kecil "Link produk belum tersedia" untuk yang boleh mengedit. Di daftar: hanya lencana `🔗 n`, URL panjang tidak pernah masuk tabel.
+
+**Edit link TIDAK menyentuh identitas sampel.** `simpanEdit` hanya menulis ulang field metadata + `linkProduk`; `kode`, `token` QR, `lifecycle`, `riwayatKeputusan`, dan log pemakaian tidak disentuh (dijaga uji `§18n`). QR fisik yang sudah tertempel tetap berlaku selamanya — ini yang membuat link boleh berubah kapan saja.
+
+> **KASUS TEPI yang tertangkap saat uji browser:** form hanya punya SATU kolom per platform. Kalau sebuah sampel punya DUA link Shopee (mis. akibat salah tempel kolom), versi pertama `gabungLinkProduk` membuang semua link platform itu lalu menulis ulang hanya isi kolom → **link kedua hilang diam-diam**. Diperbaiki dengan `linkDiluarForm()`: yang dipertahankan bukan cuma "platform lain", tapi juga "link ke-2 dst pada platform yang sama". Formnya memberi tahu staf: "Sampel ini juga punya N link platform lain — tetap tersimpan walau tidak ditampilkan di sini."
+
+**TIDAK dibuat (sesuai brief §9):** click analytics, tracking buka link, conversion, GMV attribution. Membuka link murni `<a>` biasa — tidak menyentuh log pemakaian sama sekali.
+
+**Verifikasi:** build lulus 3,72s. Seluruh uji lulus: sampel **228**, catatan 90, absensi 80, LMS 79, keuangan/aset 62, tiket 38, akses 25 = **602 tes**. **Diuji end-to-end di browser** (server Supabase tiruan, production tidak disentuh), 0 error baru di konsol pada 4 sampel berbeda: CASE 1 dua link → dua tombol · CASE 2 hanya TikTok · CASE 3 hanya Shopee (`shope.ee` terdeteksi benar) · CASE 4 tanpa link tetap bisa dipakai · CASE 5 klik kedua tautan (klik sungguhan, navigasi keluar dicegah): angka penggunaan tetap & **baris log tetap 13** · CASE 6 Gunakan Sampel tetap menambah (8→9, log 13→14) · CASE 7 ganti link TikTok + hapus Shopee → `token`/`kode`/`lifecycle`/`tanggal` tidak berubah, scan QR LAMA menampilkan URL BARU · CASE 8 record lama tanpa field `linkProduk` sama sekali: tidak error, umur & aging tetap benar, form Edit menampilkan kolom kosong. Validasi UI: `javascript:alert(1)` ditolak dengan pesan jelas; `shopee.co.id/x` tanpa skema dirapikan jadi `https://`.
+
+> **Catatan lingkungan (bukan bug app):** saat uji, halaman sempat blank dengan `Sampel.platformInfo is not a function`. Penyebabnya **Service Worker PWA** (`public/sw.js`) yang tersisa dari sesi dev sebelumnya di port yang sama, menyajikan `/src/sampel/data.js` versi lama dari cache `alkahfi-pwa-v2`. Hilang setelah SW di-unregister + cache dihapus. Di production tidak terjadi karena aset build bernama berhash (tiap deploy = nama file baru). **Kalau uji lokal tiba-tiba blank/aneh setelah menambah export baru, unregister SW dulu sebelum mencurigai kode.**
+
 ---
 
 ## 4. Status Terkini (per 1 Jul 2026)
