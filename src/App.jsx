@@ -20,7 +20,8 @@ import {
   NotebookPen, StickyNote, Star, LayoutGrid, PinOff, Globe,
   Bold, Heading, ListOrdered, ListChecks, List as ListIcon, Filter as FilterIcon,
   // Manajemen Sampel
-  Package, PackageOpen, PackageSearch, QrCode, ScanLine, History, Hourglass, Printer, Video
+  Package, PackageOpen, PackageSearch, QrCode, ScanLine, History, Hourglass, Printer, Video,
+  ShoppingBag, ShoppingCart
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -15679,10 +15680,11 @@ function SampelScanModal({ onFound, pesan, onClose }) {
 // ====== FORM TAMBAH / EDIT SAMPEL ======
 // Dioptimalkan untuk pekerjaan repetitif: fokus otomatis ke Nama Produk, Enter =
 // simpan, dan tombol "Simpan & Tambah Lagi" mengosongkan form tanpa pindah halaman.
-function SampelFormModal({ initial, sellers, allUsers, hariIni, sedangSimpan, suksesTerakhir, onCetakLabel, onSave, onClose }) {
+function SampelFormModal({ initial, sellers, allUsers, hariIni, sedangSimpan, suksesTerakhir, linkLain = [], onCetakLabel, onSave, onClose }) {
   const [form, setForm] = useState(() => initial || {
     nama: '', kategori: 'Fashion', tanggalDatang: hariIni,
     sellerId: '', sellerNama: '', penerimaId: '', penerimaNama: '', foto: null, catatan: '',
+    linkTiktok: '', linkShopee: '',
   });
   const [error, setError] = useState('');
   const [fotoPreview, setFotoPreview] = useState(initial?.foto || null);
@@ -15713,6 +15715,10 @@ function SampelFormModal({ initial, sellers, allUsers, hariIni, sedangSimpan, su
     if (Sampel.tanggalDatangTerlaluJauh(form.tanggalDatang, hariIni)) {
       setError('Tanggal kedatangan tidak boleh di masa depan.'); return;
     }
+    // Link produk OPSIONAL — hanya divalidasi kalau memang diisi.
+    const salahLink = Sampel.validasiLinkProduk(form.linkTiktok, 'Link TikTok Shop')
+      || Sampel.validasiLinkProduk(form.linkShopee, 'Link Shopee');
+    if (salahLink) { setError(salahLink); return; }
     setError('');
     onSave({
       ...form,
@@ -15723,7 +15729,8 @@ function SampelFormModal({ initial, sellers, allUsers, hariIni, sedangSimpan, su
     if (lagi) {
       // Reset cepat: kategori, tanggal & seller DIPERTAHANKAN karena satu kiriman
       // biasanya dari seller & kategori yang sama — staf tinggal ketik nama produk.
-      setForm(f => ({ ...f, nama: '', catatan: '', foto: null }));
+      // Link produk IKUT dikosongkan: tiap produk punya link sendiri.
+      setForm(f => ({ ...f, nama: '', catatan: '', foto: null, linkTiktok: '', linkShopee: '' }));
       setFotoPreview(null);
       if (namaRef.current) namaRef.current.focus();
     }
@@ -15789,6 +15796,32 @@ function SampelFormModal({ initial, sellers, allUsers, hariIni, sedangSimpan, su
                 placeholder="mis. warna hitam, size M"
                 className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" />
             </Field>
+          </div>
+          {/* Link produk — semuanya OPSIONAL. Sampel tetap bisa disimpan walau kosong. */}
+          <div className="sm:col-span-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+              <div className="text-xs font-bold text-slate-700 uppercase tracking-wide">Link Produk (Opsional)</div>
+              <p className="text-[11px] text-slate-500 mt-1 mb-2.5">
+                Tambahkan link produk agar Affiliator dapat langsung membuka produk setelah scan QR.
+              </p>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <Field label="TikTok Shop">
+                  <input value={form.linkTiktok} onChange={e => set('linkTiktok', e.target.value)}
+                    placeholder="https://vt.tiktok.com/..." inputMode="url" autoComplete="off" spellCheck="false"
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" />
+                </Field>
+                <Field label="Shopee">
+                  <input value={form.linkShopee} onChange={e => set('linkShopee', e.target.value)}
+                    placeholder="https://shopee.co.id/..." inputMode="url" autoComplete="off" spellCheck="false"
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" />
+                </Field>
+              </div>
+              {linkLain.length > 0 && (
+                <p className="text-[11px] text-slate-500 mt-2">
+                  Sampel ini juga punya {linkLain.length} link platform lain — tetap tersimpan walau tidak ditampilkan di sini.
+                </p>
+              )}
+            </div>
           </div>
           <div className="sm:col-span-2">
             <Field label="Foto Produk (opsional)">
@@ -15887,6 +15920,7 @@ function SampelDetailModal({
   const ag = Sampel.agingInfo(bucket);
   const aktif = Sampel.masihAktif(s);
   const alasan = Sampel.alasanTidakBisaPakai(user, s);
+  const linkProduk = s.linkProduk; // sudah dibersihkan normalisasiSampel (selalu array)
   const kelola = Sampel.bisaKelolaSampel(user);
   const lifecycleBoleh = Sampel.bisaUbahLifecycle(user);
 
@@ -15920,21 +15954,6 @@ function SampelDetailModal({
           </div>
         </div>
 
-        {/* Tombol utama Affiliator — besar & mudah ditekan satu tangan */}
-        {aktif ? (
-          <button onClick={onPakai} disabled={sedangPakai || !!alasan}
-            className="w-full text-white font-bold text-base py-4 rounded-2xl transition flex items-center justify-center gap-2.5 disabled:opacity-60"
-            style={{ background: 'linear-gradient(135deg,#2563EB,#1D4ED8)', boxShadow: '0 12px 28px -12px rgba(37,99,235,0.85)' }}>
-            <Video className="w-5 h-5" />
-            {sedangPakai ? 'Mencatat…' : 'Gunakan Sampel'}
-          </button>
-        ) : (
-          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-3.5 py-3 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <span>Sampel ini sudah tidak aktif ({life.label}). Pemakaian baru tidak bisa dicatat, tetapi seluruh histori tetap tersimpan.</span>
-          </div>
-        )}
-
         {/* Angka pemakaian */}
         <div>
           <div className="text-[10px] uppercase font-bold text-slate-400 mb-1.5">Penggunaan</div>
@@ -15951,6 +15970,48 @@ function SampelDetailModal({
               : <span className="text-slate-400 italic">Belum pernah digunakan untuk konten.</span>}
           </div>
         </div>
+
+        {/* Link produk — aksi SEKUNDER. Sengaja tombol bergaris (outline), bukan tombol
+            penuh berwarna, supaya tidak pernah terlihat lebih dominan daripada
+            "Gunakan Sampel" di bawahnya. Membuka link TIDAK mencatat pemakaian:
+            tautannya hanya <a> biasa, tidak menyentuh log sama sekali. */}
+        {linkProduk.length > 0 ? (
+          <div>
+            <div className="text-[10px] uppercase font-bold text-slate-400 mb-1.5">Link Produk</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {linkProduk.map(l => {
+                const info = Sampel.platformInfo(l.platform);
+                const Ikon = l.platform === 'tiktok' ? ShoppingBag : l.platform === 'shopee' ? ShoppingCart : Link2;
+                return (
+                  <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer nofollow" title={l.url}
+                    className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 transition">
+                    <Ikon className="w-4 h-4 flex-shrink-0" style={{ color: info.warna }} />
+                    <span className="truncate">{info.tombol}</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                  </a>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1.5">Membuka link tidak dihitung sebagai penggunaan sampel.</p>
+          </div>
+        ) : (kelola && (
+          <p className="text-xs text-slate-400">Link produk belum tersedia — tambahkan lewat <b>Edit Data</b>.</p>
+        ))}
+
+        {/* Tombol utama Affiliator — besar & mudah ditekan satu tangan */}
+        {aktif ? (
+          <button onClick={onPakai} disabled={sedangPakai || !!alasan}
+            className="w-full text-white font-bold text-base py-4 rounded-2xl transition flex items-center justify-center gap-2.5 disabled:opacity-60"
+            style={{ background: 'linear-gradient(135deg,#2563EB,#1D4ED8)', boxShadow: '0 12px 28px -12px rgba(37,99,235,0.85)' }}>
+            <Video className="w-5 h-5" />
+            {sedangPakai ? 'Mencatat…' : 'Gunakan Sampel'}
+          </button>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-3.5 py-3 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>Sampel ini sudah tidak aktif ({life.label}). Pemakaian baru tidak bisa dicatat, tetapi seluruh histori tetap tersimpan.</span>
+          </div>
+        )}
 
         {/* Data sampel */}
         <div className="grid sm:grid-cols-2 gap-x-4">
@@ -16095,6 +16156,16 @@ function SampelDetailModal({
 }
 
 // ====== KARTU & BARIS DAFTAR ======
+// Indikator kecil di daftar: cukup jumlahnya, URL panjang JANGAN dimunculkan di tabel.
+function LencanaLink({ jumlah }) {
+  return (
+    <span title={`${jumlah} link produk`}
+      className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5">
+      <Link2 className="w-3 h-3" />{jumlah}
+    </span>
+  );
+}
+
 function SampelKartu({ s, stat, hariIni, onBuka }) {
   const umur = Sampel.umurSampel(s.tanggalDatang, hariIni);
   const life = Sampel.lifecycleInfo(s.lifecycle);
@@ -16105,7 +16176,10 @@ function SampelKartu({ s, stat, hariIni, onBuka }) {
         <div className="min-w-0">
           <div className="font-mono text-[11px] font-bold text-blue-700">{s.kode}</div>
           <div className="text-sm font-semibold text-slate-900 truncate">{s.nama}</div>
-          <div className="text-[11px] text-slate-500 truncate">{s.kategori}{s.sellerNama ? ` · ${s.sellerNama}` : ''}</div>
+          <div className="text-[11px] text-slate-500 truncate">
+            {s.kategori}{s.sellerNama ? ` · ${s.sellerNama}` : ''}
+            {s.linkProduk.length > 0 && <LencanaLink jumlah={s.linkProduk.length} />}
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${life.badge}`}>{life.label}</span>
@@ -16265,6 +16339,7 @@ function SampelView({ user, allUsers, deepToken, onDeepSelesai, autoScan }) {
           sellerId: data.sellerId || '', sellerNama: data.sellerNama || '',
           penerimaId: data.penerimaId || '', penerimaNama: data.penerimaNama || '',
           foto: foto || null, catatan: data.catatan || '',
+          linkProduk: Sampel.gabungLinkProduk({ tiktok: data.linkTiktok, shopee: data.linkShopee }, []),
           lifecycle: 'aktif', riwayatKeputusan: [],
           createdAt: new Date().toISOString(), createdById: user.id, createdByName: user.name,
         };
@@ -16298,6 +16373,12 @@ function SampelView({ user, allUsers, deepToken, onDeepSelesai, autoScan }) {
         sellerId: data.sellerId || '', sellerNama: data.sellerNama || '',
         penerimaId: data.penerimaId || '', penerimaNama: data.penerimaNama || '',
         foto: foto || null, catatan: data.catatan || '',
+        // Link produk boleh berubah kapan saja. Yang ditulis ulang HANYA field ini —
+        // kode, token QR, lifecycle, riwayat keputusan & log pemakaian tidak disentuh,
+        // jadi label QR yang sudah tertempel di sampel fisik tetap berlaku selamanya.
+        linkProduk: Sampel.gabungLinkProduk(
+          { tiktok: data.linkTiktok, shopee: data.linkShopee },
+          Sampel.linkProdukDari(terbaru || editing)),
         updatedAt: new Date().toISOString(), updatedById: user.id, updatedByName: user.name,
       };
       const ok = await storage.set(Sampel.SAMPEL_REC_PREFIX + editing.id, rec);
@@ -16707,6 +16788,7 @@ function SampelView({ user, allUsers, deepToken, onDeepSelesai, autoScan }) {
                           <td className="px-4 py-2.5 font-mono text-xs font-bold text-blue-700 whitespace-nowrap">{s.kode}</td>
                           <td className="px-3 py-2.5 font-semibold text-slate-900">
                             {s.nama}
+                            {s.linkProduk.length > 0 && <LencanaLink jumlah={s.linkProduk.length} />}
                             {s.sellerNama && <span className="block text-[11px] font-normal text-slate-400">{s.sellerNama}</span>}
                           </td>
                           <td className="px-3 py-2.5 text-slate-600">{s.kategori}</td>
@@ -16777,7 +16859,10 @@ function SampelView({ user, allUsers, deepToken, onDeepSelesai, autoScan }) {
             sellerId: editing.sellerId, sellerNama: editing.sellerNama,
             penerimaId: editing.penerimaId, penerimaNama: editing.penerimaNama,
             foto: editing.foto, catatan: editing.catatan,
+            linkTiktok: Sampel.urlPlatform(editing, 'tiktok'),
+            linkShopee: Sampel.urlPlatform(editing, 'shopee'),
           } : null}
+          linkLain={editing ? Sampel.linkDiluarForm(Sampel.linkProdukDari(editing)) : []}
           sellers={sellers} allUsers={allUsers} hariIni={hariIni} sedangSimpan={sedangSimpan}
           suksesTerakhir={editing ? null : sukses} onCetakLabel={(rec) => cetakLabelSampel(rec, ukuranLabel)}
           onSave={(data, lagi) => (editing ? simpanEdit(data) : simpanBaru(data, lagi))}
