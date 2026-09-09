@@ -40,6 +40,17 @@ dipertahankan** karena satu kiriman biasanya dari seller yang sama.
 Di bagian atas form muncul baris hijau berisi sampel yang barusan dibuat +
 tombol **Cetak Label**, jadi tidak perlu bolak-balik halaman.
 
+### Link Produk (opsional)
+
+Di bagian bawah form ada **Link Produk (Opsional)** — isi link **TikTok Shop** dan/atau
+**Shopee** kalau ada. Gunanya: setelah Affiliator scan QR, mereka bisa langsung membuka
+produknya tanpa mencari manual.
+
+Boleh dikosongkan. Sampel tetap bisa disimpan dan dipakai walau tanpa link.
+
+Tidak perlu mengetik `https://` — cukup `shopee.co.id/nama-produk`, sistem melengkapi
+sendiri. Kalau linknya salah ketik, muncul peringatan sebelum tersimpan.
+
 ### Cetak Label
 
 Klik **Cetak Label** → jendela cetak terbuka sendiri (menu & sidebar aplikasi
@@ -77,6 +88,9 @@ Terakhir: tempelkan label pada zipper/kemasan sampel, lalu serahkan ke Affiliato
 3. Arahkan kamera HP ke QR pada label.
    - Kalau kamera tidak bisa dipakai, ketik **Sample ID**-nya di kolom bawah — hasilnya sama.
 4. Detail sampel terbuka: nama produk, umur, berapa kali dipakai, siapa yang terakhir memakainya.
+   - Kalau sampelnya punya **Link Produk**, muncul tombol **Buka di TikTok Shop** dan/atau
+     **Buka di Shopee** — langsung membuka produknya di tab baru.
+     Membuka link **tidak** dihitung sebagai penggunaan sampel.
 5. Kalau memang mau dikontenkan, tekan tombol besar:
 
    ### 🎥 Gunakan Sampel
@@ -154,7 +168,9 @@ Boleh menambahkan catatan keputusan. Setelah disimpan:
 | Scan QR, cari, lihat detail | ✅ | ✅ | ✅ |
 | **Gunakan Sampel** | ✅ | ✅ | ✅ |
 | Lihat Riwayat Saya | ✅ | ✅ | ✅ |
+| Buka link produk | ✅ | ✅ | ✅ |
 | Tambah & edit sampel | — | ✅ | ✅ |
+| Tambah / ganti / hapus link produk | — | ✅ | ✅ |
 | Cetak label / QR | — | ✅ | ✅ |
 | Dashboard & Sample Aging | — | ✅ | ✅ |
 | Jual / Bagikan / Buang | — | — | ✅ |
@@ -180,6 +196,15 @@ kuota Supabase aman). Angka **Total** sudah menghitung seluruh pemakaian sejak a
 Owner/Manajer bisa membuka tab **Dashboard** lalu klik **Hitung Ulang** — angka Total &
 Terakhir Dipakai dibangun ulang dari seluruh riwayat pemakaian.
 
+**Link produknya berubah (produk pindah toko / link kedaluwarsa).**
+Buka detail sampel → **Edit Data** → ganti isinya → Simpan. **QR tidak perlu dicetak ulang**:
+label yang sudah tertempel tetap berlaku, dan setelah discan akan langsung menampilkan link terbaru.
+Mengosongkan kolomnya berarti menghapus link itu.
+
+**Link ditempel di kolom yang salah.**
+Tidak masalah — sistem mengenali platform dari alamatnya. Link Shopee yang tak sengaja
+ditempel di kolom TikTok tetap muncul sebagai tombol **Buka di Shopee**.
+
 **QR-nya rusak / labelnya hilang.**
 Buka detail sampel → **Cetak Label** lagi. QR-nya tetap sama, jadi label lama dan label
 baru mengarah ke sampel yang sama.
@@ -199,6 +224,10 @@ Aplikasi akan meminta login dulu, lalu **otomatis membuka sampel yang tadi dipin
 ## 6. Catatan Teknis Singkat
 
 - Sumber kebenaran aktivitas sampel = **Log Pemakaian**, bukan angka penghitung.
+- Link produk disimpan sebagai array `linkProduk: [{platform, url, label}]` di record sampel —
+  bukan kolom `tiktokUrl`/`shopeeUrl` — supaya platform baru bisa ditambah tanpa mengubah
+  bentuk data. Hanya `http`/`https` yang diterima; `javascript:` dan sejenisnya ditolak.
+  Belum ada pelacakan klik link (sengaja, itu rencana V2).
 - Data disimpan per-baris di `kv_store`: `sampel:rec:<kode>`,
   `sampelpakai:rec:<tanggal>-<acak>`, `sampelstat:<kode>`.
 - Ketiganya sudah masuk **Backup & Restore** dan auto-backup harian.
