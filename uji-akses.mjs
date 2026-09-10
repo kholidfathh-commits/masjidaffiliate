@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { isManajemen, isPengawas, lingkupTim } from './src/peran/hierarki.js';
 const src = fs.readFileSync('/Users/kholidfath_/Documents/GitHub/masjidaffiliate/src/App.jsx','utf8');
 
 // Ambil fungsi canSeeTask APA ADANYA dari file (bukan salinan manual).
@@ -13,7 +14,11 @@ const canSeeTask = eval('(' + mSee[1] + ')');
 // dan uji ini tetap membaca sumber aslinya, bukan salinan manual.
 const mAssign = src.match(/function penerimaTiket\(user, allUsers\) \{([\s\S]*?)\n\}/);
 if (!mAssign) throw new Error('penerimaTiket tidak ketemu');
-const assignableUsers = new Function('user','allUsers', mAssign[1]);
+// Badan fungsi kini memakai helper hierarki (isManajemen/isPengawas/lingkupTim) yang
+// di-import App.jsx dari src/peran/hierarki.js. Helper ASLI-nya disuntikkan ke sini
+// supaya uji tetap mengeksekusi badan fungsi yang sesungguhnya — bukan salinan manual.
+const _assignRaw = new Function('user','allUsers','isManajemen','isPengawas','lingkupTim', mAssign[1]);
+const assignableUsers = (user, allUsers) => _assignRaw(user, allUsers, isManajemen, isPengawas, lingkupTim);
 
 // Ambil canAccessFeature + DIVISION_FEATURES.
 const mDF = src.match(/const DIVISION_FEATURES = \{[\s\S]*?\n\};/);
@@ -65,6 +70,22 @@ cek('Leader MCN TIDAK bisa ke staf leader lain', !assignableUsers(LMCN,SEMUA).so
 cek('Leader MCN TIDAK bisa ke leader lain',      !assignableUsers(LMCN,SEMUA).some(u=>u.id==='ltap'));
 cek('Leader TAP -> diri + bawahannya (saff)',    id(assignableUsers(LTAP,SEMUA))==='ltap,saff');
 cek('Karyawan -> hanya dirinya',                 id(assignableUsers(SMCN,SEMUA))==='smcn');
+
+console.log('\n== 4. CO-LEADER (peran wakil) DI ALUR TIKET ==');
+// Struktur uji: Leader TAP (ltap) -> Co-Leader (wtap) -> staf (sw1, sw2).
+// saff tetap staf LANGSUNG di bawah ltap (bukan bawahan wtap).
+const WTAP = { id:'wtap', role:'wakil',       division:'tap', leaderId:'ltap' };
+const SW1  = { id:'sw1',  role:'operasional', division:'tap', leaderId:'wtap' };
+const SW2  = { id:'sw2',  role:'operasional', division:'tap', leaderId:'wtap' };
+const SEMUA2 = [...SEMUA, WTAP, SW1, SW2];
+cek('Co-Leader -> diri + stafnya saja',      id(assignableUsers(WTAP,SEMUA2))==='sw1,sw2,wtap');
+cek('Co-Leader TIDAK bisa ke staf leader lain', !assignableUsers(WTAP,SEMUA2).some(u=>u.id==='smcn'));
+cek('Co-Leader TIDAK bisa ke atasannya',        !assignableUsers(WTAP,SEMUA2).some(u=>u.id==='ltap'));
+cek('Leader TAP ikut menjangkau staf di bawah Co-Leader (transitif)',
+    id(assignableUsers(LTAP,SEMUA2))==='ltap,saff,sw1,sw2,wtap');
+cek('Leader MCN tetap TIDAK menjangkau tim TAP', id(assignableUsers(LMCN,SEMUA2))==='lmcn,smcn,smcn2');
+cek('tiket ke staf Co-Leader tetap TERTUTUP dari Co-Leader kalau bukan pemberi/PIC',
+    canSeeTask(WTAP,{createdById:'mgr',assigneeId:'sw1'})===false);
 
 console.log(`\n===== ${ok} LULUS, ${bad} GAGAL =====`);
 process.exit(bad?1:0);
