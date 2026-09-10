@@ -25,6 +25,17 @@ import {
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
+// ============ MODUL HIERARKI PERAN (Manajer / Leader / Co-Leader / Karyawan) ============
+// Fungsi MURNI di src/peran/hierarki.js — SATU sumber kebenaran "siapa mengawasi siapa".
+// Diuji `node uji-peran.mjs`. Modul itu TIDAK meng-import App.jsx (hindari circular import).
+import {
+  ROLE_KEYS, ROLE_RANK, ROLE_BERATASAN, ROLE_PENGAWAS, ROLE_MANAJEMEN,
+  isManajemen, isPengawas, isPengelola, butuhAtasan,
+  bawahanLangsung, idBawahanTransitif, lingkupTim, lingkupTimIds, timSaya,
+  bisaLihatUser, bisaKelolaUser, peranBolehDibuat, calonAtasan,
+  validasiAtasan, normalisasiAtasanId
+} from './peran/hierarki.js';
+
 // ============ MODUL LMS (Pembelajaran) ============
 // data.js di-import STATIS karena loader & prefix-nya dibutuhkan saat modul ini
 // dievaluasi (didaftarkan ke PER_RECORD_LOADERS di bawah). File-nya ringan, tanpa JSX.
@@ -105,31 +116,36 @@ class LazyBoundary extends React.Component {
 }
 
 // ============ ROLES & PERMISSIONS ============
+// `rank` diambil dari ROLE_RANK (src/peran/hierarki.js) supaya urutan peran tidak
+// bisa berbeda antara tampilan dan logika hak akses.
 const ROLES = {
-  owner:      { label: 'Owner',            color: 'bg-violet-100 text-violet-800 border-violet-300',   icon: Crown,     rank: 4 },
-  manajer:    { label: 'Manajer',          color: 'bg-amber-100 text-amber-800 border-amber-300',      icon: Shield,    rank: 3 },
-  leader:     { label: 'Leader',           color: 'bg-blue-100 text-blue-800 border-blue-300',          icon: UserCheck, rank: 2 },
-  operasional:{ label: 'Karyawan',         color: 'bg-blue-100 text-blue-800 border-blue-300',    icon: User,      rank: 1 }
+  owner:      { label: 'Owner',            color: 'bg-violet-100 text-violet-800 border-violet-300',   icon: Crown,     rank: ROLE_RANK.owner },
+  manajer:    { label: 'Manajer',          color: 'bg-amber-100 text-amber-800 border-amber-300',      icon: Shield,    rank: ROLE_RANK.manajer },
+  leader:     { label: 'Leader',           color: 'bg-blue-100 text-blue-800 border-blue-300',          icon: UserCheck, rank: ROLE_RANK.leader },
+  wakil:      { label: 'Co-Leader',        color: 'bg-sky-100 text-sky-800 border-sky-300',            icon: Users,     rank: ROLE_RANK.wakil },
+  operasional:{ label: 'Karyawan',         color: 'bg-blue-100 text-blue-800 border-blue-300',    icon: User,      rank: ROLE_RANK.operasional }
 };
 
 const can = {
-  manageAllUsers: u => u.role === 'owner' || u.role === 'manajer',
+  manageAllUsers: u => isManajemen(u),
   createOwner: u => u.role === 'owner',
-  createManajer: u => u.role === 'owner' || u.role === 'manajer',
-  createLeader: u => u.role === 'owner' || u.role === 'manajer',
-  createOperasional: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
-  editAppSettings: u => u.role === 'owner' || u.role === 'manajer',
-  viewAllData: u => u.role === 'owner' || u.role === 'manajer',
-  createTasks: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
-  postAnnouncements: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
-  manageSchedule: u => u.role === 'owner' || u.role === 'manajer' || u.role === 'leader',
+  createManajer: u => isManajemen(u),
+  createLeader: u => isManajemen(u),
+  // Leader & Co-Leader boleh membuat akun di bawah mereka (peran persisnya dibatasi
+  // peranBolehDibuat(): Leader → Co-Leader/Karyawan, Co-Leader → Karyawan saja).
+  createOperasional: u => isManajemen(u) || isPengawas(u),
+  editAppSettings: u => isManajemen(u),
+  viewAllData: u => isManajemen(u),
+  createTasks: u => isManajemen(u) || isPengawas(u),
+  // Pengumuman bersifat SIAR ke seluruh organisasi — sengaja TETAP hanya
+  // Owner/Manajer/Leader. Co-Leader mengawasi timnya, bukan menyiarkan ke semua orang.
+  postAnnouncements: u => isManajemen(u) || u.role === 'leader',
+  manageSchedule: u => isManajemen(u) || isPengawas(u),
   // contextual checks
-  canSeeUser: (viewer, target) => {
-    if (viewer.role === 'owner' || viewer.role === 'manajer') return true;
-    if (viewer.id === target.id) return true;
-    if (viewer.role === 'leader' && target.leaderId === viewer.id) return true;
-    return false;
-  },
+  // CATATAN: dua fungsi di bawah butuh `allUsers` untuk menelusuri rantai
+  // Leader → Co-Leader → Karyawan. Argumen ketiga opsional supaya pemanggil lama
+  // (yang hanya mengecek bawahan LANGSUNG) tetap berjalan benar.
+  canSeeUser: (viewer, target, allUsers = []) => bisaLihatUser(viewer, target, allUsers),
   // Tiket bersifat TERTUTUP: hanya pemberi tugas, PIC, dan manajemen (Owner/Manajer).
   // Leader TIDAK lagi otomatis melihat seluruh tiket bawahannya — ia melihat tiket yang
   // ia BERIKAN sendiri (sebagai createdById) dan tiket yang ditujukan kepadanya.
@@ -905,7 +921,7 @@ function reportFieldsOf(r) {
     : DEFAULT_DAILY_FIELDS.map(f => ({ id: f.id, label: f.label, type: f.type, value: r[f.id] }));
 }
 
-const DEFAULT_ROLE_LABELS = { owner: 'Owner', manajer: 'Manajer', leader: 'Leader', operasional: 'Karyawan' };
+const DEFAULT_ROLE_LABELS = { owner: 'Owner', manajer: 'Manajer', leader: 'Leader', wakil: 'Co-Leader', operasional: 'Karyawan' };
 const DEFAULT_JOB_TITLES = ['Creator Manager', 'Admin Live', 'Admin Grup', 'Creator Hunter', 'Content Creator', 'Tim Ads', 'Marketing', 'Editor Video', 'Affiliator', 'Admin Campaign', 'Dokumentasi', 'Live Streaming'];
 
 // Konfigurasi absensi: jam kerja, toleransi telat, & lokasi kerja
@@ -1169,6 +1185,7 @@ function displayJobTitle(u) {
   if (!u) return null;
   if (u.role === 'owner' || u.role === 'manajer') return null;
   if (u.role === 'leader') return `Leader ${LEADER_DIV_SHORT[u.division] || ''}`.trim();
+  if (u.role === 'wakil') return `Co-Leader ${LEADER_DIV_SHORT[u.division] || ''}`.trim();
   return u.jobTitle?.trim() || null;
 }
 
@@ -1474,6 +1491,22 @@ export default function App() {
       }
     })();
   }, []);
+
+  // ===== SESI MENGIKUTI DATA, BUKAN SEBALIKNYA =====
+  // Peran / atasan / divisi bisa diubah admin SAAT orangnya sedang login. Sesi hanya
+  // menyimpan { id } di localStorage; sumber kebenaran peran tetap `users:list`.
+  // Setiap kali daftar user disegarkan, salinan `currentUser` ikut diperbarui supaya
+  // hak akses mengikuti data terbaru tanpa menunggu logout-login.
+  useEffect(() => {
+    if (!currentUser?.id || !allUsers.length) return;
+    const fresh = allUsers.find(u => u.id === currentUser.id);
+    if (!fresh) return;
+    const berubah = fresh.role !== currentUser.role
+      || (fresh.leaderId || null) !== (currentUser.leaderId || null)
+      || (fresh.division || '') !== (currentUser.division || '')
+      || !!fresh.isSecretariat !== !!currentUser.isSecretariat;
+    if (berubah) setCurrentUser(fresh);
+  }, [allUsers, currentUser?.id]);
 
   // Auto-backup harian: jalan 1x saat ada user login (dijaga agar maksimal 1x/hari)
   useEffect(() => {
@@ -2219,7 +2252,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       label: 'Utama',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
-        { id: 'division-review', label: 'Divisi', icon: Building2, show: user.role !== 'operasional' }
+        { id: 'division-review', label: 'Divisi', icon: Building2, show: isPengelola(user) }
       ]
     },
     {
@@ -2259,7 +2292,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'gmv', label: 'Target & GMV', icon: BarChart3, show: canAccessFeature(user, 'gmv') },
         { id: 'affiliate-accounts', label: 'Akun Affiliator', icon: Target, show: canAccessFeature(user, 'affiliate-accounts') },
         { id: 'kpi', label: 'KPI Tim', icon: Award, show: true },
-        { id: 'reports', label: 'Laporan Mingguan', icon: FileText, show: user.role !== 'operasional' },
+        { id: 'reports', label: 'Laporan Mingguan', icon: FileText, show: isPengelola(user) },
         { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, show: true }
       ]
     },
@@ -2277,14 +2310,14 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       label: 'Pembelajaran',
       items: [
         { id: 'my-learning', label: 'Pembelajaran Saya', icon: GraduationCap, show: true },
-        { id: 'team-learning', label: 'Pembelajaran Tim', icon: ClipboardCheck, show: user.role !== 'operasional' },
+        { id: 'team-learning', label: 'Pembelajaran Tim', icon: ClipboardCheck, show: isPengelola(user) },
         { id: 'learning-admin', label: 'Kelola Pembelajaran', icon: BookOpen, show: can.editAppSettings(user) }
       ]
     },
     {
       label: 'Tim & Pengaturan',
       items: [
-        { id: 'users', label: 'Anggota Tim', icon: UserCog, show: user.role !== 'operasional' },
+        { id: 'users', label: 'Anggota Tim', icon: UserCog, show: isPengelola(user) },
         { id: 'announcements', label: 'Pengumuman', icon: Megaphone, show: true },
         { id: 'feedback', label: 'Masukan & Bug', icon: MessageSquare, show: true },
         { id: 'settings', label: 'Pengaturan App', icon: Settings, show: can.editAppSettings(user) }
@@ -2508,9 +2541,10 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
         });
       }
       // Pengajuan izin: pending → hanya ke Owner/Manajer/Leader (leader: timnya); hasil keputusan → ke pemohon
-      if (user.role === 'owner' || user.role === 'manajer' || user.role === 'leader') {
+      if (isManajemen(user) || isPengawas(user)) {
+        const idTimSaya = isManajemen(user) ? null : idBawahanTransitif(user.id, allUsers);
         leaveReqs.filter(l => l.status === 'pending')
-          .filter(l => user.role !== 'leader' || (allUsers.find(u => u.id === l.userId)?.leaderId === user.id))
+          .filter(l => !idTimSaya || idTimSaya.has(l.userId))
           .slice(0, 8).forEach(l => notifs.push({
             id: `leave-p-${l.id}`, type: 'leave',
             title: `🟡 Pengajuan izin: ${l.userName} · ${fmtDate(l.date)}`,
@@ -2675,7 +2709,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
   };
 
   const quickActions = [
-    ...(user.role !== 'operasional' ? [{ label: 'Tiket Baru', icon: CheckSquare, view: 'tasks', color: 'text-blue-600 bg-blue-50' }] : []),
+    ...(isPengelola(user) ? [{ label: 'Tiket Baru', icon: CheckSquare, view: 'tasks', color: 'text-blue-600 bg-blue-50' }] : []),
     { label: 'Laporan Harian', icon: ClipboardList, view: 'daily-reports', color: 'text-blue-600 bg-blue-50' },
     { label: 'Pengumuman', icon: Megaphone, view: 'announcements', color: 'text-rose-600 bg-rose-50' }
   ];
@@ -2778,7 +2812,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
                   <div>
                     <div className="px-4 py-2 text-[10px] uppercase font-bold text-slate-500 bg-slate-50/50">Anggota Tim ({searchResults.users.length})</div>
                     {searchResults.users.map(u => (
-                      <button key={u.id} onClick={() => { setView(user.role !== 'operasional' ? 'users' : 'leaderboard'); setShowSearchDropdown(false); setSearchQuery(''); }}
+                      <button key={u.id} onClick={() => { setView(isPengelola(user) ? 'users' : 'leaderboard'); setShowSearchDropdown(false); setSearchQuery(''); }}
                         className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-700 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden">
                           {u.avatarImage ? <AsyncImg refId={u.avatarImage} alt="" className="w-full h-full object-cover" fallback={u.name.charAt(0).toUpperCase()} /> : u.name.charAt(0).toUpperCase()}
@@ -2983,7 +3017,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
     .slice(0, 4);
   const latest = announcements[0];
 
-  const visibleMembers = allUsers.filter(u => can.canSeeUser(user, u)).length;
+  const visibleMembers = allUsers.filter(u => can.canSeeUser(user, u, allUsers)).length;
 
   // Helper: greeting
   const greeting = useMemo(() => {
@@ -3027,7 +3061,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
       icon: Briefcase,
       gradient: 'from-violet-500/15 to-blue-500/15 text-violet-700',
       badge: { text: 'Online', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-      action: () => user.role !== 'operasional' ? setView('users') : setView('leaderboard')
+      action: () => isPengelola(user) ? setView('users') : setView('leaderboard')
     }
   ];
 
@@ -3183,7 +3217,7 @@ function Dashboard({ user, allUsers, setView, settings }) {
         target={kpiConfig.targetScore || 85}
         openProblems={problems.filter(p => p.status !== 'resolved')}
         canHandle={user.role === 'owner' || user.role === 'manajer' || user.role === 'leader'}
-        showProblems={user.role !== 'operasional'}
+        showProblems={isPengelola(user)}
         onKpi={() => setView('kpi')} onProblems={() => setView('problems')} />
 
       {/* Evaluasi otomatis */}
@@ -3438,7 +3472,7 @@ function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTar
   }
 
   // 3) Akun affiliator di bawah target harian hari ini
-  if (isOwnerMgr || user.role === 'leader' || (user.division || '') === 'internal') {
+  if (isOwnerMgr || isPengawas(user) || (user.division || '') === 'internal') {
     const dim = daysInMonth(mk);
     const behind = [];
     affAccounts.filter(a => a.active !== false).forEach(a => {
@@ -3451,18 +3485,18 @@ function generateInsights({ user, tasks, attendance, reports, gmvEntries, gmvTar
     if (behind.length > 0) out.push({ level: 'warning', text: `${behind.length} akun affiliator di bawah target harian hari ini: ${behind.slice(0, 3).join(', ')}${behind.length > 3 ? ' dll' : ''}.`, action: { label: 'Cek Akun', view: 'affiliate-accounts' } });
   }
 
-  // 4) Akun tanpa target (untuk leader/owner) — breakdown belum lengkap
-  if (isOwnerMgr || user.role === 'leader') {
+  // 4) Akun tanpa target (untuk leader/co-leader/owner) — breakdown belum lengkap
+  if (isOwnerMgr || isPengawas(user)) {
     const noTarget = affAccounts.filter(a => a.active !== false && !(Number(a.targets?.[mk]) > 0));
     if (noTarget.length > 0) out.push({ level: 'info', text: `${noTarget.length} akun belum diset target bulan ini. Lengkapi breakdown 1 M.`, action: { label: 'Set Target', view: 'affiliate-accounts' } });
   }
 
   // 5) Belum lapor harian (untuk owner/manajer/leader: tim; lainnya: diri sendiri)
-  const scopeUsers = isOwnerMgr ? allUsers : (user.role === 'leader' ? allUsers.filter(u => u.leaderId === user.id || u.id === user.id) : [user]);
+  const scopeUsers = lingkupTim(user, allUsers);
   const mustReport = (u) => u.role !== 'operasional' || templates.some(t => t.assignedUserIds?.includes(u.id));
   const reportedToday = new Set(reports.filter(r => r.date === today).map(r => r.authorId));
   const notReported = scopeUsers.filter(u => mustReport(u) && !reportedToday.has(u.id));
-  if (isOwnerMgr || user.role === 'leader') {
+  if (isOwnerMgr || isPengawas(user)) {
     if (notReported.length > 0 && new Date().getHours() >= 12) out.push({ level: 'info', text: `${notReported.length} dari ${scopeUsers.length} anggota belum lapor harian.`, action: { label: 'Lihat', view: 'daily-reports' } });
   } else {
     if (mustReport(user) && !reportedToday.has(user.id) && new Date().getHours() >= 12) out.push({ level: 'warning', text: `Anda belum mengisi laporan harian hari ini.`, action: { label: 'Lapor', view: 'daily-reports' } });
@@ -5272,21 +5306,31 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
   const [editing, setEditing] = useState(null);
   const [resetting, setResetting] = useState(null);
 
-  if (user.role === 'operasional') return <NoAccess />;
+  if (!isPengelola(user)) return <NoAccess />;
 
-  // Visible: Manajer sees all; Leader sees self + operasional under them
-  let visible = [];
-  if ((user.role === 'manajer' || user.role === 'owner')) visible = allUsers;
-  else if (user.role === 'leader') visible = allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
+  // Cakupan: Owner/Manajer melihat semua; Leader & Co-Leader melihat dirinya +
+  // SELURUH bawahannya (Leader ikut melihat staf yang ada di bawah Co-Leader-nya).
+  const visible = lingkupTim(user, allUsers);
 
   const grouped = {
-    manajer: visible.filter(u => (u.role === 'manajer' || u.role === 'owner')),
+    manajer: visible.filter(u => isManajemen(u)),
     leader: visible.filter(u => u.role === 'leader'),
+    wakil: visible.filter(u => u.role === 'wakil'),
     operasional: visible.filter(u => u.role === 'operasional')
   };
 
+  // Anggota yang atasannya sudah TIDAK berperan mengawasi lagi (mis. Co-Leader-nya
+  // diturunkan jadi Karyawan, atau atasannya dihapus). Kalau dibiarkan, orang-orang ini
+  // "menggantung": tidak ada yang berhak menyetujui izin & melihat laporan mereka.
+  // Ditandai di sini supaya tidak lagi baru ketahuan berbulan-bulan kemudian.
+  const anggotaMenggantung = visible.filter(u => {
+    if (!butuhAtasan(u.role)) return false;
+    const atasan = u.leaderId ? allUsers.find(x => x.id === u.leaderId) : null;
+    return !atasan || (!isPengawas(atasan) && !isManajemen(atasan));
+  });
+
   // Anggota yang masih memakai key divisi lama yang sudah dihapus dari struktur (mis. 'media')
-  const staleDivMembers = (user.role === 'manajer' || user.role === 'owner')
+  const staleDivMembers = isManajemen(user)
     ? allUsers.filter(u => u.division && !DIVISIONS[u.division])
     : [];
 
@@ -5301,6 +5345,25 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
     u.role === 'operasional' && (u.jobTitle || '').trim() && !daftarJabatan.includes(u.jobTitle.trim()));
 
   const handleSave = async (data) => {
+    // ===== PENJAGAAN HAK AKSES SEBELUM MENULIS =====
+    // Menyembunyikan pilihan di form saja TIDAK cukup — aturan yang sama diperiksa
+    // ulang di sini, tepat sebelum data ditulis (pola yang sama dipakai modul Sampel).
+    // Ini gerbang produk terakhir di klien; gerbang sesungguhnya (RLS) ada di Backlog.
+    if (!peranBolehDibuat(user).includes(data.role)) {
+      return alert(`Anda tidak berhak memberikan peran ${ROLES[data.role]?.label || data.role}.`);
+    }
+    if (editing && !bisaKelolaUser(user, editing, allUsers)) {
+      return alert('Anda tidak berhak mengubah akun ini.');
+    }
+    const pesanAtasan = validasiAtasan(data.role, data.leaderId, editing?.id || null, allUsers);
+    if (pesanAtasan) return alert(pesanAtasan);
+    // Leader/Co-Leader hanya boleh menempatkan anggota di bawah dirinya atau bawahannya.
+    if (!isManajemen(user) && butuhAtasan(data.role)) {
+      const bolehJadiAtasan = lingkupTimIds(user, allUsers);
+      if (!bolehJadiAtasan.has(data.leaderId)) {
+        return alert('Anda hanya bisa menempatkan anggota di bawah diri sendiri atau bawahan Anda.');
+      }
+    }
     let list = await storage.getList('users:list');
     let subjek = null; // anggota yang baru dibuat/diubah → dipakai auto-enroll di bawah
     if (editing) {
@@ -5308,23 +5371,32 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
       // sehingga (a) field password & confirmPassword yang kosong ikut tertulis ke record
       // user setiap kali diedit, dan (b) leaderId TIDAK di-null-kan saat peran berubah
       // dari operasional ke leader/manajer — akibatnya orang itu masih ikut terhitung
-      // sebagai anggota tim leader lamanya oleh filter `u.leaderId === user.id`.
+      // sebagai anggota tim leader lamanya oleh saringan "bawahan saya".
+      // Sekarang penormalannya dipusatkan di normalisasiAtasanId() (src/peran/hierarki.js).
       const patch = {
         name: data.name, username: data.username.toLowerCase(),
-        role: data.role, leaderId: data.role === 'operasional' ? data.leaderId : null,
+        role: data.role, leaderId: normalisasiAtasanId(data.role, data.leaderId),
         jobTitle: data.jobTitle?.trim() || '',
         division: data.division || 'internal',
         phone: data.phone || '', gmail: data.gmail || '', isSecretariat: !!data.isSecretariat
       };
       list = list.map(u => u.id === editing.id ? { ...u, ...patch } : u);
       subjek = list.find(u => u.id === editing.id) || null;
-      await logActivity(`mengupdate data ${data.name}`, user.name);
+      // Perubahan peran/atasan dicatat EKSPLISIT — ini jejak audit promosi jabatan.
+      const jejak = [];
+      if (editing.role !== patch.role) jejak.push(`peran ${ROLES[editing.role]?.label || editing.role} → ${ROLES[patch.role]?.label || patch.role}`);
+      if ((editing.leaderId || null) !== (patch.leaderId || null)) {
+        const namaAtasan = (id) => id ? (list.find(u => u.id === id)?.name || id) : 'tanpa atasan';
+        jejak.push(`atasan ${namaAtasan(editing.leaderId)} → ${namaAtasan(patch.leaderId)}`);
+      }
+      if ((editing.division || '') !== (patch.division || '')) jejak.push(`divisi ${divLabel(editing.division || 'internal')} → ${divLabel(patch.division)}`);
+      await logActivity(jejak.length ? `mengubah ${data.name}: ${jejak.join(', ')}` : `mengupdate data ${data.name}`, user.name);
     } else {
       const salt = genSalt();
       const passwordHash = await hashPassword(data.password, salt);
       const newUser = {
         id: uid(), name: data.name, username: data.username.toLowerCase(),
-        role: data.role, leaderId: data.role === 'operasional' ? data.leaderId : null,
+        role: data.role, leaderId: normalisasiAtasanId(data.role, data.leaderId),
         jobTitle: data.jobTitle?.trim() || '',
         division: data.division || 'internal',
         phone: data.phone || '', gmail: data.gmail || '', isSecretariat: !!data.isSecretariat, salt, passwordHash,
@@ -5384,13 +5456,25 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
 
   return (
     <div className="max-w-6xl">
-      <PageHeader title="Anggota Tim" subtitle={(user.role === 'manajer' || user.role === 'owner') ? 'Kelola semua Manajer, Leader, dan Tim Operasional' : 'Kelola Tim Operasional di bawah Anda'}
+      <PageHeader title="Anggota Tim" subtitle={isManajemen(user) ? 'Kelola Manajer, Leader, Co-Leader, dan Karyawan' : 'Kelola anggota tim di bawah supervisi Anda'}
         action={
           <button onClick={() => { setEditing(null); setShowForm(true); }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
             <Plus className="w-4 h-4" /> Anggota Baru
           </button>
         } />
+
+      {anggotaMenggantung.length > 0 && (
+        <div className="bg-red-50 border border-red-200 text-red-800 text-sm rounded-xl px-4 py-2.5 mb-4 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            <b>{anggotaMenggantung.length} anggota</b> atasannya sudah tidak berperan mengawasi
+            ({anggotaMenggantung.map(u => u.name).join(', ')}).
+            Laporan & pengajuan izin mereka <b>tidak ada yang berwenang menangani</b> —
+            tetapkan Atasan Langsung yang baru lewat tombol Edit.
+          </span>
+        </div>
+      )}
 
       {staleDivMembers.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-2.5 mb-4 flex items-center gap-2">
@@ -5424,7 +5508,7 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
         </div>
       )}
 
-      {['manajer', 'leader', 'operasional'].map(role => {
+      {['manajer', 'leader', 'wakil', 'operasional'].map(role => {
         if (grouped[role].length === 0) return null;
         const RoleIcon = ROLES[role].icon;
         return (
@@ -5435,8 +5519,10 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {grouped[role].map(m => {
                 const leader = m.leaderId ? allUsers.find(u => u.id === m.leaderId) : null;
-                const operasionalCount = m.role === 'leader' ? allUsers.filter(u => u.leaderId === m.id).length : null;
-                const canEdit = (user.role === 'manajer' || user.role === 'owner') || (user.role === 'leader' && m.leaderId === user.id);
+                // Jumlah orang yang diawasi — dihitung TRANSITIF supaya Leader ikut
+                // menghitung staf yang berada di bawah Co-Leader-nya.
+                const jumlahBawahan = isPengawas(m) ? idBawahanTransitif(m.id, allUsers).size : null;
+                const canEdit = bisaKelolaUser(user, m, allUsers);
                 return (
                   <div key={m.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition">
                     <div className="flex items-start gap-3">
@@ -5445,8 +5531,9 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
                         <div className="font-semibold text-slate-900 truncate">{m.name}</div>
                         <div className="text-xs text-slate-500">@{m.username}</div>
                         {displayJobTitle(m) && <div className="text-[10px] mt-1 inline-block px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">{displayJobTitle(m)}</div>}
-                        {leader && <div className="text-[10px] text-slate-500 mt-1">Leader: {leader.name}</div>}
-                        {operasionalCount !== null && <div className="text-[10px] text-blue-600 mt-1">Memimpin {operasionalCount} operasional</div>}
+                        <div className="text-[10px] text-slate-500 mt-1">Divisi: {divLabel(m.division || 'internal')}</div>
+                        {leader && <div className="text-[10px] text-slate-500 mt-0.5">Atasan: {leader.name} <span className="text-slate-400">({ROLES[leader.role]?.label || leader.role})</span></div>}
+                        {jumlahBawahan !== null && <div className="text-[10px] text-blue-600 mt-0.5">Mengawasi {jumlahBawahan} anggota</div>}
                         {m.phone && <div className="text-[10px] text-slate-500 mt-0.5">📱 {m.phone}</div>}
                       </div>
                       {canEdit && (
@@ -5481,18 +5568,15 @@ function UsersView({ user, allUsers, settings, onRefresh }) {
 function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose }) {
   const isEdit = !!editing;
   // Allowed roles based on currentUser
-  const allowedRoles = useMemo(() => {
-    if (currentUser.role === 'owner') return ['owner', 'manajer', 'leader', 'operasional'];
-    if (currentUser.role === 'manajer') return ['manajer', 'leader', 'operasional'];
-    if (currentUser.role === 'leader') return ['operasional'];
-    return [];
-  }, [currentUser]);
+  // Peran yang boleh diberikan — SATU sumber aturan di src/peran/hierarki.js,
+  // sama persis dengan yang diperiksa ulang di handleSave sebelum menulis.
+  const allowedRoles = useMemo(() => peranBolehDibuat(currentUser), [currentUser]);
 
   const [form, setForm] = useState({
     name: editing?.name || '',
     username: editing?.username || '',
-    role: editing?.role || allowedRoles[0] || 'operasional',
-    leaderId: editing?.leaderId || (currentUser.role === 'leader' ? currentUser.id : ''),
+    role: editing?.role || allowedRoles[allowedRoles.length - 1] || 'operasional',
+    leaderId: editing?.leaderId || (isPengawas(currentUser) ? currentUser.id : ''),
     jobTitle: editing?.jobTitle || '',
     division: editing?.division || 'internal',
     phone: editing?.phone || '',
@@ -5502,8 +5586,26 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
   });
   const [error, setError] = useState('');
 
-  const leaders = allUsers.filter(u => u.role === 'leader');
+  // Calon atasan mengikuti peran yang sedang dipilih: pangkat atasan harus lebih tinggi,
+  // dan dirinya/bawahannya sendiri disaring supaya struktur tidak melingkar.
+  // Leader/Co-Leader hanya boleh menempatkan orang di bawah dirinya atau bawahannya.
+  const atasanOptions = useMemo(() => {
+    const semua = calonAtasan(form.role, allUsers, editing?.id || null);
+    if (isManajemen(currentUser)) return semua;
+    const boleh = lingkupTimIds(currentUser, allUsers);
+    return semua.filter(u => boleh.has(u.id));
+  }, [form.role, allUsers, editing, currentUser]);
   const jobTitleOptions = settings?.jobTitles || DEFAULT_JOB_TITLES;
+
+  // Kalau peran diganti ke peran yang tidak butuh atasan, pilihan atasan lama dibuang
+  // supaya tidak ikut tersimpan diam-diam (dan sebaliknya, pilihan yang jadi tidak sah direset).
+  useEffect(() => {
+    if (!butuhAtasan(form.role)) {
+      if (form.leaderId) setForm(f => ({ ...f, leaderId: '' }));
+    } else if (form.leaderId && !atasanOptions.some(u => u.id === form.leaderId)) {
+      setForm(f => ({ ...f, leaderId: '' }));
+    }
+  }, [form.role, atasanOptions]);
 
   const submit = async () => {
     setError('');
@@ -5518,10 +5620,12 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
         return setError('Username sudah dipakai.');
       }
     }
-    if (form.role === 'operasional' && !form.leaderId) return setError('Karyawan harus punya Leader.');
+    const pesanAtasan = validasiAtasan(form.role, form.leaderId, editing?.id || null, allUsers);
+    if (pesanAtasan) return setError(pesanAtasan);
     // Jabatan wajib untuk role 'operasional' saja. Owner/Manajer memang tidak memakai
     // jabatan (jabatannya = perannya), dan Leader jabatannya diturunkan dari divisi.
     if (form.role === 'operasional' && !form.jobTitle) return setError('Posisi / Jabatan wajib dipilih untuk karyawan.');
+    if (!allowedRoles.includes(form.role)) return setError('Anda tidak berhak memberikan peran itu.');
     onSave(form);
   };
 
@@ -5544,14 +5648,19 @@ function UserForm({ currentUser, editing, allUsers, settings, onSave, onClose })
             {allowedRoles.map(r => <option key={r} value={r}>{ROLES[r].label}</option>)}
           </select>
         </Field>
-        {form.role === 'operasional' && (
-          <Field label="Leader Pengawas *">
+        {butuhAtasan(form.role) && (
+          <Field label="Atasan Langsung *">
             <select value={form.leaderId} onChange={e => setForm({ ...form, leaderId: e.target.value })}
-              disabled={currentUser.role === 'leader'}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-100">
-              <option value="">- Pilih Leader -</option>
-              {leaders.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              <option value="">- Pilih Atasan -</option>
+              {atasanOptions.map(l => <option key={l.id} value={l.id}>{l.name} — {ROLES[l.role]?.label || l.role}</option>)}
             </select>
+            <div className="text-[11px] text-slate-500 mt-1">
+              💡 Inilah yang menentukan <b>siapa boleh melihat laporan, absensi, dan KPI orang ini</b>.
+              {form.role === 'wakil'
+                ? ' Co-Leader melihat data anggota yang atasannya adalah dia.'
+                : ' Karyawan bisa berada langsung di bawah Leader, atau di bawah Co-Leader.'}
+            </div>
           </Field>
         )}
         <Field label="Divisi / Tim *">
@@ -5663,11 +5772,11 @@ function ResetPasswordModal({ target, onSave, onClose }) {
 // keduanya tidak bisa berbeda diam-diam.
 function penerimaTiket(user, allUsers) {
   // Owner & Manajer: ke siapa saja.
-  if (user.role === 'manajer' || user.role === 'owner') return allUsers;
-  // Leader: HANYA ke bawahannya langsung (yang "Leader Pengawas"-nya dia) + dirinya.
-  // Dipakai relasi leaderId, bukan divisi — itu mekanisme yang dipakai seluruh app
-  // (absensi, KPI, laporan, cuti), dan leaderId tidak dijamin sedivisi dengan leader.
-  if (user.role === 'leader') return allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
+  if (isManajemen(user)) return allUsers;
+  // Leader & Co-Leader: HANYA ke bawahannya (sampai ke bawah) + dirinya.
+  // Dipakai relasi atasan langsung, bukan divisi — itu mekanisme yang dipakai seluruh
+  // app (absensi, KPI, laporan, cuti), dan atasan tidak dijamin sedivisi dengan bawahan.
+  if (isPengawas(user)) return lingkupTim(user, allUsers);
   // Karyawan: hanya untuk dirinya sendiri.
   return [user];
 }
@@ -6091,8 +6200,8 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
   const canComment =
     task.createdById === user.id ||
     task.assigneeId === user.id ||
-    (user.role === 'manajer' || user.role === 'owner') ||
-    (user.role === 'leader' && assigneeUser?.leaderId === user.id);
+    isManajemen(user) ||
+    (!!assigneeUser && isPengawas(user) && idBawahanTransitif(user.id, allUsers).has(assigneeUser.id));
 
   const canEdit = (user.role === 'manajer' || user.role === 'owner') || task.createdById === user.id;
   const canDelete = (user.role === 'manajer' || user.role === 'owner') || task.createdById === user.id;
@@ -6383,7 +6492,7 @@ function TaskForm({ task, prefill, user, assignableUsers, onSave, onClose }) {
 
 // ============ REPORTS ============
 function ReportsView({ user, allUsers }) {
-  if (user.role === 'operasional') return <NoAccess />;
+  if (!isPengelola(user)) return <NoAccess />;
   const [reports, setReports] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -6458,16 +6567,9 @@ function ReportsView({ user, allUsers }) {
     load();
   };
 
-  // Visibility: Manajer all, Leader = self + own operasional reports, Operasional = self
-  const visibleReports = reports.filter(r => {
-    if ((user.role === 'manajer' || user.role === 'owner')) return true;
-    if (r.authorId === user.id) return true;
-    if (user.role === 'leader') {
-      const author = allUsers.find(u => u.id === r.authorId);
-      return author && author.leaderId === user.id;
-    }
-    return false;
-  });
+  // Visibility: Manajer semua · Leader/Co-Leader = dirinya + seluruh bawahannya · Karyawan = dirinya
+  const idTerlihat = lingkupTimIds(user, allUsers);
+  const visibleReports = reports.filter(r => idTerlihat.has(r.authorId));
   const weeks = useMemo(() => [...new Set(visibleReports.map(r => r.weekStart))].sort().reverse(), [visibleReports]);
   const filtered = filterWeek === 'all' ? visibleReports : visibleReports.filter(r => r.weekStart === filterWeek);
 
@@ -7725,11 +7827,7 @@ function KpiView({ user, allUsers }) {
   const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
 
   // Siapa yang boleh dilihat
-  const visibleUsers = useMemo(() => {
-    if (isOwnerMgr) return allUsers;
-    if (user.role === 'leader') return allUsers.filter(u => u.leaderId === user.id || u.id === user.id);
-    return allUsers.filter(u => u.id === user.id);
-  }, [allUsers, user, isOwnerMgr]);
+  const visibleUsers = useMemo(() => lingkupTim(user, allUsers), [allUsers, user]);
 
   const kpiData = { tasks, attendance, reports, gmvEntries, gmvTargets, affAccounts, affEntries, allUsers, templates: kpiTemplates, leaves: kpiLeaves };
   const scored = useMemo(() => visibleUsers.map(u => ({
@@ -9067,12 +9165,9 @@ function AttendanceView({ user, allUsers }) {
   // ===== IZIN (pengajuan & persetujuan) =====
   const izinHmin = Number(config.izinHmin ?? 1);
   const canDecideLeave = (l) => {
-    if (user.role === 'owner' || user.role === 'manajer') return true;
-    if (user.role === 'leader') {
-      const target = allUsers.find(u => u.id === l.userId);
-      return target && target.leaderId === user.id;
-    }
-    return false;
+    if (isManajemen(user)) return true;
+    if (!isPengawas(user)) return false;
+    return idBawahanTransitif(user.id, allUsers).has(l.userId);
   };
   const submitIzin = async (data) => {
     const rec = {
@@ -9158,19 +9253,14 @@ function AttendanceView({ user, allUsers }) {
   // ===== PERMISSION & CAKUPAN DATA =====
   // Blok ini sengaja diletakkan SEBELUM semua useMemo rekap di bawahnya (aturan urutan
   // deklarasi const — salah urutan = TDZ = layar putih yang tidak ketangkap vite build).
-  const canSeeOthers = user.role === 'owner' || user.role === 'manajer' || user.role === 'leader';
-  const teamForFilter = useMemo(() => {
-    if (user.role === 'owner' || user.role === 'manajer') return allUsers;
-    if (user.role === 'leader') return allUsers.filter(u => u.leaderId === user.id || u.id === user.id);
-    return [user];
-  }, [allUsers, user]);
+  const canSeeOthers = isManajemen(user) || isPengawas(user);
+  const teamForFilter = useMemo(() => lingkupTim(user, allUsers), [allUsers, user]);
 
   // Record yang boleh dilihat berdasarkan ROLE saja (belum kena filter divisi/nama/tanggal).
   const roleRecords = useMemo(() => {
-    if (user.role === 'owner' || user.role === 'manajer') return records;
-    if (user.role === 'leader') {
-      const teamIds = new Set(allUsers.filter(u => u.leaderId === user.id).map(u => u.id));
-      teamIds.add(user.id);
+    if (isManajemen(user)) return records;
+    if (isPengawas(user)) {
+      const teamIds = lingkupTimIds(user, allUsers);
       return records.filter(r => teamIds.has(r.userId));
     }
     return records.filter(r => r.userId === user.id);
@@ -9631,7 +9721,7 @@ function AttendanceView({ user, allUsers }) {
           )}
         </div>
 
-        {(user.role === 'owner' || user.role === 'manajer' || user.role === 'leader') && (
+        {isPengelola(user) && (
           <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4 sm:p-5">
             <h3 className="font-display font-bold text-slate-900 mb-3">Persetujuan Izin {pendingForMe.length > 0 && <span className="text-xs font-bold text-white bg-amber-500 rounded-full px-2 py-0.5 ml-1">{pendingForMe.length}</span>}</h3>
             {pendingForMe.length === 0 ? (
@@ -11097,12 +11187,10 @@ function SettingsView({ user, settings, onSave }) {
     const cleaned = {
       ...form,
       logoImage: logoMode === 'image' ? form.logoImage : null,
-      customRoles: {
-        owner: form.customRoles.owner?.trim() || DEFAULT_ROLE_LABELS.owner,
-        manajer: form.customRoles.manajer?.trim() || DEFAULT_ROLE_LABELS.manajer,
-        leader: form.customRoles.leader?.trim() || DEFAULT_ROLE_LABELS.leader,
-        operasional: form.customRoles.operasional?.trim() || DEFAULT_ROLE_LABELS.operasional
-      },
+      // Ditulis dari ROLE_KEYS, bukan daftar manual — supaya peran baru tidak pernah
+      // lupa ikut tersimpan (dulu daftar ini hardcode 4 peran).
+      customRoles: Object.fromEntries(ROLE_KEYS.map(k =>
+        [k, form.customRoles?.[k]?.trim() || DEFAULT_ROLE_LABELS[k]])),
       // Filter empty strings dan deduplicate
       jobTitles: [...new Set(form.jobTitles.map(jt => jt.trim()).filter(Boolean))]
     };
@@ -11240,7 +11328,7 @@ function SettingsView({ user, settings, onSave }) {
           </button>
         </div>
         <div className="space-y-3">
-          {['owner', 'manajer', 'leader', 'operasional'].map(role => {
+          {ROLE_KEYS.map(role => {
             const Icon = ROLES[role].icon;
             return (
               <div key={role} className="flex items-center gap-3">
@@ -11249,7 +11337,7 @@ function SettingsView({ user, settings, onSave }) {
                 </div>
                 <div className="flex-1">
                   <div className="text-[10px] text-slate-500 uppercase">Default: {DEFAULT_ROLE_LABELS[role]}</div>
-                  <input type="text" value={form.customRoles[role]}
+                  <input type="text" value={form.customRoles[role] || ''}
                     placeholder={DEFAULT_ROLE_LABELS[role]}
                     onChange={e => setForm({ ...form, customRoles: { ...form.customRoles, [role]: e.target.value } })}
                     className="w-full px-3 py-2 mt-1 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
@@ -11456,6 +11544,7 @@ function SettingsView({ user, settings, onSave }) {
               <span className="text-[10px] px-2 py-0.5 rounded bg-violet-100 text-violet-800">{form.customRoles.owner || DEFAULT_ROLE_LABELS.owner}</span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800">{form.customRoles.manajer || DEFAULT_ROLE_LABELS.manajer}</span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-800">{form.customRoles.leader || DEFAULT_ROLE_LABELS.leader}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-sky-100 text-sky-800">{form.customRoles.wakil || DEFAULT_ROLE_LABELS.wakil}</span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-800">{form.customRoles.operasional || DEFAULT_ROLE_LABELS.operasional}</span>
             </div>
           </div>
@@ -12549,16 +12638,11 @@ function DailyReportsView({ user, allUsers }) {
     load();
   };
 
-  // Visibility: Manajer all, Leader self+team, Operasional self
-  const visibleReports = useMemo(() => reports.filter(r => {
-    if ((user.role === 'manajer' || user.role === 'owner')) return true;
-    if (r.authorId === user.id) return true;
-    if (user.role === 'leader') {
-      const author = allUsers.find(u => u.id === r.authorId);
-      return author && author.leaderId === user.id;
-    }
-    return false;
-  }), [reports, user, allUsers]);
+  // Visibility: Manajer semua · Leader/Co-Leader dirinya + seluruh bawahannya · Karyawan dirinya
+  const visibleReports = useMemo(() => {
+    const ids = lingkupTimIds(user, allUsers);
+    return reports.filter(r => ids.has(r.authorId));
+  }, [reports, user, allUsers]);
 
   // Identitas array dijaga stabil (useMemo) supaya mesin ringkasan tidak menghitung ulang tiap render.
   const filtered = useMemo(() => visibleReports.filter(r => {
@@ -12619,9 +12703,7 @@ function DailyReportsView({ user, allUsers }) {
     setShowDownloadModal(false);
   };
 
-  const filterableAuthors = user.role === 'operasional' ? [user] :
-    user.role === 'leader' ? allUsers.filter(u => u.id === user.id || u.leaderId === user.id) :
-    allUsers;
+  const filterableAuthors = lingkupTim(user, allUsers);
 
   // Susun laporan PER TEMPLATE/FORM jadi tabel (baris = laporan, kolom = pertanyaan form)
   const valStr = (v) => Array.isArray(v) ? v.join(', ') : (v ?? '');
@@ -13564,9 +13646,10 @@ function FieldBuilder({ field, idx, total, onChange, onRemove, onMoveUp, onMoveD
 
 // ============ TEAM CALENDAR ============
 // Siapa yang boleh menambah/atur agenda kalender:
-// Owner (CEO), Manajer, Leader (khusus timnya), & Sekretariat (seluruh tim). Lainnya hanya lihat.
+// Owner (CEO), Manajer, Leader & Co-Leader (khusus timnya), serta Sekretariat (seluruh tim).
+// Lainnya hanya lihat. Cakupan peserta yang bisa dipilih dibatasi di CalendarForm.
 function canManageCalendar(u) {
-  return u.role === 'owner' || u.role === 'manajer' || u.role === 'leader' || !!u.isSecretariat;
+  return isManajemen(u) || isPengawas(u) || !!u.isSecretariat;
 }
 
 // ====== INTEGRASI GOOGLE CALENDAR (OAuth, tanpa backend — pakai Google Identity Services) ======
@@ -13986,8 +14069,8 @@ function EventForm({ event, allUsers, user, onSave, onClose }) {
   });
 
   // Scope peserta: owner/manajer/sekretariat → semua tim; leader → hanya timnya + dirinya
-  const canAll = user.role === 'owner' || user.role === 'manajer' || !!user.isSecretariat;
-  const selectableUsers = canAll ? allUsers : allUsers.filter(u => u.id === user.id || u.leaderId === user.id);
+  const canAll = isManajemen(user) || !!user.isSecretariat;
+  const selectableUsers = canAll ? allUsers : lingkupTim(user, allUsers);
   const gcalReady = !!GCAL_ENDPOINT && !event?.id; // jembatan terpusat, hanya untuk agenda baru
   const [addGcal, setAddGcal] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -14520,7 +14603,7 @@ function DivisionReviewView({ user, allUsers, setView }) {
   if (loading) return <div className="text-slate-400 text-sm">Memuat...</div>;
 
   const inRange = (dk) => !!dk && dk >= period.start && dk <= period.end;
-  const divLeaders = members.filter(m => m.role === 'leader');
+  const divLeaders = members.filter(m => m.role === 'leader' || m.role === 'wakil');
 
   // Tiket — WAJIB lewat can.canSeeTask. Tanpa ini, halaman Divisi membocorkan judul
   // tiket seluruh anggota divisi kepada leader, padahal aturannya tiket hanya boleh
