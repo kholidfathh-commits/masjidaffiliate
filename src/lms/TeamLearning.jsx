@@ -277,7 +277,7 @@ function TeamLearningBody({ user, allUsers }) {
     if (!reviewing || reviewBusy) return;
     const learner = usersById.get(reviewing.userId);
     // Periksa ULANG wewenang: daftar di layar bisa basi setelah polling / ganti peran.
-    if (!learner || !canReviewLearner(user, learner)) {
+    if (!learner || !canReviewLearner(user, learner, allUsers || [])) {
       setReviewErr('Anda tidak berwenang mereview tugas peserta ini.');
       return;
     }
@@ -328,7 +328,7 @@ function TeamLearningBody({ user, allUsers }) {
 
   const doReset = async (row) => {
     if (!resetFor || resetBusy) return;
-    if (!canReviewLearner(user, resetFor)) {
+    if (!canReviewLearner(user, resetFor, allUsers || [])) {
       setResetErr('Anda tidak berwenang mengubah data peserta ini.');
       return;
     }
@@ -375,7 +375,7 @@ function TeamLearningBody({ user, allUsers }) {
   const doValidation = async () => {
     if (!valModal || valBusy) return;
     const { learner, path, status } = valModal;
-    if (!canReviewLearner(user, learner)) {
+    if (!canReviewLearner(user, learner, allUsers || [])) {
       setValErr('Anda tidak berwenang memvalidasi peserta ini.');
       return;
     }
