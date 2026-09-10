@@ -14,6 +14,8 @@
 // ============================================================================
 
 // ---------- Dependensi yang disuntikkan dari App.jsx ----------
+import { isManajemen, isPengawas, idBawahanTransitif } from '../peran/hierarki.js';
+
 const _dep = {
   storage: null,
   putImage: async (v) => v,
@@ -674,27 +676,35 @@ export async function syncEnrollmentStatus(enrollment, pathProgress) {
 // ============================================================================
 // HAK AKSES
 // ----------------------------------------------------------------------------
-// Mengikuti sistem role yang sudah ada (owner/manajer/leader/operasional) dan
-// relasi leaderId. TIDAK membuat sistem izin baru.
+// Mengikuti sistem role yang sudah ada (owner/manajer/leader/wakil/operasional) dan
+// relasi atasan langsung. TIDAK membuat sistem izin baru — aturan hierarkinya
+// diambil dari src/peran/hierarki.js supaya sama persis dengan seluruh app.
 // Catatan jujur: app ini menegakkan otorisasi di frontend (tidak ada backend dan
 // RLS-nya `using(true)`), jadi pengecekan ini adalah pagar produk, bukan pagar
 // keamanan kriptografis. Batasan ini berlaku untuk SELURUH app, bukan khusus LMS.
 // ============================================================================
-export const isLmsAdmin = (u) => !!u && (u.role === 'owner' || u.role === 'manajer');
-export const isLmsReviewer = (u) => !!u && (u.role === 'owner' || u.role === 'manajer' || u.role === 'leader');
+export const isLmsAdmin = (u) => isManajemen(u);
+// Reviewer = manajemen + siapa pun yang mengawasi orang lain (Leader & Co-Leader).
+export const isLmsReviewer = (u) => !!u && (isManajemen(u) || isPengawas(u));
 
-/** Peserta yang boleh dilihat/direview oleh `user`. */
+/** Peserta yang boleh dilihat/direview oleh `user` (bawahan sampai ke bawah). */
 export function learnersVisibleTo(user, allUsers) {
   if (!user) return [];
   if (isLmsAdmin(user)) return allUsers;
-  if (user.role === 'leader') return allUsers.filter(u => u.leaderId === user.id);
-  return allUsers.filter(u => u.id === user.id);
+  if (isPengawas(user)) {
+    const ids = idBawahanTransitif(user.id, allUsers);
+    return (allUsers || []).filter(u => ids.has(u.id));
+  }
+  return (allUsers || []).filter(u => u.id === user.id);
 }
 
-export function canReviewLearner(user, learner) {
+export function canReviewLearner(user, learner, allUsers = []) {
   if (!user || !learner) return false;
   if (isLmsAdmin(user)) return true;
-  return user.role === 'leader' && learner.leaderId === user.id;
+  if (!isPengawas(user)) return false;
+  // Cocokkan cepat untuk bawahan langsung; kalau tidak, telusuri rantai (Co-Leader).
+  if (learner.leaderId === user.id) return true;
+  return idBawahanTransitif(user.id, allUsers).has(learner.id);
 }
 
 // ============================================================================
