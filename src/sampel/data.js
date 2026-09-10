@@ -32,6 +32,7 @@
 // ============================================================================
 
 import { wibDayKey, geserHari } from '../absensi/logika.js';
+import { isManajemen, isPengawas } from '../peran/hierarki.js';
 
 export const SAMPEL_REC_PREFIX = 'sampel:rec:';
 export const SAMPEL_BACKUP_KEY = 'sampel:all';
@@ -722,8 +723,9 @@ export function riwayatSampel(logs = [], sampelId, batas = 200) {
 }
 
 // ====== HAK AKSES ======
-// Dipetakan ke role yang SUDAH ADA di app (owner/manajer/leader/operasional + flag
-// isSecretariat), persis pola canManageCalendar(). Tidak ada sistem role baru.
+// Dipetakan ke role yang SUDAH ADA di app (owner/manajer/leader/wakil/operasional +
+// flag isSecretariat), persis pola canManageCalendar(). Tidak ada sistem role baru —
+// daftar peran pengawas diambil dari src/peran/hierarki.js (satu sumber kebenaran).
 //
 //  · Semua user            : pindai QR, cari, lihat detail, tekan "Gunakan Sampel".
 //  · Leader / Sekretariat  : + tambah, edit, cetak label, halaman Aging & Dashboard.
@@ -732,12 +734,12 @@ export function riwayatSampel(logs = [], sampelId, batas = 200) {
 /** Boleh menambah/mengubah metadata sampel, cetak label, buka Dashboard & Aging. */
 export function bisaKelolaSampel(u) {
   if (!u) return false;
-  return u.role === 'owner' || u.role === 'manajer' || u.role === 'leader' || !!u.isSecretariat;
+  return isManajemen(u) || isPengawas(u) || !!u.isSecretariat;
 }
 /** Boleh mengubah lifecycle (KEEP/JUAL/BAGIKAN/BUANG) & menghapus sampel. */
 export function bisaUbahLifecycle(u) {
   if (!u) return false;
-  return u.role === 'owner' || u.role === 'manajer';
+  return isManajemen(u);
 }
 /** Boleh mencatat pemakaian: siapa pun yang login, selama sampelnya masih aktif. */
 export function bisaPakaiSampel(u, s) {
