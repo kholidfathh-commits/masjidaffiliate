@@ -553,6 +553,44 @@ async function loadTasks() {
   return recs;
 }
 
+// To-Do (todos:all) — per-record. Dulu SELURUH to-do semua orang ada di satu baris,
+// jadi dua penulis berdekatan saling menimpa diam-diam.
+//
+// SENGAJA BERBEDA dari loadTasks() dkk (keputusan Manager 11 Sep 2026). Pada pola lama,
+// `allMigrated` memakai `item.id == null` sebagai syarat LULUS, sehingga item TANPA id
+// dianggap "sudah beres": 'todos:all' tetap dihapus dan item itu lenyap dari aplikasi —
+// tersisa hanya di arsip yang tidak pernah dibaca siapa pun. Di sini migrasinya FAIL-SAFE:
+// apa pun yang belum benar-benar berpindah membuat 'todos:all' DIPERTAHANKAN, dan setiap
+// item lama tetap ikut ditampilkan supaya tidak ada yang hilang dari layar.
+const TODO_REC_PREFIX = 'todos:rec:';
+async function loadTodos() {
+  const recs = await storage.listByPrefix(TODO_REC_PREFIX);
+  let legacy = null;
+  try { legacy = await storage.get('todos:all'); } catch { legacy = null; }
+  if (Array.isArray(legacy) && legacy.length) {
+    const have = new Set(recs.map(r => r && r.id));
+    let semuaBeres = true; // satu saja belum berpindah → 'todos:all' WAJIB dipertahankan
+    for (const item of legacy) {
+      if (!item) continue;              // slot kosong: tidak ada data yang bisa hilang
+      if (item.id == null) {
+        // Tanpa id, baris 'todos:rec:<id>' mustahil dibuat. Datanya nyata, jadi tetap
+        // ditampilkan — dan migrasi TIDAK boleh dianggap selesai.
+        recs.push(item); semuaBeres = false; continue;
+      }
+      if (have.has(item.id)) continue;  // sudah berpindah pada pemuatan sebelumnya
+      const ok = await storage.set(TODO_REC_PREFIX + item.id, item);
+      if (ok) { recs.push(item); have.add(item.id); }
+      else { recs.push(item); semuaBeres = false; } // tulis gagal → tetap tampil, belum tuntas
+    }
+    // Arsip ditulis LEBIH DULU; 'todos:all' hanya dihapus kalau arsipnya benar-benar tersimpan.
+    if (semuaBeres) {
+      const arsipOk = await storage.set('todos:all:archived-v2', legacy);
+      if (arsipOk) await storage.delete('todos:all');
+    }
+  }
+  return recs;
+}
+
 // Izin (leave-requests:all) — per-record.
 const LEAVE_REC_PREFIX = 'leave-requests:rec:';
 async function loadLeaves() {
@@ -681,7 +719,7 @@ initLms({
 
 // Daftar modul per-record (key backup logis → loader & prefix baris). Tambah modul baru di sini.
 const PER_RECORD_LOADERS = {
-  'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar, 'division-plans:all': loadDivisionPlans, 'img:store': loadImageStore,
+  'attendance:all': loadAttendanceRecs, 'daily-reports:all': loadDailyReports, 'gmv:daily': loadGmvEntries, 'affiliate-gmv:daily': loadAffEntries, 'tasks:all': loadTasks, 'todos:all': loadTodos, 'leave-requests:all': loadLeaves, 'calendar:all': loadCalendar, 'division-plans:all': loadDivisionPlans, 'img:store': loadImageStore,
   [Aset.ASET_BACKUP_KEY]: loadAssets,
   // Catatan Kerja
   [Catatan.CATATAN_BACKUP_KEY]: loadNotes, [Catatan.FAVORIT_BACKUP_KEY]: loadNoteFavorites,
@@ -694,7 +732,7 @@ const PER_RECORD_LOADERS = {
   'lms:library:all': loadLmsLibrary, 'lms:library-bodies:all': loadLmsLibraryBodies,
 };
 const PER_RECORD_PREFIX = {
-  'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX, 'division-plans:all': DIVPLAN_REC_PREFIX, 'img:store': IMG_PREFIX,
+  'attendance:all': ATT_REC_PREFIX, 'daily-reports:all': RPT_REC_PREFIX, 'gmv:daily': GMV_REC_PREFIX, 'affiliate-gmv:daily': AFF_REC_PREFIX, 'tasks:all': TASK_REC_PREFIX, 'todos:all': TODO_REC_PREFIX, 'leave-requests:all': LEAVE_REC_PREFIX, 'calendar:all': CAL_REC_PREFIX, 'division-plans:all': DIVPLAN_REC_PREFIX, 'img:store': IMG_PREFIX,
   [Aset.ASET_BACKUP_KEY]: Aset.ASET_REC_PREFIX,
   // Catatan Kerja
   [Catatan.CATATAN_BACKUP_KEY]: Catatan.CATATAN_REC_PREFIX, [Catatan.FAVORIT_BACKUP_KEY]: Catatan.FAVORIT_REC_PREFIX,
@@ -2654,7 +2692,7 @@ function TopBar({ user, onToggleSidebar, sidebarOpen, onOpenMobileMenu, onOpenPr
       }
     };
     loadNotifs();
-    const iv = setInterval(pollWhenVisible(loadNotifs), 60000); // 60s + hanya saat tab dibuka — hemat egress (data ditarik ulang)
+    const iv = setInterval(pollWhenVisible(loadNotifs), 180000); // 180s + hanya saat tab dibuka — hemat egress (data ditarik ulang)
     return () => { stopped = true; clearInterval(iv); };
   }, [user.id]);
 
@@ -7808,6 +7846,7 @@ function KpiView({ user, allUsers }) {
   const [mKey, setMKey] = useState(monthKey());
   const [showConfig, setShowConfig] = useState(false);
   const [expanded, setExpanded] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = async () => {
     setTasks(await loadTasks());
@@ -7822,7 +7861,7 @@ function KpiView({ user, allUsers }) {
     setCfg(normalizeKpiConfig(await storage.get('kpi:config')));
     setLoading(false);
   };
-  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 300000); return () => clearInterval(iv); }, []);
 
   const isOwnerMgr = user.role === 'owner' || user.role === 'manajer';
 
@@ -7853,12 +7892,20 @@ function KpiView({ user, allUsers }) {
   return (
     <div className="max-w-5xl">
       <PageHeader title="KPI Tim" subtitle={`Poin kinerja bulanan · target ${target} = Mumtaz`}
-        action={isOwnerMgr ? (
-          <button onClick={() => setShowConfig(true)}
-            className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
-            <Settings className="w-4 h-4" /> Atur KPI
-          </button>
-        ) : null} />
+        action={(
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }} disabled={refreshing}
+              className="bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Segarkan
+            </button>
+            {isOwnerMgr && (
+              <button onClick={() => setShowConfig(true)}
+                className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+                <Settings className="w-4 h-4" /> Atur KPI
+              </button>
+            )}
+          </div>
+        )} />
 
       {/* Month nav + summary */}
       <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
@@ -11570,7 +11617,7 @@ function TodosView({ user, allUsers }) {
   const [filter, setFilter] = useState({ owner: user.id });
   const [dragOver, setDragOver] = useState(null);
 
-  const load = async () => setTodos(await storage.getList('todos:all'));
+  const load = async () => setTodos(await loadTodos());
   useEffect(() => { load(); }, []);
 
   // CAKUPAN To-Do (diperketat): To-Do itu catatan kerja pribadi, bukan papan terbuka.
@@ -11603,16 +11650,17 @@ function TodosView({ user, allUsers }) {
     // Pemilik to-do dipaksa berada dalam cakupan. Tanpa ini, seorang karyawan masih
     // bisa membuat to-do atas nama orang lain walaupun dropdown-nya sudah dipersempit.
     const ownerId = visibleOwnerIds.has(data.ownerId) ? data.ownerId : user.id;
-    let list = await storage.getList('todos:all');
+    let rec;
     if (editing) {
       if (!bolehUbah(editing)) { alert('Anda tidak berwenang mengubah to-do ini.'); return; }
       const owner = allUsers.find(u => u.id === ownerId);
-      list = list.map(t => t.id === editing.id
-        ? { ...t, ...data, ownerId, ownerName: owner?.name || t.ownerName, updatedAt: new Date().toISOString() }
-        : t);
+      // Baca ulang BARIS INI tepat sebelum menulis, lalu gabungkan. Yang ditulis cuma
+      // satu baris, jadi to-do orang lain tidak mungkin lagi ikut tertimpa.
+      const current = (await storage.get(TODO_REC_PREFIX + editing.id)) || editing;
+      rec = { ...current, ...data, ownerId, ownerName: owner?.name || current.ownerName, updatedAt: new Date().toISOString() };
     } else {
       const owner = allUsers.find(u => u.id === ownerId);
-      list.unshift({
+      rec = {
         id: uid(), ...data,
         ownerId,
         ownerName: owner?.name || user.name,
@@ -11620,17 +11668,18 @@ function TodosView({ user, allUsers }) {
         createdById: user.id,        // jejak pembuat (dulu tidak ada sama sekali)
         createdByName: user.name,
         createdAt: new Date().toISOString()
-      });
+      };
     }
-    await storage.set('todos:all', list);
+    const ok = await storage.set(TODO_REC_PREFIX + rec.id, rec);
+    if (!ok) { alert('⚠️ Gagal menyimpan to-do ke server. Coba lagi saat koneksi stabil.'); return; }
     setShowForm(false); setEditing(null); load();
   };
 
   const handleDelete = async (todo) => {
     if (!bolehUbah(todo)) { alert('Anda tidak berwenang menghapus to-do ini.'); return; }
     if (!confirm(`Hapus to-do "${todo.title}"?`)) return;
-    const list = (await storage.getList('todos:all')).filter(t => t.id !== todo.id);
-    await storage.set('todos:all', list);
+    const ok = await storage.delete(TODO_REC_PREFIX + todo.id);
+    if (!ok) { alert('⚠️ Gagal menghapus to-do di server. Coba lagi saat koneksi stabil.'); return; }
     load();
   };
 
@@ -11639,10 +11688,12 @@ function TodosView({ user, allUsers }) {
     // jadi izinnya HARUS diperiksa di sini, bukan cuma lewat atribut draggable.
     const target = todos.find(t => t.id === todoId);
     if (!bolehUbah(target)) return;
-    const list = (await storage.getList('todos:all')).map(t =>
-      t.id === todoId ? { ...t, status: newStatus, completedAt: newStatus === 'done' ? new Date().toISOString() : null } : t
-    );
-    await storage.set('todos:all', list);
+    // Baca ulang baris itu dulu supaya perubahan lain pada to-do yang sama (mis. judul
+    // yang baru diedit) tidak hilang hanya karena kartunya digeser.
+    const current = (await storage.get(TODO_REC_PREFIX + todoId)) || target;
+    const rec = { ...current, status: newStatus, completedAt: newStatus === 'done' ? new Date().toISOString() : null };
+    const ok = await storage.set(TODO_REC_PREFIX + todoId, rec);
+    if (!ok) { alert('⚠️ Gagal menyimpan perubahan status to-do (koneksi). Coba lagi.'); return; }
     load();
   };
 
@@ -14579,6 +14630,7 @@ function DivisionReviewView({ user, allUsers, setView }) {
   const [loading, setLoading] = useState(true);
   const [showPlanForm, setShowPlanForm] = useState(false);
   const [editingPlan, setEditingPlan] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = async () => {
     try {
@@ -14591,7 +14643,7 @@ function DivisionReviewView({ user, allUsers, setView }) {
       console.warn('Muat halaman Divisi gagal (dicoba lagi di poll berikutnya):', e?.message || e);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 30000); return () => clearInterval(iv); }, []);
+  useEffect(() => { load(); const iv = setInterval(pollWhenVisible(load), 300000); return () => clearInterval(iv); }, []);
 
   const members = useMemo(() => allUsers.filter(u => (u.division || 'internal') === div), [allUsers, div]);
   const memberIds = useMemo(() => new Set(members.map(m => m.id)), [members]);
@@ -14704,7 +14756,15 @@ function DivisionReviewView({ user, allUsers, setView }) {
   return (
     <div className="max-w-6xl">
       <PageHeader title="Divisi" subtitle="Ringkasan kondisi tiap divisi: anggota, pekerjaan, rencana, dan kendala"
-        action={<DateRangePopover value={period} onChange={setPeriod} tabs={['custom', 'day', 'week', 'month']} defaultTab="month" maxDate={null} showPresets />} />
+        action={(
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }} disabled={refreshing}
+              className="bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Segarkan
+            </button>
+            <DateRangePopover value={period} onChange={setPeriod} tabs={['custom', 'day', 'week', 'month']} defaultTab="month" maxDate={null} showPresets />
+          </div>
+        )} />
 
       {/* Switcher divisi — hanya owner/manajer; leader terkunci ke divisinya */}
       {isMgr && (
