@@ -4448,6 +4448,37 @@ cek('84m. leadId ikut tersimpan saat tiket BARU maupun DIEDIT (dua-duanya sebar 
   /rec = \{\s*\.\.\.editing, \.\.\.data,/.test(src) && /rec = \{\s*id: uid\(\), \.\.\.data,/.test(src));
 
 // ============================================================================
+judul('85. Tiket terkait pada detail goal (arah sebaliknya)');
+// ============================================================================
+const iTk = src.indexOf('function GrdTiketTerkaitGoal(');
+const jTk = src.indexOf('function GrdDetailGoal(');
+cek('85a. Bagian "Tiket Terkait" ada', iTk > 0 && jTk > iTk);
+const badanTk = src.slice(iTk, jTk);
+
+cek('85b. HAK LIHAT tiket tidak dilonggarkan — tetap lewat can.canSeeTask',
+  /can\.canSeeTask\(user, t\)/.test(badanTk));
+cek('85c. Tidak menulis ulang aturan siapa boleh lihat tiket',
+  !/assigneeId === user\.id/.test(badanTk) && !/createdById === user\.id/.test(badanTk));
+cek('85d. Hanya tiket yang PUNYA kaitan yang dihitung', /t\.leadId && idLead\.has\(t\.leadId\)/.test(badanTk));
+cek('85e. Kaitannya lewat lead measure milik goal ini', /l\.goalId === goalId/.test(badanTk));
+cek('85f. Dimuat SAAT DIMINTA, bukan saat detail goal dibuka (bacaan tiket paling besar)',
+  /const bukaDaftar = \(\) => \{ setBuka\(true\); if \(tiket === null\) muat\(\); \};/.test(badanTk));
+cek('85g. Goal tanpa lead measure tidak memuat apa pun', /if \(idLead\.size === 0\) return null;/.test(badanTk));
+cek('85h. Dikatakan bahwa daftarnya bisa kurang karena tiket memang tertutup',
+  /Tiket bersifat tertutup/.test(badanTk));
+cek('85i. Gagal muat tidak menggantung — jadi daftar kosong, bukan "memuat" selamanya',
+  /catch[\s\S]{0,160}setTiket\(\[\]\)/.test(badanTk));
+cek('85j. Komponen terpisah dari GrdDetailGoal — sebab detail goal punya early return & tak boleh punya hook',
+  /function GrdTiketTerkaitGoal\(/.test(src) && iTk < jTk
+  && /const \[buka, setBuka\] = useState\(false\)/.test(badanTk));
+cek('85k. Dipasang di detail goal', /<GrdTiketTerkaitGoal /.test(src));
+cek('85l. GrdDetailGoal tetap tanpa hook setelah early return', (() => {
+  const b = src.slice(jTk, src.indexOf('function GrdSimpul('));
+  const i = b.indexOf('if (!g) return null;');
+  return i > 0 && !/use(State|Effect|Memo|Callback|Ref)\s*\(/.test(b.slice(i));
+})());
+
+// ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
 // ada aturan yang terlanggar — bukan regexnya yang perlu dilonggarkan.

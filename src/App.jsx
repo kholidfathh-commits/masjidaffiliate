@@ -19098,6 +19098,95 @@ function GrdBaris({ label, children }) {
  * siapa, dan diturunkan lagi ke berapa goal) — itu yang membedakan panel ini
  * dari sekadar kartu, karena "roll down" baru terasa kalau rantainya kelihatan.
  */
+/**
+ * DAFTAR TIKET TERKAIT sebuah goal — arah sebaliknya dari kaitan di form tiket:
+ * "goal ini sebenarnya sedang dikerjakan lewat pekerjaan apa saja?".
+ *
+ * DIMUAT SAAT DIMINTA, bukan saat detail goal dibuka. Membaca seluruh tiket
+ * itu bacaan terbesar di app ini, sedangkan mayoritas orang membuka detail goal
+ * untuk melihat angkanya, bukan tiketnya. Egress project ini pernah over-kuota
+ * sampai layanannya dibatasi — jadi bacaan sebesar itu harus diminta, bukan
+ * terjadi sendiri.
+ *
+ * HAK LIHAT tiket TIDAK dilonggarkan di sini. Tiket bersifat tertutup
+ * (can.canSeeTask: hanya pemberi tugas, PIC, dan Owner/Manajer), dan aturan itu
+ * tetap berlaku walau goalnya boleh dilihat. Karena itu daftarnya bisa terlihat
+ * kurang bagi sebagian orang — dan itu DIKATAKAN, bukan dibiarkan terbaca
+ * sebagai "tidak ada tiket".
+ */
+function GrdTiketTerkaitGoal({ user, allUsers, goalId, leads = [] }) {
+  const [buka, setBuka] = useState(false);
+  const [tiket, setTiket] = useState(null);   // null = belum pernah dimuat
+  const [sibuk, setSibuk] = useState(false);
+
+  const idLead = useMemo(
+    () => new Set(leads.filter(l => l && l.goalId === goalId).map(l => l.id)),
+    [leads, goalId]);
+
+  const muat = async () => {
+    setSibuk(true);
+    try {
+      const semua = await loadTasks();
+      setTiket(semua.filter(t => t && t.leadId && idLead.has(t.leadId) && can.canSeeTask(user, t)));
+    } catch (e) {
+      console.warn('Muat tiket terkait gagal:', e?.message || e);
+      setTiket([]);
+    } finally { setSibuk(false); }
+  };
+
+  const bukaDaftar = () => { setBuka(true); if (tiket === null) muat(); };
+
+  if (idLead.size === 0) return null;   // goal tanpa lead measure tak mungkin punya tiket terkait
+
+  return (
+    <div className="mt-4 rounded-2xl border border-slate-200/70 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-bold text-slate-600 uppercase tracking-wide">Tiket Terkait</div>
+        {!buka && (
+          <button type="button" onClick={bukaDaftar}
+            className="text-xs font-semibold text-blue-700 hover:underline">
+            Lihat tiket terkait
+          </button>
+        )}
+      </div>
+
+      {!buka ? (
+        <div className="text-sm text-slate-500 mt-1.5">
+          Belum dimuat — daftar tiket adalah bacaan besar, jadi hanya diambil saat diminta.
+        </div>
+      ) : sibuk ? (
+        <div className="text-sm text-slate-400 mt-1.5">Memuat tiket…</div>
+      ) : (tiket || []).length === 0 ? (
+        <div className="text-sm text-slate-500 mt-1.5">
+          Tidak ada tiket terkait yang boleh Anda lihat. Tiket bersifat tertutup — hanya pemberi tugas,
+          PIC, dan Owner/Manajer yang bisa melihatnya, jadi bisa saja ada tiket yang tidak muncul di sini.
+        </div>
+      ) : (
+        <>
+          <div className="space-y-2 mt-2">
+            {tiket.map(t => (
+              <div key={t.id} className="flex items-start justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-800 break-words">{t.title}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    PIC: {t.assigneeName || '-'}{t.deadline ? ` · Deadline ${fmtDate(t.deadline)}` : ''}
+                  </div>
+                </div>
+                <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded font-semibold ${TASK_STATUS[t.status]?.color || ''}`}>
+                  {TASK_STATUS[t.status]?.label || t.status}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="text-xs text-slate-500 mt-2">
+            Hanya tiket yang boleh Anda lihat yang ditampilkan.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], leads = [], onClose, onUbah, onHapus, onTurunkan, onBukaLead }) {
   const g = Grd.normalisasiGoal(goal);
   if (!g) return null;
@@ -19240,6 +19329,8 @@ function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], leads = []
           </div>
         )}
       </div>
+
+      <GrdTiketTerkaitGoal user={user} allUsers={allUsers} goalId={g.id} leads={leads} />
 
       {/* Jejak perubahan angka: siapa, kapan, dari berapa ke berapa. */}
       <div className="mt-4 rounded-2xl border border-slate-200/70 p-4">
