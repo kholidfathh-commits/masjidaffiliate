@@ -4318,6 +4318,50 @@ cek('82x. Dan hasilnya memang sama untuk tanggal yang sama',
   SB.awalMinggu('2026-09-20') === Abs.awalMingguWib('2026-09-20'));
 
 // ============================================================================
+judul('83. Halaman ikut disinkronkan saat peran berubah');
+// ----------------------------------------------------------------------------
+// Sesi sudah mengikuti data (peran diubah admin → currentUser disegarkan), dan
+// menu ikut berubah. Yang dulu tertinggal: `view` yang SEDANG terbuka. Orangnya
+// tetap duduk di halaman yang bukan haknya sampai ia mengklik menu lain.
+// ============================================================================
+cek('83a. Daftar menu ada di level modul, bukan terkubur di dalam Sidebar',
+  /^function menuUntuk\(user\) \{/m.test(src));
+cek('83b. Sidebar memakai daftar itu, tidak menyalin daftarnya sendiri',
+  /const menuGroups = menuUntuk\(user\);/.test(src)
+  && src.split('const menuGroups = [').length === 1);
+cek('83c. Ada dua pembacaan: yang BOLEH dibuka dan yang DIKENAL menu',
+  /const idMenuBoleh = \(user\)/.test(src) && /const idMenuSemua = \(user\)/.test(src));
+
+const iEfek = src.indexOf('HALAMAN IKUT DIPERIKSA ULANG');
+cek('83d. App memeriksa ulang halaman yang sedang terbuka', iEfek > 0);
+const badanEfek = src.slice(iEfek, iEfek + 1400);
+cek('83e. Halaman yang tidak lagi boleh → dipulangkan ke dashboard',
+  /!idMenuBoleh\(currentUser\)\.has\(view\)[\s\S]{0,80}setView\('dashboard'\)/.test(badanEfek), badanEfek.slice(0, 900));
+cek('83f. HANYA halaman milik menu yang dipulangkan (deep link tidak diputus)',
+  /idMenuSemua\(currentUser\)\.has\(view\)/.test(badanEfek));
+cek('83g. Dashboard tidak pernah memulangkan dirinya sendiri (hindari putaran)',
+  /view === 'dashboard'\) return/.test(badanEfek));
+cek('83h. Diperiksa ulang tiap kali peran ATAU halaman berubah',
+  /\}, \[currentUser, view\]\);/.test(badanEfek));
+
+// Efek ini hanya berguna kalau sesinya memang ikut disegarkan — dijaga juga.
+cek('83i. Sesi mengikuti data: peran baru dipungut tanpa logout',
+  /fresh\.role !== currentUser\.role/.test(src));
+cek('83j. Atasan & divisi ikut dipungut (keduanya mengubah cakupan data)',
+  /fresh\.leaderId \|\| null\) !== \(currentUser\.leaderId \|\| null\)/.test(src)
+  && /fresh\.division \|\| ''\) !== \(currentUser\.division \|\| ''\)/.test(src));
+
+// Halaman GRD & Laporan Mingguan ikut terlindungi oleh mekanisme yang sama.
+const daftarMenu = src.slice(src.indexOf('function menuUntuk(user)'), src.indexOf('const idMenuBoleh'));
+cek('83k. Halaman GRD terdaftar di menu (jadi ikut diperiksa ulang)',
+  ['grd-tree', 'grd-kelola', 'grd-lead', 'grd-skor', 'grd-akses']
+    .every(id => daftarMenu.includes(`id: '${id}'`)));
+cek('83l. Kontrol Akses GRD hanya untuk pengelola',
+  /id: 'grd-akses'[^}]*show: isPengelola\(user\)/.test(daftarMenu));
+cek('83m. Laporan Mingguan ikut di daftar yang sama',
+  /id: 'reports'[^}]*show: isPengelola\(user\)/.test(daftarMenu));
+
+// ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
 // ada aturan yang terlanggar — bukan regexnya yang perlu dilonggarkan.

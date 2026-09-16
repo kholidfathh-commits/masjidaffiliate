@@ -1608,6 +1608,24 @@ export default function App() {
     if (berubah) setCurrentUser(fresh);
   }, [allUsers, currentUser?.id]);
 
+  // ===== HALAMAN IKUT DIPERIKSA ULANG, BUKAN CUMA MENUNYA =====
+  // Saat peran turun, item menunya memang langsung hilang — tapi `view` yang
+  // sedang terbuka tidak ikut diperiksa, jadi orangnya tetap duduk di halaman
+  // yang sudah bukan haknya sampai ia mengklik menu lain.
+  //
+  // Hanya halaman yang MEMANG milik menu yang dipulangkan. Halaman yang dicapai
+  // lewat deep link / rute khusus tidak diganggu — memulangkannya berarti
+  // memutus tautan yang sah.
+  //
+  // Ini pagar PRODUK, bukan pagar keamanan: pagar sebenarnya tetap pemeriksaan
+  // di dalam tiap halaman + (nanti) RLS. Lihat catatan di src/peran/hierarki.js.
+  useEffect(() => {
+    if (!currentUser || view === 'dashboard') return;
+    if (idMenuSemua(currentUser).has(view) && !idMenuBoleh(currentUser).has(view)) {
+      setView('dashboard');
+    }
+  }, [currentUser, view]);
+
   // Auto-backup harian: jalan 1x saat ada user login (dijaga agar maksimal 1x/hari)
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -2351,8 +2369,15 @@ function AuthShell({ settings, children }) {
 }
 
 // ============ SIDEBAR ============
-function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mobileOpen, onCloseMobile, onOpenProfile }) {
-  const menuGroups = [
+// ============ DAFTAR HALAMAN PER PERAN ============
+// SATU daftar yang menjawab "halaman apa saja yang boleh dibuka orang ini".
+// Sidebar memakainya untuk menggambar menu, dan App memakainya untuk
+// memulangkan orang dari halaman yang mendadak TIDAK lagi boleh ia buka —
+// mis. perannya diturunkan admin saat ia sedang login. Sebelum ini menunya
+// langsung hilang tapi halamannya tetap terbuka, karena `view` tidak ikut
+// diperiksa ulang.
+function menuUntuk(user) {
+  return [
     {
       label: 'Utama',
       items: [
@@ -2442,6 +2467,20 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       ]
     }
   ];
+}
+
+/** Id halaman yang menunya TAMPIL untuk orang ini. */
+const idMenuBoleh = (user) => new Set(
+  menuUntuk(user).flatMap(g => g.items).filter(i => i.show).map(i => i.id));
+
+/** Semua id halaman yang DIKENAL menu — dipakai untuk membedakan "tidak boleh"
+ *  dari "halaman yang tidak lewat menu" (mis. dibuka lewat deep link). */
+const idMenuSemua = (user) => new Set(
+  menuUntuk(user).flatMap(g => g.items).map(i => i.id));
+
+
+function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mobileOpen, onCloseMobile, onOpenProfile }) {
+  const menuGroups = menuUntuk(user);
   const RoleIcon = ROLES[user.role].icon;
   // Saat menu dipilih: pindah view + tutup drawer mobile
   const handleNav = (id) => { setView(id); if (onCloseMobile) onCloseMobile(); };
