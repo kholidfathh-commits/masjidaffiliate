@@ -20754,6 +20754,12 @@ function GrdLeadView({ user, allUsers }) {
 
   const perluSaya = useMemo(() => Lead.menungguPenilaianSaya(user, leads, allUsers),
     [user, leads, allUsers]);
+  // Sisi sebaliknya: usulan SAYA yang dikembalikan penilai.
+  const perluDiperbaiki = useMemo(() => Lead.perluSayaPerbaiki(user, leads), [user, leads]);
+  const komitmen = useMemo(
+    () => Lead.komitmenMingguan(user, leads, goalPeriode.map(g => g.id)),
+    [user, leads, goalPeriode]);
+  const beban = useMemo(() => Lead.bebanMingguan(komitmen), [komitmen]);
 
   const tampil = useMemo(() => {
     const kata = q.trim().toLowerCase();
@@ -20803,6 +20809,40 @@ function GrdLeadView({ user, allUsers }) {
         </div>
       )}
 
+      {/* Pemberitahuan untuk PENGUSUL: usulannya dikembalikan. Tanpa ini alurnya
+          timpang — penilai diberi tahu, pengusul tidak, dan usulan mengendap. */}
+      {perluDiperbaiki.length > 0 && (
+        <div className="mb-5 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <RefreshCw className="w-4 h-4 text-orange-600 flex-shrink-0 mt-0.5" />
+            <div className="text-[12px] text-orange-900 leading-relaxed flex-1">
+              <span className="font-bold">{perluDiperbaiki.length} usulan Anda</span> dikembalikan penilai.
+              Perbaiki lalu kirim ulang supaya bisa dinilai lagi.
+            </div>
+          </div>
+          <div className="mt-2.5 space-y-1.5">
+            {perluDiperbaiki.map(l => (
+              <div key={l.id} className="flex items-start justify-between gap-3 bg-white rounded-lg border border-orange-200 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold text-slate-800">{l.description}</div>
+                  {l.catatan && (
+                    <div className="text-[11px] text-slate-600 mt-0.5">
+                      {l.penilaiNama || 'Penilai'}: &ldquo;{l.catatan}&rdquo;
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => setFormLead({ goal: goalPeriode.find(g => g.id === l.goalId), lead: l })}
+                  disabled={!goalPeriode.some(g => g.id === l.goalId)}
+                  title={goalPeriode.some(g => g.id === l.goalId) ? undefined : 'Goalnya ada di periode lain'}
+                  className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white flex-shrink-0">
+                  Perbaiki
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <GrdPemilihPeriode jenis={jenis} periode={periode} onJenis={gantiJenis} onPeriode={setPeriode} />
         <div className="relative flex-1 min-w-[12rem]">
@@ -20812,6 +20852,43 @@ function GrdLeadView({ user, allUsers }) {
             className="w-full h-9 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400" />
         </div>
       </div>
+
+      {/* KOMITMEN MINGGUAN saya — daftar pendek yang dilihat tiap awal pekan,
+          tanpa perlu membuka goal satu per satu. */}
+      {komitmen.length > 0 && (
+        <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50/50 p-4">
+          <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
+            <div className="text-xs font-bold text-blue-900 uppercase tracking-wide">
+              Komitmen Mingguan Anda
+            </div>
+            <div className="text-[11px] text-blue-800">
+              {Object.entries(beban).map(([uom, n], i) => (
+                <span key={uom}>
+                  {i > 0 && <span className="text-blue-300 mx-1.5">·</span>}
+                  <span className="font-bold tabular-nums">{n}</span> {uom}
+                </span>
+              ))}
+              <span className="text-blue-400"> / minggu</span>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            {komitmen.map(l => {
+              const g = goalPeriode.find(x => x.id === l.goalId);
+              return (
+                <div key={l.id} className="flex items-start justify-between gap-3 bg-white rounded-lg border border-blue-200 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-semibold text-slate-800">{l.description}</div>
+                    {g && <div className="text-[11px] text-slate-400 mt-0.5">untuk: {g.description}</div>}
+                  </div>
+                  <span className="text-[11px] text-slate-600 tabular-nums flex-shrink-0">
+                    <span className="font-bold text-slate-800">{l.targetMingguan}</span> {l.uom}/mgg
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <MiniStat label="Aktif" value={ringkas.aktif} />

@@ -2414,6 +2414,15 @@ cek('46d. Ringkasan menghitung tiap status',
 cek('46e. Daftar kosong aman', L.ringkasLead([]).total === 0 && L.ringkasLead(null).total === 0);
 
 judul('47. Penjaga App.jsx — halaman Lead Measure');
+cek('47a-26. Halaman menampilkan Komitmen Mingguan pengguna',
+  /Lead\.komitmenMingguan\(user, leads/.test(src) && /Komitmen Mingguan Anda/.test(src));
+cek('47a-27. Beban mingguan diringkas per satuan',
+  /Lead\.bebanMingguan\(komitmen\)/.test(src));
+cek('47a-24. Pengusul diberi tahu usulannya dikembalikan',
+  /Lead\.perluSayaPerbaiki\(user, leads\)/.test(src)
+  && /usulan Anda<\/span> dikembalikan penilai/.test(src));
+cek('47a-25. Pemberitahuan memuat catatan penilai + tombol perbaiki langsung',
+  /\{l\.penilaiNama \|\| 'Penilai'\}/.test(src));
 cek('47a-19. Kotak masuk penilaian ada & dipakai halaman',
   /function GrdKotakMasukLead\(/.test(src) && /<GrdKotakMasukLead\b/.test(src));
 cek('47a-20. Setujui bisa satu klik dari kotak masuk',
@@ -2810,6 +2819,67 @@ cek('53j. Contoh kosong tidak error (ditolak validasi, bukan meledak)', (() => {
   return c !== null && L.validasiLead(c) !== '';
 })());
 cek('53k. Goal kosong tidak error', L.terapkanTemplateLead(L.TEMPLATE_LEAD.leader[0], null) !== null);
+
+judul('54. Pemberitahuan dua arah: penilai DAN pengusul');
+const daftarDua = [
+  lm({ id: 'p1', ownerId: 'u-staf1', status: 'perbaiki', catatan: 'Kurang tajam.' }),
+  lm({ id: 'p2', ownerId: 'u-staf1', status: 'ditolak', catatan: 'Sudah ada yang mirip.' }),
+  lm({ id: 'p3', ownerId: 'u-staf1', status: 'usul' }),
+  lm({ id: 'p4', ownerId: 'u-staf1', status: 'aktif' }),
+  lm({ id: 'p5', ownerId: 'u-staf2', status: 'perbaiki' }),
+];
+cek('54a. Pengusul diberi tahu yang DIKEMBALIKAN (perbaiki + ditolak)',
+  L.perluSayaPerbaiki(orang('u-staf1'), daftarDua).map(l => l.id).sort().join() === 'p1,p2',
+  L.perluSayaPerbaiki(orang('u-staf1'), daftarDua).map(l => l.id));
+cek('54b. Yang masih menunggu TIDAK masuk (bukan tugasnya sekarang)',
+  !L.perluSayaPerbaiki(orang('u-staf1'), daftarDua).some(l => l.id === 'p3'));
+cek('54c. Yang sudah aktif tidak masuk',
+  !L.perluSayaPerbaiki(orang('u-staf1'), daftarDua).some(l => l.id === 'p4'));
+cek('54d. Usulan orang lain tidak masuk',
+  !L.perluSayaPerbaiki(orang('u-staf1'), daftarDua).some(l => l.id === 'p5'));
+cek('54e. Orang lain melihat miliknya sendiri',
+  L.perluSayaPerbaiki(orang('u-staf2'), daftarDua).map(l => l.id).join() === 'p5');
+cek('54f. Tanpa pengguna → kosong', L.perluSayaPerbaiki(null, daftarDua).length === 0);
+cek('54g. Daftar kosong aman', L.perluSayaPerbaiki(orang('u-staf1'), null).length === 0);
+cek('54h. Dua sisi alur saling melengkapi, tidak tumpang tindih', (() => {
+  // Yang menunggu dinilai atasan TIDAK boleh muncul juga sebagai "perlu saya perbaiki".
+  const utkAtasan = L.menungguPenilaianSaya(orang('u-leader'), daftarDua, tim).map(l => l.id);
+  const utkPengusul = L.perluSayaPerbaiki(orang('u-staf1'), daftarDua).map(l => l.id);
+  return utkAtasan.every(id => !utkPengusul.includes(id));
+})());
+
+judul('55. Komitmen mingguan');
+const daftarKm = [
+  lm({ id: 'k1', ownerId: 'u-staf1', goalId: 'g1', status: 'aktif', description: 'B Konten', targetMingguan: 7, uom: 'Konten' }),
+  lm({ id: 'k2', ownerId: 'u-staf1', goalId: 'g2', status: 'aktif', description: 'A Live', targetMingguan: 3, uom: 'Sesi' }),
+  lm({ id: 'k3', ownerId: 'u-staf1', goalId: 'g1', status: 'aktif', description: 'C Riset', targetMingguan: 5, uom: 'Konten' }),
+  lm({ id: 'k4', ownerId: 'u-staf1', goalId: 'g1', status: 'usul', description: 'Belum aktif', targetMingguan: 9, uom: 'Konten' }),
+  lm({ id: 'k5', ownerId: 'u-staf2', goalId: 'g1', status: 'aktif', description: 'Punya orang lain', targetMingguan: 4, uom: 'Konten' }),
+];
+const km = L.komitmenMingguan(orang('u-staf1'), daftarKm);
+cek('55a. Hanya lead AKTIF milik sendiri', km.map(l => l.id).sort().join() === 'k1,k2,k3', km.map(l => l.id));
+cek('55b. Yang masih usul tidak ikut (belum jadi komitmen)', !km.some(l => l.id === 'k4'));
+cek('55c. Punya orang lain tidak ikut', !km.some(l => l.id === 'k5'));
+cek('55d. Lintas goal (bukan cuma satu goal)',
+  new Set(km.map(l => l.goalId)).size === 2);
+cek('55e. Urut abjad supaya stabil', km.map(l => l.description).join() === 'A Live,B Konten,C Riset');
+cek('55f. Bisa dibatasi ke goal tertentu saja',
+  L.komitmenMingguan(orang('u-staf1'), daftarKm, ['g2']).map(l => l.id).join() === 'k2');
+cek('55g. Batas goal kosong → tidak ada komitmen',
+  L.komitmenMingguan(orang('u-staf1'), daftarKm, []).length === 0);
+cek('55h. Tanpa pengguna → kosong', L.komitmenMingguan(null, daftarKm).length === 0);
+cek('55i. Daftar kosong aman', L.komitmenMingguan(orang('u-staf1'), null).length === 0);
+
+const bb = L.bebanMingguan(km);
+cek('55j. Beban dijumlah PER SATUAN', bb.Konten === 12 && bb.Sesi === 3, bb);
+cek('55k. Satuan yang sama digabung, bukan didaftar dua kali',
+  Object.keys(bb).length === 2);
+cek('55l. Beban dari daftar kosong = objek kosong',
+  Object.keys(L.bebanMingguan([])).length === 0 && Object.keys(L.bebanMingguan(null)).length === 0);
+cek('55m. Lead tanpa satuan tidak merusak hitungan',
+  Object.keys(L.bebanMingguan([{ id: 'x', goalId: 'g', ownerId: 'u', description: 'a', targetMingguan: 5, uom: '' }])).length === 0);
+cek('55n. Angkanya tidak pernah NaN',
+  Object.values(L.bebanMingguan(km)).every(Number.isFinite));
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

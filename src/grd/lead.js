@@ -298,6 +298,46 @@ export function menungguPenilaianSaya(user, daftar, allUsers) {
     .filter(l => l.status === 'usul' && bisaNilaiLead(user, l, allUsers));
 }
 
+/**
+ * Usulan MILIK SAYA yang perlu saya kerjakan: diminta perbaiki, atau ditolak.
+ *
+ * Pasangan dari `menungguPenilaianSaya`. Tanpa ini alurnya timpang — atasan
+ * diberi tahu ada yang menunggu dinilai, tapi pengusul tidak pernah diberi tahu
+ * usulannya dikembalikan, dan usulan itu mengendap tanpa ada yang tahu.
+ */
+export function perluSayaPerbaiki(user, daftar) {
+  if (!user) return [];
+  return (daftar || []).map(normalisasiLead).filter(Boolean)
+    .filter(l => l.ownerId === user.id && (l.status === 'perbaiki' || l.status === 'ditolak'));
+}
+
+/**
+ * KOMITMEN MINGGUAN seseorang: seluruh lead measure AKTIF miliknya, lintas goal.
+ *
+ * Istilah "Komitmen Mingguan" memang bagian dari kosakata GRD yang disepakati —
+ * inilah wujudnya: daftar pendek yang orang lihat tiap awal pekan untuk tahu
+ * apa yang harus ia kerjakan, tanpa perlu membuka goal satu per satu.
+ */
+export function komitmenMingguan(user, daftar, goalIds = null) {
+  if (!user) return [];
+  const boleh = goalIds ? new Set(goalIds) : null;
+  return (daftar || []).map(normalisasiLead).filter(Boolean)
+    .filter(l => l.ownerId === user.id && l.status === 'aktif')
+    .filter(l => !boleh || boleh.has(l.goalId))
+    .sort((a, b) => a.description.localeCompare(b.description));
+}
+
+/** Total beban mingguan per satuan — mis. { Konten: 12, Sesi: 3 }. */
+export function bebanMingguan(daftarKomitmen) {
+  const per = {};
+  for (const l of daftarKomitmen || []) {
+    const n = normalisasiLead(l);
+    if (!n || !n.uom) continue;
+    per[n.uom] = (per[n.uom] || 0) + n.targetMingguan;
+  }
+  return per;
+}
+
 /** Urutan tampil yang stabil: yang menunggu di atas, lalu aktif, lalu sisanya. */
 const BOBOT_STATUS = { usul: 0, perbaiki: 1, aktif: 2, ditolak: 3 };
 export function urutkanLead(daftar) {
