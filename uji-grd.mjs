@@ -3523,9 +3523,13 @@ function fungsiLayanan() {
 const semuaFungsi = fungsiLayanan();
 cek('68a. Fungsi layanan terbaca', semuaFungsi.length >= 20, semuaFungsi.length);
 
-// Fungsi TULIS = yang memanggil st().set / st().delete atau lewatRpc.
+// Fungsi TULIS = yang menulis ke storage, atau memanggil RPC yang MENULIS.
+// `lewatRpc` saja tidak cukup jadi penanda: ada juga RPC yang membaca
+// (grd_baca_goal), dan menganggapnya "tulis" membuat penjaga ini menuduh
+// fungsi baca lupa memeriksa wewenang — padahal membaca memang tidak menulis.
 const fungsiTulis = semuaFungsi.filter(f =>
-  /st\(\)\.(set|delete)\(/.test(f.badan) || /lewatRpc\(/.test(f.badan));
+  /st\(\)\.(set|delete)\(/.test(f.badan)
+  || /lewatRpc\(\s*['"`]grd_(simpan|hapus)_/.test(f.badan));
 cek('68b. Fungsi tulis terdeteksi', fungsiTulis.length >= 5, fungsiTulis.map(f => f.nama));
 
 // Tiap fungsi tulis WAJIB memanggil salah satu pemeriksa wewenang,
@@ -3617,6 +3621,141 @@ cek('69j. Argumen kosong → semua false, dengan alasan', (() => {
 cek('69k. Goal tanpa pemilik → semua false', (() => {
   const r = G.izinGoal(orang('u-owner'), goalDari(''), tim);
   return !r.lihat && !r.ubah && !r.turunkan;
+})());
+
+judul('70. Jalur RPC lengkap: goal, lead, skor');
+const rekamRpc = [];
+const spRp = storageMock();
+Svc.setJalurGrd('auto');
+Svc.initGrd({ storage: spRp, rpc: rpcMock({ rekam: rekamRpc }) });
+
+const gRp = { id: 'rp-goal', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(gRp, { user: STAF1, allUsers: tim });
+cek('70a. Goal lewat RPC', rekamRpc.some(r => r.nama === 'grd_simpan_goal'));
+
+// lead butuh baca goal-nya; storage tetap dipakai untuk BACA
+let lRp = await Svc.usulkanLead(
+  { goalId: 'rp-goal', ownerId: 'u-staf1', description: 'Konten tayang', targetMingguan: 5, uom: 'Konten' },
+  { user: STAF1, allUsers: tim, goal: gRp });
+cek('70b. Usul lead lewat RPC', rekamRpc.some(r => r.nama === 'grd_simpan_lead'));
+cek('70c. Lead TIDAK ditulis dua kali ke kv_store', spRp.jumlah('grdlead:rec:') === 0);
+
+lRp = await Svc.nilaiLead(lRp, 'aktif', { user: LEADER, allUsers: tim });
+cek('70d. Penilaian lead juga lewat RPC',
+  rekamRpc.filter(r => r.nama === 'grd_simpan_lead').length === 2);
+
+await Svc.simpanSkor({ lead: lRp, minggu: SB.mingguIni(), nilai: 6 }, { user: STAF1, allUsers: tim });
+cek('70e. Skor lewat RPC', rekamRpc.some(r => r.nama === 'grd_simpan_skor'));
+cek('70f. Skor TIDAK ditulis dua kali ke kv_store', spRp.jumlah('grdskor:rec:') === 0);
+
+// RPC belum dipasang → semuanya fallback, app tetap jalan
+const spFb = storageMock();
+Svc.setJalurGrd('auto');
+Svc.initGrd({ storage: spFb, rpc: rpcMock({ belumDipasang: true }) });
+const gFb = { id: 'fb-goal', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(gFb, { user: STAF1, allUsers: tim });
+let lFb = await Svc.usulkanLead(
+  { goalId: 'fb-goal', ownerId: 'u-staf1', description: 'x', targetMingguan: 2, uom: 'y' },
+  { user: STAF1, allUsers: tim, goal: gFb });
+lFb = await Svc.nilaiLead(lFb, 'aktif', { user: LEADER, allUsers: tim });
+await Svc.simpanSkor({ lead: lFb, minggu: SB.mingguIni(), nilai: 2 }, { user: STAF1, allUsers: tim });
+cek('70g. RPC belum dipasang → goal, lead, skor SEMUA tetap tersimpan',
+  spFb.jumlah('grdgoal:rec:') === 1 && spFb.jumlah('grdlead:rec:') === 1 && spFb.jumlah('grdskor:rec:') === 1);
+
+judul('71. Berkas SQL memuat ketiga jalur');
+const sqlPenuh = fs.readFileSync(ROOT + '/supabase-grd-rpc.sql', 'utf8');
+cek('71a. Fungsi lead & skor ada',
+  /create or replace function public\.grd_simpan_lead/.test(sqlPenuh)
+  && /create or replace function public\.grd_simpan_skor/.test(sqlPenuh));
+cek('71b. Nama fungsi cocok dengan yang dipanggil aplikasi', (() => {
+  const svc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+  return /grd_simpan_lead/.test(svc) && /grd_simpan_skor/.test(svc);
+})());
+cek('71c. Batas 3 lead aktif ditegakkan di server juga',
+  /sudah punya 3 lead measure aktif/.test(sqlPenuh));
+cek('71d. Kunci minggu wajib tanggal Senin diperiksa di server',
+  /isodow/.test(sqlPenuh) && /harus tanggal Senin/.test(sqlPenuh));
+// Angkanya sengaja TIDAK dipatok — menambah fungsi SQL baru tidak boleh
+// membuat uji ini jatuh; yang dijaga adalah SETIAP fungsi memenuhi syaratnya.
+const jumlahFungsiSql = (sqlPenuh.match(/create or replace function/g) || []).length;
+cek('71e. SETIAP fungsi security invoker (tidak menaikkan hak diam-diam)',
+  (sqlPenuh.match(/security invoker/g) || []).length === jumlahFungsiSql
+  && !/security definer/.test(sqlPenuh), jumlahFungsiSql);
+cek('71f. SETIAP fungsi diberi izin panggil',
+  (sqlPenuh.match(/grant execute on function/g) || []).length === jumlahFungsiSql);
+cek('71g. Tetap JUJUR menyatakan belum jadi pagar sebelum Auth',
+  /TIDAK menambah keamanan/.test(sqlPenuh)
+  // 4 blok di dalam fungsi + 1 sebutan di catatan kepala
+  && (sqlPenuh.match(/PAGAR SESUNGGUHNYA/g) || []).length >= 4);
+cek('71h. TIAP fungsi TULIS punya pemeriksaan wewenang (bukan lagi sekadar TODO)', (() => {
+  // Fungsi baca & helper memang tidak perlu — yang wajib adalah yang menulis.
+  const tulis = ['grd_simpan_goal', 'grd_hapus_goal', 'grd_simpan_lead', 'grd_simpan_skor'];
+  return tulis.every(n => {
+    const i = sqlPenuh.indexOf('function public.' + n);
+    const j = sqlPenuh.indexOf('$$;', i);
+    const blok = sqlPenuh.slice(i, j);
+    return /PAGAR SESUNGGUHNYA/.test(blok) && /grd_boleh_tulis/.test(blok);
+  });
+})());
+cek('71i. Fungsi BACA menyaring periode di server (menghemat data terkirim)',
+  /create or replace function public\.grd_baca_goal/.test(sqlPenuh)
+  && /value->>'periode' = p_periode/.test(sqlPenuh));
+cek('71j. Fungsi baca ditandai stable (tidak mengubah apa pun)',
+  /stable/.test(sqlPenuh.slice(sqlPenuh.indexOf('grd_baca_goal'))));
+cek('71k. JUJUR: penyaringan per peran BELUM dipasang & alasannya ditulis',
+  /Penyaringan PER PERAN sengaja BELUM dipasang/.test(sqlPenuh)
+  && /klien bisa mengirim id siapa/.test(sqlPenuh));
+lepasMockGrd();
+
+judul('72. Pagar wewenang di sisi server (SQL)');
+const sqlAkhir = fs.readFileSync(ROOT + '/supabase-grd-rpc.sql', 'utf8');
+cek('72a. Helper wewenang ada', /create or replace function public\.grd_boleh_tulis/.test(sqlAkhir));
+cek('72b. Aturannya sama: pemilik, Owner/Manajer, atau atasan BERJENJANG',
+  /with recursive/.test(sqlAkhir) && /'owner', 'manajer'/.test(sqlAkhir));
+cek('72c. Hierarki dibaca dari users:list yang sudah ada (bukan tabel baru)',
+  /key = 'users:list'/.test(sqlAkhir));
+cek('72d. Sebelum Auth aktif helper mengembalikan true (aplikasi yang menjaga)',
+  /if v_me is null then\s*\n\s*return true;/.test(sqlAkhir));
+cek('72e. Data rusak (owner kosong) ditolak semua orang',
+  /if p_owner_id is null or p_owner_id = '' then\s*\n\s*return false;/.test(sqlAkhir));
+
+cek('72f. SEMUA fungsi tulis memakai helper itu', (() => {
+  const tulis = ['grd_simpan_goal', 'grd_hapus_goal', 'grd_simpan_lead', 'grd_simpan_skor'];
+  return tulis.every(n => {
+    const i = sqlAkhir.indexOf('function public.' + n);
+    const j = sqlAkhir.indexOf('$$;', i);
+    return /grd_boleh_tulis/.test(sqlAkhir.slice(i, j));
+  });
+})());
+cek('72g. Tidak ada TODO pagar yang tertinggal', !/TODO\(setelah Auth\)/.test(sqlAkhir));
+cek('72h. HAPUS membaca pemilik dari BARISNYA, bukan dari argumen', (() => {
+  const i = sqlAkhir.indexOf('function public.grd_hapus_goal');
+  const j = sqlAkhir.indexOf('$$;', i);
+  const blok = sqlAkhir.slice(i, j);
+  return /select value->>'ownerId' from public\.kv_store/.test(blok);
+})());
+cek('72i. MENILAI lead dibedakan dari mengubah, juga di server', (() => {
+  const i = sqlAkhir.indexOf('function public.grd_simpan_lead');
+  const j = sqlAkhir.indexOf('$$;', i);
+  return /tidak bisa menilai usulan Anda sendiri/.test(sqlAkhir.slice(i, j));
+})());
+cek('72j. Helper ditandai stable & security invoker', (() => {
+  const i = sqlAkhir.indexOf('function public.grd_boleh_tulis');
+  const j = sqlAkhir.indexOf('$$', i);
+  const kepala = sqlAkhir.slice(i, j);
+  return /stable/.test(kepala) && /security invoker/.test(kepala);
+})());
+cek('72k. Peringatan menjaga sinkron dengan bolehTulisMilik ditulis',
+  /SINKRON dengan bolehTulisMilik/.test(sqlAkhir));
+cek('72l. Aturan server sepadan dengan aturan aplikasi (owner/manajer + berjenjang)', (() => {
+  // Bukan menjalankan SQL-nya — memastikan KEDUANYA menyebut unsur yang sama.
+  const js = fs.readFileSync(ROOT + '/src/grd/data.js', 'utf8');
+  const i = js.indexOf('export function bolehTulisMilik');
+  const blokJs = js.slice(i, js.indexOf('\n}', i));
+  return /isManajemen/.test(blokJs) && /idBawahanTransitif/.test(blokJs)
+    && /'owner', 'manajer'/.test(sqlAkhir) && /with recursive/.test(sqlAkhir);
 })());
 
 // ============================================================================

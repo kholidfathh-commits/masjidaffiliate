@@ -93,10 +93,22 @@ const catatAktivitas = (teks, namaUser) => {
  * Semua goal. Melempar saat koneksi gagal — pemanggil WAJIB menangkapnya dan
  * mempertahankan data lama di layar, jangan mengosongkan daftar (pola yang sama
  * dipakai loadAssets/loadNotes).
+ *
+ * `periode` opsional: bila diisi DAN fungsi `grd_baca_goal` sudah terpasang,
+ * penyaringannya dikerjakan di server sehingga yang terkirim hanya baris yang
+ * dipakai. Kalau belum terpasang, baca seperti biasa lalu saring di memori —
+ * hasilnya sama, hanya datanya lebih banyak lewat jaringan.
  */
-export async function ambilGoal() {
+export async function ambilGoal(periode = '') {
+  if (periode) {
+    const viaRpc = await lewatRpc('grd_baca_goal', { p_periode: periode });
+    if (viaRpc.pakai && Array.isArray(viaRpc.data)) {
+      return viaRpc.data.map(Grd.normalisasiGoal).filter(Boolean);
+    }
+  }
   const recs = await st().listByPrefix(Grd.GOAL_REC_PREFIX);
-  return recs.map(Grd.normalisasiGoal).filter(Boolean);
+  const semua = recs.map(Grd.normalisasiGoal).filter(Boolean);
+  return periode ? Grd.goalPeriode(semua, periode) : semua;
 }
 
 /** Goal satu periode saja (bulan ikut tertarik oleh kuartal yang memuatnya). */
@@ -383,8 +395,12 @@ export async function simpanSkor({ lead, minggu, nilai, catatan = '' }, { user, 
   const salah = Skor.validasiSkor(rec);
   if (salah) throw new GrdDitolak(salah);
 
-  const ok = await st().set(Skor.SKOR_REC_PREFIX + rec.id, Skor.normalisasiSkor(rec));
-  if (!ok) throw new GrdDitolak('Gagal menyimpan skor. Coba lagi.');
+  const bersih = Skor.normalisasiSkor(rec);
+  const viaRpc = await lewatRpc('grd_simpan_skor', { p_skor: bersih });
+  if (!viaRpc.pakai) {
+    const ok = await st().set(Skor.SKOR_REC_PREFIX + rec.id, bersih);
+    if (!ok) throw new GrdDitolak('Gagal menyimpan skor. Coba lagi.');
+  }
 
   const kata = Skor.menang(rec) ? 'MENANG' : 'kalah';
   catatAktivitas(`mengisi skor "${l.description}" minggu ${Skor.labelMinggu(mk)} — ${kata}`, user && user.name);
@@ -444,8 +460,11 @@ export async function usulkanLead(lead, { user, allUsers, goal, leadLama = null 
     diusulkanNama: (user && user.name) || '',
     diusulkanPada: new Date().toISOString(),
   };
-  const ok = await st().set(kunciLead(rec), rec);
-  if (!ok) throw new GrdDitolak('Gagal menyimpan lead measure. Coba lagi.');
+  const viaRpc = await lewatRpc('grd_simpan_lead', { p_lead: rec });
+  if (!viaRpc.pakai) {
+    const ok = await st().set(kunciLead(rec), rec);
+    if (!ok) throw new GrdDitolak('Gagal menyimpan lead measure. Coba lagi.');
+  }
 
   catatAktivitas(`${leadLama ? 'memperbaiki' : 'mengusulkan'} lead measure "${rec.description}"`, user && user.name);
   return rec;
@@ -503,8 +522,11 @@ export async function nilaiLead(lead, statusBaru, { user, allUsers, catatan = ''
     dinilaiPada: new Date().toISOString(),
     riwayat: Lead.tambahRiwayatLead(l, { aksi: statusBaru, oleh: user, catatan: alasan }),
   };
-  const ok = await st().set(kunciLead(rec), rec);
-  if (!ok) throw new GrdDitolak('Gagal menyimpan penilaian. Coba lagi.');
+  const viaRpc = await lewatRpc('grd_simpan_lead', { p_lead: rec });
+  if (!viaRpc.pakai) {
+    const ok = await st().set(kunciLead(rec), rec);
+    if (!ok) throw new GrdDitolak('Gagal menyimpan penilaian. Coba lagi.');
+  }
 
   const kata = statusBaru === 'aktif' ? 'menyetujui'
     : statusBaru === 'ditolak' ? 'menolak' : 'meminta perbaikan';
