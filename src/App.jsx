@@ -1544,6 +1544,13 @@ export default function App() {
   const [allUsers, setAllUsers] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [view, setView] = useState('dashboard');
+  // Goal yang ingin dilihat jejaknya saat halaman Jejak dibuka dari Detail Goal.
+  // SENGAJA prop biasa, bukan variabel modul yang dibaca-lalu-dikosongkan:
+  // React.StrictMode menjalankan initializer & effect DUA KALI saat development,
+  // jadi nilai yang "habis sekali baca" akan hilang di panggilan kedua — persis
+  // jebakan yang sudah ditulis di ATURAN WAJIB no. 8 (CLAUDE.md).
+  const [grdJejakGoal, setGrdJejakGoal] = useState(null);
+  const bukaJejakGoal = (goalId) => { setGrdJejakGoal(goalId || null); setView('grd-jejak'); };
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -1714,12 +1721,12 @@ export default function App() {
             {view === 'tap-commission' && <TapCommissionView user={currentUser} />}
             {view === 'partner-feedback' && <PartnerFeedbackView user={currentUser} />}
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
-            {view === 'grd-tree' && <GrdTreeView user={currentUser} allUsers={allUsers} setView={setView} />}
-            {view === 'grd-kelola' && <GrdKelolaView user={currentUser} allUsers={allUsers} setView={setView} />}
-            {view === 'grd-lead' && <GrdLeadView user={currentUser} allUsers={allUsers} />}
+            {view === 'grd-tree' && <GrdTreeView user={currentUser} allUsers={allUsers} setView={setView} bukaJejak={bukaJejakGoal} />}
+            {view === 'grd-kelola' && <GrdKelolaView user={currentUser} allUsers={allUsers} setView={setView} bukaJejak={bukaJejakGoal} />}
+            {view === 'grd-lead' && <GrdLeadView user={currentUser} allUsers={allUsers} bukaJejak={bukaJejakGoal} />}
             {view === 'grd-skor' && <GrdScoreboardView user={currentUser} allUsers={allUsers} />}
             {view === 'grd-akses' && <GrdAksesView user={currentUser} allUsers={allUsers} />}
-            {view === 'grd-jejak' && <GrdJejakView user={currentUser} allUsers={allUsers} />}
+            {view === 'grd-jejak' && <GrdJejakView user={currentUser} allUsers={allUsers} goalAwal={grdJejakGoal} />}
             {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'aset' && <AsetView user={currentUser} />}
             {view === 'sampel' && <SampelView user={currentUser} allUsers={allUsers}
@@ -19213,7 +19220,7 @@ function GrdTiketTerkaitGoal({ user, allUsers, goalId, leads = [] }) {
   );
 }
 
-function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], leads = [], onClose, onUbah, onHapus, onTurunkan, onBukaLead }) {
+function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], leads = [], onClose, onUbah, onHapus, onTurunkan, onBukaLead, onBukaJejak }) {
   const g = Grd.normalisasiGoal(goal);
   if (!g) return null;
   const pemilik = Grd.pemilikGoal(g, allUsers);
@@ -19360,7 +19367,18 @@ function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], leads = []
 
       {/* Jejak perubahan angka: siapa, kapan, dari berapa ke berapa. */}
       <div className="mt-4 rounded-2xl border border-slate-200/70 p-4">
-        <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2.5">Riwayat Perubahan</div>
+        <div className="flex items-center justify-between gap-2 mb-2.5">
+          <div className="text-xs font-bold text-slate-600 uppercase tracking-wide">Riwayat Perubahan</div>
+          {/* Panel ini cuma memuat jejak goal INI. Kalau orang sudah sampai ke sini,
+              pertanyaan berikutnya hampir selalu "goal lain bagaimana?" — jadi
+              jalannya disediakan, bukan dibiarkan dicari sendiri lewat menu. */}
+          {onBukaJejak && (
+            <button type="button" onClick={() => onBukaJejak(g)}
+              className="text-xs font-semibold text-blue-700 hover:underline flex-shrink-0">
+              Lihat di Jejak Perubahan
+            </button>
+          )}
+        </div>
         {riwayat.length === 0 ? (
           <div className="text-sm text-slate-500">Belum ada perubahan tercatat pada goal ini.</div>
         ) : (
@@ -19556,7 +19574,7 @@ function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal, onU
   );
 }
 
-function GrdTreeView({ user, allUsers, setView }) {
+function GrdTreeView({ user, allUsers, setView, bukaJejak }) {
   const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
 
   // Data SUNGGUHAN dari kv_store lewat src/grd/layanan.js. Kegagalan koneksi
@@ -19708,6 +19726,7 @@ function GrdTreeView({ user, allUsers, setView }) {
         <GrdDetailGoal goal={detail} user={user} allUsers={allUsers}
           semuaGoal={goals} leads={leads} onClose={() => setDetail(null)}
           onBukaLead={() => { setDetail(null); setView('grd-lead'); }}
+          onBukaJejak={bukaJejak ? (g) => { setDetail(null); bukaJejak(g.id); } : null}
           onUbah={(g) => { setDetail(null); tulis.bukaUbah(g); }}
           onHapus={(g) => { setDetail(null); tulis.setHapus(g); }}
           onTurunkan={(g) => { setDetail(null); tulis.setTurunkan(g); }} />
@@ -20228,7 +20247,7 @@ function GrdSimpulRantai({ simpul, user, allUsers, leads, onBuka, onUbah, onTuru
  * Gerbangnya sama dengan halaman GRD lain: muatKonteksGrd menyaring jejak
  * mengikuti goal yang boleh dilihat, jadi cabang lain tidak bocor lewat sini.
  */
-function GrdJejakView({ user, allUsers }) {
+function GrdJejakView({ user, allUsers, goalAwal = null }) {
   const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
   const [goals, setGoals] = useState([]);
   const [jejak, setJejak] = useState([]);
@@ -20236,7 +20255,11 @@ function GrdJejakView({ user, allUsers }) {
   const [oleh, setOleh] = useState('');
   const [q, setQ] = useState('');
   const [hanyaAngka, setHanyaAngka] = useState(true);
-  const [semuaPeriode, setSemuaPeriode] = useState(false);
+  // Dibuka dari Detail Goal → langsung tersaring ke goal itu. Kalau datang
+  // begitu, periode ikut dilepas: goalnya bisa saja dari periode lain, dan
+  // "sudah disaring tapi kosong" adalah layar yang paling membingungkan.
+  const [goalFokus, setGoalFokus] = useState(goalAwal || '');
+  const [semuaPeriode, setSemuaPeriode] = useState(!!goalAwal);
 
   const muat = async () => {
     try {
@@ -20249,8 +20272,8 @@ function GrdJejakView({ user, allUsers }) {
   useEffect(() => { muat(); const iv = setInterval(pollWhenVisible(muat), 60000); return () => clearInterval(iv); }, []);
 
   const hasil = useMemo(() => Grd.jejakLintasGoal(jejak, goals, allUsers, {
-    periode: semuaPeriode ? '' : periode, olehId: oleh, hanyaAngka, kata: q,
-  }), [jejak, goals, allUsers, periode, semuaPeriode, oleh, hanyaAngka, q]);
+    periode: semuaPeriode ? '' : periode, olehId: oleh, goalId: goalFokus, hanyaAngka, kata: q,
+  }), [jejak, goals, allUsers, periode, semuaPeriode, oleh, goalFokus, hanyaAngka, q]);
 
   const ringkas = useMemo(() => Grd.ringkasJejakAngka(hasil.hasil), [hasil]);
   const judulGoal = useMemo(() => new Map(goals.map(g => [g.id, g])), [goals]);
@@ -20295,6 +20318,17 @@ function GrdJejakView({ user, allUsers }) {
         </button>
       </div>
 
+      {goalFokus && (
+        <div className="mb-4 flex items-center gap-2 flex-wrap text-sm">
+          <span className="text-slate-500">Disaring ke satu goal:</span>
+          <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 border border-blue-200 px-3 py-1 font-semibold text-blue-800">
+            {judulGoal.get(goalFokus)?.description || 'Goal tidak ditemukan / di luar hak lihat Anda'}
+            <button type="button" onClick={() => setGoalFokus('')} aria-label="Lepas saringan goal"
+              className="text-blue-600 hover:text-blue-900 font-bold">✕</button>
+          </span>
+        </div>
+      )}
+
       {/* Naik/turun dipisah: target yang DITURUNKAN diam-diam itu justru yang
           paling sering dicari orang saat membuka jejak audit. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -20316,7 +20350,9 @@ function GrdJejakView({ user, allUsers }) {
         <EmptyState icon={History} text={
           jejak.length === 0
             ? 'Belum ada perubahan angka yang tercatat.'
-            : 'Tidak ada perubahan yang cocok dengan saringan ini. Coba "Semua periode" atau kosongkan pencarian.'
+            : goalFokus
+              ? 'Goal ini belum punya perubahan yang tercatat. Lepas saringan goal untuk melihat yang lain.'
+              : 'Tidak ada perubahan yang cocok dengan saringan ini. Coba "Semua periode" atau kosongkan pencarian.'
         } />
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
@@ -20360,7 +20396,7 @@ function GrdJejakView({ user, allUsers }) {
   );
 }
 
-function GrdKelolaView({ user, allUsers, setView }) {
+function GrdKelolaView({ user, allUsers, setView, bukaJejak }) {
   const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
   const [q, setQ] = useState('');
   const [lingkup, setLingkup] = useState('semua'); // semua | saya | tim
@@ -20531,6 +20567,7 @@ function GrdKelolaView({ user, allUsers, setView }) {
         <GrdDetailGoal goal={detail} user={user} allUsers={allUsers}
           semuaGoal={goals} jejak={jejak} leads={leads} onClose={() => setDetail(null)}
           onBukaLead={() => { setDetail(null); setView('grd-lead'); }}
+          onBukaJejak={bukaJejak ? (g) => { setDetail(null); bukaJejak(g.id); } : null}
           onUbah={(g) => { setDetail(null); tulis.bukaUbah(g); }}
           onHapus={(g) => { setDetail(null); tulis.setHapus(g); }}
           onTurunkan={(g) => { setDetail(null); tulis.setTurunkan(g); }} />
@@ -21149,7 +21186,7 @@ function GrdKartuLead({ l, user, allUsers, onNilai, onUbah }) {
 }
 
 /** Satu goal beserta lead measure-nya. */
-function GrdBlokLeadGoal({ goal, leads, user, allUsers, onUsul, onNilai, onUbah }) {
+function GrdBlokLeadGoal({ goal, leads, user, allUsers, onUsul, onNilai, onUbah, onBukaJejak }) {
   const pemilik = Grd.pemilikGoal(goal, allUsers);
   const st = Lead.statusLeadGoal(leads, goal.id);
   const daftar = Lead.urutkanLead(Lead.leadPerGoal(leads, goal.id));
@@ -21178,6 +21215,15 @@ function GrdBlokLeadGoal({ goal, leads, user, allUsers, onUsul, onNilai, onUbah 
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
               {st.menunggu} menunggu
             </span>
+          )}
+          {/* Sebelum menyetujui komitmen mingguan, yang perlu diketahui penilai
+              adalah apakah TARGET GOAL-nya baru saja digeser. Jalannya disediakan
+              di sini, bukan dibiarkan dicari sendiri lewat menu. */}
+          {onBukaJejak && (
+            <button onClick={onBukaJejak} title="Lihat perubahan angka pada goal ini"
+              className="text-[11px] font-semibold text-slate-500 hover:text-blue-700 hover:underline">
+              Jejak angka
+            </button>
           )}
           {bisaUsul && onUsul && st.sisa > 0 && (
             <button onClick={() => onUsul(goal)}
@@ -21286,7 +21332,7 @@ function GrdKotakMasukLead({ daftar, goals, user, allUsers, leads, onSetujui, on
  * arti lepas dari goal yang didorongnya, dan batas 1–3 itu berlaku per goal —
  * keduanya cuma terbaca kalau ditampilkan berkelompok.
  */
-function GrdLeadView({ user, allUsers }) {
+function GrdLeadView({ user, allUsers, bukaJejak }) {
   const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
   const [goals, setGoals] = useState([]);
   const [leads, setLeads] = useState([]);
@@ -21509,7 +21555,8 @@ function GrdLeadView({ user, allUsers }) {
             <GrdBlokLeadGoal key={g.id} goal={g} leads={leads} user={user} allUsers={allUsers}
               onUsul={(goal) => setFormLead({ goal })}
               onUbah={(lead) => setFormLead({ goal: g, lead })}
-              onNilai={(lead) => setNilaiLead({ goal: g, lead })} />
+              onNilai={(lead) => setNilaiLead({ goal: g, lead })}
+              onBukaJejak={bukaJejak ? () => bukaJejak(g.id) : null} />
           ))}
         </div>
       )}

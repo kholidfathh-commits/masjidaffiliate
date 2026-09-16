@@ -4668,6 +4668,34 @@ cek('87af. Waktu tak terbaca → kosong, bukan "Invalid Date"',
 cek('87ag. Nama pengubah dipakai dari yang TERSIMPAN di jejak (nama saat itu), bukan dicari ulang',
   /oleh \{j\.olehNama \|\| 'Tidak diketahui'\}/.test(badanJv));
 // --- nilai lama & baru berdampingan, dengan satuan ---
+// --- jalan masuk ke halaman Jejak dari Detail Goal & Lead Measure ---
+cek('87an. Detail Goal punya tombol ke halaman Jejak', (() => {
+  const b = src.slice(src.indexOf('function GrdDetailGoal('), src.indexOf('function GrdSimpul('));
+  return /onBukaJejak && \(/.test(b) && /Lihat di Jejak Perubahan/.test(b);
+})());
+cek('87ao. Halaman Lead Measure juga punya jalannya (penilai perlu tahu targetnya baru digeser)', (() => {
+  const i = src.indexOf('function GrdBlokLeadGoal(');
+  const b = src.slice(i, src.indexOf('\nfunction ', i + 10));
+  return /onBukaJejak && \(/.test(b) && /Jejak angka/.test(b);
+})());
+cek('87ao1. Blok goal di halaman Lead Measure benar-benar dioper pembukanya',
+  /onBukaJejak=\{bukaJejak \? \(\) => bukaJejak\(g\.id\) : null\}/.test(src));
+cek('87ap. Goal fokus dioper lewat PROP, bukan variabel modul yang habis sekali baca',
+  /const \[grdJejakGoal, setGrdJejakGoal\] = useState\(null\)/.test(src)
+  && /goalAwal=\{grdJejakGoal\}/.test(src));
+cek('87aq. Alasannya ditulis: StrictMode menjalankan initializer/effect dua kali (ATURAN WAJIB no. 8)',
+  /StrictMode menjalankan initializer & effect DUA KALI/.test(src));
+cek('87ar. Halaman menerima goalAwal dan memakainya sebagai saringan',
+  /function GrdJejakView\(\{ user, allUsers, goalAwal = null \}\)/.test(src)
+  && /useState\(goalAwal \|\| ''\)/.test(badanJv)
+  && /goalId: goalFokus/.test(badanJv));
+cek('87as. Datang dari Detail Goal → periode ikut dilepas (goalnya bisa dari periode lain)',
+  /useState\(!!goalAwal\)/.test(badanJv));
+cek('87at. Saringan goalnya kelihatan dan BISA DILEPAS, bukan jebakan',
+  /Disaring ke satu goal:/.test(badanJv) && /setGoalFokus\(''\)/.test(badanJv));
+cek('87au. Kosong karena saringan goal dibedakan dari kosong beneran',
+  /Goal ini belum punya perubahan yang tercatat/.test(badanJv));
+
 cek('87ai. Nilai lama dicoret dan nilai baru ditebalkan, berdampingan',
   /line-through text-slate-400">\{grdNilaiJejak\(j\.dari/.test(badanJv)
   && /font-semibold text-slate-800">\{grdNilaiJejak\(j\.ke/.test(badanJv));
