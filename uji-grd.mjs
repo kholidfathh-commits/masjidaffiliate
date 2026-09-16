@@ -20,6 +20,7 @@ import * as L from './src/grd/lead.js';
 import * as SB from './src/grd/scoreboard.js';
 import { goalContoh } from './src/grd/contoh.js';
 import * as Svc from './src/grd/layanan.js';
+import * as H from './src/peran/hierarki.js';
 import { storageMock, rpcMock, lepasMockGrd } from './src/grd/mock.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -4223,6 +4224,54 @@ cek('81aa. Halaman Scoreboard MEMBERI TAHU kalau ada baris yang tak bisa dinilai
   /rekap\.rusak\s*>\s*0/.test(src) && /tidak bisa dinilai/.test(src));
 cek('81ab. Halaman Scoreboard juga melaporkan skor yang lead measure-nya hilang',
   /Skor\.skorYatim\(/.test(src) && /skorHilang\.length\s*>\s*0/.test(src));
+
+// ============================================================================
+judul('82. Hak akses halaman Laporan Mingguan (PRD butir e)');
+// ----------------------------------------------------------------------------
+// Halamannya SUDAH ADA sejak sebelum modul GRD. Yang dikunci di sini adalah
+// KEPUTUSANNYA: Leader & Co-Leader boleh membukanya, dan yang mereka lihat
+// dibatasi lingkup timnya. Tanpa penjaga ini, satu suntingan kecil bisa
+// menutup aksesnya lagi diam-diam dan tidak ada yang tahu sampai ada yang
+// mengeluh.
+// ============================================================================
+const iLap = src.indexOf('function ReportsView(');
+const jLap = src.indexOf('function ReportBlock(');
+cek('82a. Halaman ReportsView ada di App.jsx', iLap > 0 && jLap > iLap);
+const badanLap = src.slice(iLap, jLap);
+
+const menuLap = src.split('\n').find(b => /id: 'reports'/.test(b) && /Laporan Mingguan/.test(b)) || '';
+cek('82b. Menu Laporan Mingguan ada di sidebar', !!menuLap, menuLap);
+cek('82c. Menu dibuka dengan isPengelola → Leader & Co-Leader ikut, bukan cuma manajemen',
+  /show:\s*isPengelola\(user\)/.test(menuLap), menuLap.trim());
+cek('82d. BUKAN dibatasi ke manajemen saja', !/show:\s*isManajemen\(user\)/.test(menuLap));
+
+cek('82e. isPengelola memang mencakup Leader DAN Co-Leader',
+  H.isPengelola({ role: 'leader' }) === true && H.isPengelola({ role: 'wakil' }) === true);
+cek('82f. Tapi tidak mencakup karyawan biasa', H.isPengelola({ role: 'operasional' }) === false);
+
+cek('82g. Isi halaman disaring lewat lingkupTimIds (satu sumber kebenaran, bukan rumus salinan)',
+  /lingkupTimIds\(user,\s*allUsers\)/.test(badanLap));
+cek('82h. TIDAK ada rumus atasan yang disalin ulang di halaman ini',
+  !/\.leaderId\s*===\s*user\.id/.test(badanLap));
+
+// Perilaku lingkupnya sendiri — supaya "boleh membuka" tidak berarti "melihat semua orang".
+const rLap = [
+  { id: 'r1', authorId: 'u-owner' },
+  { id: 'r2', authorId: 'u-leader' },
+  { id: 'r3', authorId: 'u-wakil' },
+  { id: 'r4', authorId: 'u-staf1' },
+];
+const terlihatOleh = (u) => {
+  const ids = H.lingkupTimIds(u, tim);
+  return rLap.filter(r => ids.has(r.authorId)).map(r => r.id).join();
+};
+cek('82i. Owner melihat laporan semua orang', terlihatOleh(OWNER) === 'r1,r2,r3,r4', terlihatOleh(OWNER));
+cek('82j. Leader melihat dirinya + bawahan sampai ke bawah (lewat Co-Leader)',
+  terlihatOleh(LEADER) === 'r2,r3,r4', terlihatOleh(LEADER));
+cek('82k. Co-Leader melihat dirinya + stafnya, BUKAN laporan Leader-nya',
+  terlihatOleh(WAKIL) === 'r3,r4', terlihatOleh(WAKIL));
+cek('82l. Karyawan hanya melihat laporannya sendiri',
+  terlihatOleh(STAF1) === 'r4', terlihatOleh(STAF1));
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
