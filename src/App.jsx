@@ -19374,6 +19374,8 @@ function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], leads = []
                       {' '}<span className="line-through text-slate-400">{grdNilaiJejak(j.dari, j.field, allUsers)}</span>
                       {' → '}
                       <span className="font-semibold text-slate-800">{grdNilaiJejak(j.ke, j.field, allUsers)}</span>
+                      {/* Satuan sekali di belakang pasangannya — sama seperti halaman Jejak. */}
+                      {Grd.fieldJejakAngka(j.field) && g.uom && <span className="text-slate-500"> {g.uom}</span>}
                     </span>
                   )}
                   <div className="text-slate-400 mt-0.5">oleh {j.olehNama}</div>
@@ -20329,6 +20331,12 @@ function GrdJejakView({ user, allUsers }) {
                         {' '}<span className="line-through text-slate-400">{grdNilaiJejak(j.dari, j.field, allUsers)}</span>
                         {' → '}
                         <span className="font-semibold text-slate-800">{grdNilaiJejak(j.ke, j.field, allUsers)}</span>
+                        {/* Satuan ditulis SEKALI di belakang pasangannya, bukan dua kali:
+                            "100 Konten → 80 Konten" panjang tanpa menambah keterangan.
+                            Hanya untuk field angka — "periode" atau "pemilik" tak bersatuan. */}
+                        {Grd.fieldJejakAngka(j.field) && g && g.uom && (
+                          <span className="text-slate-500"> {g.uom}</span>
+                        )}
                         {arah === 'turun' && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">TURUN</span>}
                         {arah === 'naik' && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">NAIK</span>}
                       </>

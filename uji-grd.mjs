@@ -4653,6 +4653,22 @@ cek('87af. Waktu tak terbaca → kosong, bukan "Invalid Date"',
   /Number\.isNaN\(d\.getTime\(\)\)\) return '';/.test(badanWj));
 cek('87ag. Nama pengubah dipakai dari yang TERSIMPAN di jejak (nama saat itu), bukan dicari ulang',
   /oleh \{j\.olehNama \|\| 'Tidak diketahui'\}/.test(badanJv));
+// --- nilai lama & baru berdampingan, dengan satuan ---
+cek('87ai. Nilai lama dicoret dan nilai baru ditebalkan, berdampingan',
+  /line-through text-slate-400">\{grdNilaiJejak\(j\.dari/.test(badanJv)
+  && /font-semibold text-slate-800">\{grdNilaiJejak\(j\.ke/.test(badanJv));
+cek('87aj. Satuan goal ikut ditulis untuk perubahan ANGKA',
+  /Grd\.fieldJejakAngka\(j\.field\) && g && g\.uom/.test(badanJv));
+cek('87ak. Satuan ditulis SEKALI di belakang pasangannya, bukan dua kali',
+  (badanJv.match(/\{g\.uom\}/g) || []).length === 1, (badanJv.match(/\{g\.uom\}/g) || []).length);
+cek('87al. Panel Riwayat di detail goal ikut menulis satuan (dua tempat, satu kebiasaan)', (() => {
+  const b = src.slice(src.indexOf('function GrdDetailGoal('), src.indexOf('function GrdSimpul('));
+  return /Grd\.fieldJejakAngka\(j\.field\) && g\.uom/.test(b);
+})());
+cek('87am. Field bukan-angka TIDAK diberi satuan (periode/pemilik tak bersatuan)',
+  G.fieldJejakAngka('periode') === false && G.fieldJejakAngka('ownerId') === false
+  && G.fieldJejakAngka('target') === true && G.fieldJejakAngka('actual') === true);
+
 cek('87ah. Pengubah yang akunnya sudah dihapus tetap punya nama di daftar saring',
   /'Akun terhapus'/.test(fs.readFileSync(ROOT + '/src/grd/data.js', 'utf8')));
 
