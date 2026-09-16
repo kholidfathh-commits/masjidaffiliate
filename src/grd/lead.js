@@ -124,6 +124,25 @@ export function statusLeadGoal(daftar, goalId) {
   };
 }
 
+/**
+ * Badge ringkas status lead measure sebuah goal — dipakai di kartu goal.
+ * Mengembalikan null kalau tidak perlu ditampilkan (goal sudah punya lead aktif
+ * dan tidak ada yang menunggu), supaya kartu tidak penuh lencana yang tidak
+ * menambah informasi.
+ */
+export function badgeLeadGoal(daftar, goalId) {
+  const st = statusLeadGoal(daftar, goalId);
+  if (st.menunggu > 0) {
+    return { teks: `${st.menunggu} usulan`, color: 'bg-amber-100 text-amber-800',
+      judul: `${st.menunggu} lead measure menunggu penilaian` };
+  }
+  if (st.aktif === 0) {
+    return { teks: 'tanpa lead', color: 'bg-orange-100 text-orange-800',
+      judul: 'Goal ini belum punya lead measure aktif — belum ada tindakan mingguan yang mendorongnya' };
+  }
+  return null;
+}
+
 // ====== HAK AKSES ======
 /**
  * Boleh MENGUSULKAN lead measure untuk goal ini? Pemilik goalnya, atau atasannya.

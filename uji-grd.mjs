@@ -2414,6 +2414,45 @@ cek('46d. Ringkasan menghitung tiap status',
 cek('46e. Daftar kosong aman', L.ringkasLead([]).total === 0 && L.ringkasLead(null).total === 0);
 
 judul('47. Penjaga App.jsx — halaman Lead Measure');
+cek('47a-14. Kartu goal di pohon memakai lencana lead measure', (() => {
+  const i = src.indexOf('function GrdKartuGoal(');
+  const j = src.indexOf('function GrdSimpul(');
+  return /Lead\.badgeLeadGoal\(leads, g\.id\)/.test(src.slice(i, j));
+})());
+cek('47a-15. Baris goal di Kelola Goal juga', (() => {
+  const i = src.indexOf('function GrdBarisGoal(');
+  const j = src.indexOf('function GrdSimpulRantai(');
+  return /Lead\.badgeLeadGoal\(leads, g\.id\)/.test(src.slice(i, j));
+})());
+cek('47a-11. Panel detail goal menampilkan lead measure AKTIF-nya', (() => {
+  const i = src.indexOf('function GrdDetailGoal(');
+  const j = src.indexOf('function GrdSimpul(');
+  const blok = src.slice(i, j);
+  return /Lead\.leadAktif\(leads, g\.id\)/.test(blok) && /Lead Measure Aktif/.test(blok);
+})());
+cek('47a-12. Goal tanpa lead aktif diberi tahu + jalan pintas ke halamannya', (() => {
+  const i = src.indexOf('function GrdDetailGoal(');
+  const j = src.indexOf('function GrdSimpul(');
+  const blok = src.slice(i, j);
+  return /belum punya tindakan mingguan/.test(blok) && /onBukaLead/.test(blok);
+})());
+cek('47a-13. Kedua halaman goal memuat lead measure',
+  (src.match(/GrdSvc\.ambilLead\(\)/g) || []).length >= 3);
+cek('47a-8. Usulan DITOLAK bisa diperbaiki dari layar (sesuai ALUR_LEAD)', (() => {
+  const i = src.indexOf('function GrdKartuLead(');
+  const j = src.indexOf('function GrdBlokLeadGoal(');
+  const blok = src.slice(i, j);
+  return /l\.status === 'perbaiki' \|\| l\.status === 'ditolak'/.test(blok)
+    && /Perbaiki lalu usulkan lagi/.test(blok);
+})());
+cek('47a-9. Catatan penilai ditempel di ATAS isian form saat memperbaiki', (() => {
+  const i = src.indexOf('function GrdFormLead(');
+  const j = src.indexOf('function GrdNilaiLeadModal(');
+  const blok = src.slice(i, j);
+  return /Alasan ditolak/.test(blok) && /Yang perlu diperbaiki/.test(blok);
+})());
+cek('47a-10. Judul & tombol menyesuaikan keadaan usulan',
+  /Usulkan Lagi Lead Measure/.test(src) && /Usulkan Lagi'/.test(src));
 cek('47a-5. Panel penilaian ada & dipakai halaman',
   /function GrdNilaiLeadModal\(/.test(src) && /<GrdNilaiLeadModal\b/.test(src));
 cek('47a-6. Tiga jawaban: setujui, minta perbaiki, tolak',
@@ -2583,6 +2622,68 @@ cek('49s. Slot aktif tidak bertambah', Lead2Aktif(await Svc.ambilLeadGoal('gn1')
 cek('49t. Masih boleh ditolak', (await pesanNl(() => Svc.nilaiLead(uUlang, 'ditolak',
   { user: LEADER, allUsers: tim, catatan: 'Sudah cukup tiga.' }))) === '');
 lepasMockGrd();
+
+judul('50. Perbaikan usulan yang leadDitolak');
+const spPb = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spPb });
+const goalPb = { id: 'gp1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(goalPb, { user: OWNER, allUsers: tim });
+const pesanPb = async (fn) => { try { await fn(); return ''; } catch (e) { return e.message; } };
+
+const pb1 = await Svc.usulkanLead(
+  { goalId: 'gp1', ownerId: 'u-staf1', description: 'Konten tayang', targetMingguan: 2, uom: 'Konten' },
+  { user: STAF1, allUsers: tim, goal: goalPb });
+await Svc.nilaiLead(pb1, 'ditolak', { user: LEADER, allUsers: tim, catatan: 'Targetnya terlalu rendah.' });
+const leadDitolak = (await Svc.ambilLeadGoal('gp1')).find(l => l.id === pb1.id);
+
+cek('50a. Alur membolehkan leadDitolak → usul', L.bolehPindahStatus('ditolak', 'usul'));
+cek('50b. Pengusul boleh memperbaiki yang DITOLAK', L.bisaUbahLead(STAF1, leadDitolak, tim));
+cek('50c. Catatan penolakan tersimpan untuk dibaca saat memperbaiki',
+  /terlalu rendah/.test(leadDitolak.catatan) && leadDitolak.penilaiNama === 'Leader TAP');
+
+const pbUlang = await Svc.usulkanLead({ ...leadDitolak, targetMingguan: 10 },
+  { user: STAF1, allUsers: tim, goal: goalPb, leadLama: leadDitolak });
+cek('50d. Usulan ulang kembali berstatus "usul"', pbUlang.status === 'usul');
+cek('50e. Angka yang diperbaiki tersimpan', pbUlang.targetMingguan === 10);
+cek('50f. Catatan penolakan lama DIBERSIHKAN (bukan menempel selamanya)', pbUlang.catatan === '');
+cek('50g. Penilai lama ikut dibersihkan', pbUlang.penilaiId === '' && pbUlang.penilaiNama === '');
+cek('50h. Tidak menambah baris baru', spPb.jumlah('grdlead:rec:gp1:') === 1);
+cek('50i. Kini boleh dinilai lagi',
+  (await pesanPb(() => Svc.nilaiLead(pbUlang, 'aktif', { user: LEADER, allUsers: tim }))) === '');
+
+cek('50j. Rekan sejajar tetap tidak boleh memperbaiki punya orang lain',
+  /tidak berwenang mengubah/.test(await pesanPb(() => Svc.usulkanLead({ ...leadDitolak, targetMingguan: 9 },
+    { user: STAF2, allUsers: tim, goal: goalPb, leadLama: leadDitolak }))));
+cek('50k. Perbaikan tetap divalidasi',
+  /lebih dari nol/.test(await pesanPb(() => Svc.usulkanLead({ ...leadDitolak, targetMingguan: 0 },
+    { user: STAF1, allUsers: tim, goal: goalPb, leadLama: leadDitolak }))));
+lepasMockGrd();
+
+judul('51. Badge status lead measure di kartu goal');
+const bg = (daftar, goalId) => L.badgeLeadGoal(daftar, goalId);
+cek('51a. Goal tanpa lead sama sekali ditandai "tanpa lead"',
+  bg([], 'gx')?.teks === 'tanpa lead');
+cek('51b. Penjelasannya menyebut belum ada tindakan mingguan',
+  /tindakan mingguan/.test(bg([], 'gx').judul));
+cek('51c. Goal dengan lead aktif TIDAK diberi lencana (tidak menambah informasi)',
+  bg([lm({ status: 'aktif' })], 'g1') === null);
+cek('51d. Usulan menunggu diangkat jadi lencana',
+  bg([lm({ status: 'usul' })], 'g1')?.teks === '1 usulan');
+cek('51e. Menunggu DIUTAMAKAN daripada "tanpa lead"', (() => {
+  const b = bg([lm({ id: 'a', status: 'usul' })], 'g1');
+  return b.teks === '1 usulan';
+})());
+cek('51f. Menunggu tetap tampil walau sudah ada yang aktif', (() => {
+  const b = bg([lm({ id: 'a', status: 'aktif' }), lm({ id: 'b', status: 'usul' })], 'g1');
+  return b?.teks === '1 usulan';
+})());
+cek('51g. Goal yang cuma punya lead DITOLAK dihitung "tanpa lead"',
+  bg([lm({ status: 'ditolak' })], 'g1')?.teks === 'tanpa lead');
+cek('51h. Lead goal lain tidak memengaruhi',
+  bg([lm({ goalId: 'g2', status: 'aktif' })], 'g1')?.teks === 'tanpa lead');
+cek('51i. Tiap lencana punya warna & penjelasan',
+  ['teks', 'color', 'judul'].every(k => k in bg([], 'gx')));
+cek('51j. Daftar kosong/null aman', bg(null, 'gx')?.teks === 'tanpa lead');
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

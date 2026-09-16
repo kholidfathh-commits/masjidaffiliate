@@ -1687,8 +1687,8 @@ export default function App() {
             {view === 'tap-commission' && <TapCommissionView user={currentUser} />}
             {view === 'partner-feedback' && <PartnerFeedbackView user={currentUser} />}
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
-            {view === 'grd-tree' && <GrdTreeView user={currentUser} allUsers={allUsers} />}
-            {view === 'grd-kelola' && <GrdKelolaView user={currentUser} allUsers={allUsers} />}
+            {view === 'grd-tree' && <GrdTreeView user={currentUser} allUsers={allUsers} setView={setView} />}
+            {view === 'grd-kelola' && <GrdKelolaView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'grd-lead' && <GrdLeadView user={currentUser} allUsers={allUsers} />}
             {view === 'grd-akses' && <GrdAksesView user={currentUser} allUsers={allUsers} />}
             {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} setView={setView} />}
@@ -18767,9 +18767,12 @@ function grdAngka(n) {
   return Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('id-ID') : String(Math.round(v * 100) / 100);
 }
 
-function GrdKartuGoal({ g, bolehUbah, onBuka, onUbah }) {
+function GrdKartuGoal({ g, bolehUbah, onBuka, onUbah, leads }) {
   const persen = Grd.persenCapaian(g);
   const gaya = Grd.gayaStatus(Grd.statusCapaian(g));
+  // Goal tanpa lead measure harus kelihatan DARI POHON, bukan cuma saat dibuka —
+  // itu justru yang paling butuh perhatian dan paling mudah terlewat.
+  const badgeLead = leads ? Lead.badgeLeadGoal(leads, g.id) : null;
   return (
     <div onClick={() => onBuka && onBuka(g)} role="button" tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBuka && onBuka(g); } }}
@@ -18783,6 +18786,12 @@ function GrdKartuGoal({ g, bolehUbah, onBuka, onUbah }) {
             <span className="text-slate-300 mx-1.5">·</span>
             terkini {grdAngka(g.actual)}
           </div>
+          {badgeLead && (
+            <span title={badgeLead.judul}
+              className={`inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full ${badgeLead.color}`}>
+              {badgeLead.teks}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>{gaya.label}</span>
@@ -18822,13 +18831,15 @@ function GrdBaris({ label, children }) {
  * siapa, dan diturunkan lagi ke berapa goal) — itu yang membedakan panel ini
  * dari sekadar kartu, karena "roll down" baru terasa kalau rantainya kelihatan.
  */
-function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], onClose, onUbah, onHapus, onTurunkan }) {
+function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], leads = [], onClose, onUbah, onHapus, onTurunkan, onBukaLead }) {
   const g = Grd.normalisasiGoal(goal);
   if (!g) return null;
   const pemilik = Grd.pemilikGoal(g, allUsers);
   const gaya = Grd.gayaStatus(Grd.statusCapaian(g));
   const persen = Grd.persenCapaian(g);
   const sisa = Grd.sisaMenujuTarget(g);
+  const leadAktifGoal = Lead.leadAktif(leads, g.id);
+  const leadGoal = Lead.statusLeadGoal(leads, g.id);
   // GERBANG: rantai ditelusuri hanya di antara goal yang boleh dilihat pengguna
   // ini — supaya "diturunkan ke N goal" tidak ikut menghitung cabang lain.
   // SENGAJA bukan useMemo: komponen ini punya `if (!g) return null` di atas, dan
@@ -18928,6 +18939,41 @@ function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], onClose, o
         </div>
       </div>
 
+      {/* Lead measure aktif — tindakan mingguan yang mendorong goal ini.
+          Ditampilkan DI SINI karena inilah tempat orang bertanya "lalu saya
+          harus ngapain?" setelah melihat angkanya masih jauh. */}
+      <div className="mt-4 rounded-2xl border border-slate-200/70 p-4">
+        <div className="flex items-center justify-between gap-2 mb-2.5">
+          <div className="text-xs font-bold text-slate-600 uppercase tracking-wide">Lead Measure Aktif</div>
+          {leadGoal.menunggu > 0 && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+              {leadGoal.menunggu} menunggu persetujuan
+            </span>
+          )}
+        </div>
+        {leadAktifGoal.length > 0 ? (
+          <div className="space-y-2">
+            {leadAktifGoal.map(l => (
+              <div key={l.id} className="flex items-start justify-between gap-3 text-[12px] border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+                <span className="text-slate-700">{l.description}</span>
+                <span className="text-slate-600 tabular-nums flex-shrink-0">
+                  <span className="font-bold text-slate-800">{l.targetMingguan}</span> {l.uom}/minggu
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-sm text-slate-500">
+            Belum ada lead measure aktif — goal ini belum punya tindakan mingguan yang mendorongnya.
+            {onBukaLead && (
+              <button onClick={onBukaLead} className="ml-1 font-semibold text-blue-700 hover:underline">
+                Atur di halaman Lead Measure.
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Jejak perubahan angka: siapa, kapan, dari berapa ke berapa. */}
       <div className="mt-4 rounded-2xl border border-slate-200/70 p-4">
         <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2.5">Riwayat Perubahan</div>
@@ -18997,7 +19043,7 @@ function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], onClose, o
  * berapa goal, rata capaian) tetap tampil supaya melipat tidak berarti
  * kehilangan informasi.
  */
-function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal, onUbahGoal }) {
+function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal, onUbahGoal, leads }) {
   const u = simpul.user;
   const peran = ROLES[u.role] || ROLES.operasional;
   const PeranIcon = peran.icon;
@@ -19079,7 +19125,7 @@ function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal, onU
           <div className="mt-3 space-y-2 pl-9">
             {simpul.goals.map(g => (
               <GrdKartuGoal key={g.id} g={g} bolehUbah={Grd.bisaUbahGoal(user, g, allUsers)}
-                onBuka={onBukaGoal} onUbah={onUbahGoal} />
+                onBuka={onBukaGoal} onUbah={onUbahGoal} leads={leads} />
             ))}
             {simpul.tersembunyi > 0 && (
               <div className="text-[11px] text-slate-400 italic inline-flex items-center gap-1.5">
@@ -19110,7 +19156,7 @@ function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal, onU
         <div className="mt-2.5 ml-4 sm:ml-7 pl-4 sm:pl-6 border-l-2 border-slate-200 space-y-2.5">
           {simpul.anak.map(a => (
             <GrdSimpul key={a.user.id} simpul={a} user={user} allUsers={allUsers}
-              terlipat={terlipat} onToggle={onToggle} onBukaGoal={onBukaGoal} onUbahGoal={onUbahGoal} />
+              terlipat={terlipat} onToggle={onToggle} onBukaGoal={onBukaGoal} onUbahGoal={onUbahGoal} leads={leads} />
           ))}
         </div>
       )}
@@ -19118,16 +19164,19 @@ function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal, onU
   );
 }
 
-function GrdTreeView({ user, allUsers }) {
+function GrdTreeView({ user, allUsers, setView }) {
   const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
 
   // Data SUNGGUHAN dari kv_store lewat src/grd/layanan.js. Kegagalan koneksi
   // tidak mengosongkan layar (pola sama dengan AsetView/CatatanView).
   const [goals, setGoals] = useState([]);
+  const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const muat = async () => {
-    try { setGoals(await GrdSvc.ambilGoal()); }
-    catch (e) { console.warn('Muat goal gagal (pertahankan data lama):', e?.message || e); }
+    try {
+      const [g, l] = await Promise.all([GrdSvc.ambilGoal(), GrdSvc.ambilLead()]);
+      setGoals(g); setLeads(l);
+    } catch (e) { console.warn('Muat goal gagal (pertahankan data lama):', e?.message || e); }
     finally { setLoading(false); }
   };
   useEffect(() => { muat(); const iv = setInterval(pollWhenVisible(muat), 60000); return () => clearInterval(iv); }, []);
@@ -19257,7 +19306,7 @@ function GrdTreeView({ user, allUsers }) {
         <div className="space-y-3">
           {pohon.map(s => (
             <GrdSimpul key={s.user.id} simpul={s} user={user} allUsers={allUsers}
-              terlipat={terlipat} onToggle={toggle}
+              terlipat={terlipat} onToggle={toggle} leads={leads}
               onBukaGoal={setDetail} onUbahGoal={tulis.bukaUbah} />
           ))}
         </div>
@@ -19265,7 +19314,8 @@ function GrdTreeView({ user, allUsers }) {
 
       {detail && (
         <GrdDetailGoal goal={detail} user={user} allUsers={allUsers}
-          semuaGoal={goals} onClose={() => setDetail(null)}
+          semuaGoal={goals} leads={leads} onClose={() => setDetail(null)}
+          onBukaLead={() => { setDetail(null); setView('grd-lead'); }}
           onUbah={(g) => { setDetail(null); tulis.bukaUbah(g); }}
           onHapus={(g) => { setDetail(null); tulis.setHapus(g); }}
           onTurunkan={(g) => { setDetail(null); tulis.setTurunkan(g); }} />
@@ -19653,13 +19703,14 @@ function GrdHapusGoalModal({ goal, allUsers, goalAda, onHapus, onClose }) {
 }
 
 /** Satu baris goal di halaman Kelola Goal. */
-function GrdBarisGoal({ g, pemilik, user, allUsers, onBuka, onUbah, onTurunkan, onHapus }) {
+function GrdBarisGoal({ g, pemilik, user, allUsers, leads, onBuka, onUbah, onTurunkan, onHapus }) {
   const gaya = Grd.gayaStatus(Grd.statusCapaian(g));
   const persen = Grd.persenCapaian(g);
   // Baris ini MEMERIKSA SENDIRI wewenangnya, tidak mengandalkan pemanggil sudah
   // menyaring daftarnya. Pemanggil hari ini memang menyaring — tapi kalau besok
   // daftarnya diperluas (mis. menampilkan goal tim), tombolnya tidak ikut bocor.
   const bolehUbah = !user || Grd.bisaUbahGoal(user, g, allUsers);
+  const badgeLead = leads ? Lead.badgeLeadGoal(leads, g.id) : null;
   return (
     <div onClick={() => onBuka && onBuka(g)} role="button" tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBuka && onBuka(g); } }}
@@ -19681,6 +19732,15 @@ function GrdBarisGoal({ g, pemilik, user, allUsers, onBuka, onUbah, onTurunkan, 
             <span className="text-[11px] text-slate-500 tabular-nums">
               {grdAngka(g.base)} → {grdAngka(g.target)} {g.uom}
             </span>
+            {badgeLead && (
+              <>
+                <span className="text-slate-300">·</span>
+                <span title={badgeLead.judul}
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badgeLead.color}`}>
+                  {badgeLead.teks}
+                </span>
+              </>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -19714,7 +19774,7 @@ function GrdBarisGoal({ g, pemilik, user, allUsers, onBuka, onUbah, onTurunkan, 
 }
 
 /** Satu simpul RANTAI GOAL: goal induk di atas, turunannya menjorok ke dalam. */
-function GrdSimpulRantai({ simpul, user, allUsers, onBuka, onUbah, onTurunkan, onHapus }) {
+function GrdSimpulRantai({ simpul, user, allUsers, leads, onBuka, onUbah, onTurunkan, onHapus }) {
   const g = simpul.goal;
   const pemilik = Grd.pemilikGoal(g, allUsers);
   const punyaAnak = (simpul.anak || []).length > 0;
@@ -19723,12 +19783,12 @@ function GrdSimpulRantai({ simpul, user, allUsers, onBuka, onUbah, onTurunkan, o
       {simpul.level > 0 && (
         <span aria-hidden="true" className="absolute -left-4 sm:-left-6 top-7 w-4 sm:w-6 h-px bg-slate-200" />
       )}
-      <GrdBarisGoal g={g} pemilik={pemilik} user={user} allUsers={allUsers}
+      <GrdBarisGoal g={g} pemilik={pemilik} user={user} allUsers={allUsers} leads={leads}
         onBuka={onBuka} onUbah={onUbah} onTurunkan={onTurunkan} onHapus={onHapus} />
       {punyaAnak && (
         <div className="mt-2.5 ml-4 sm:ml-7 pl-4 sm:pl-6 border-l-2 border-slate-200 space-y-2.5">
           {simpul.anak.map(a => (
-            <GrdSimpulRantai key={a.goal.id} simpul={a} user={user} allUsers={allUsers}
+            <GrdSimpulRantai key={a.goal.id} simpul={a} user={user} allUsers={allUsers} leads={leads}
               onBuka={onBuka} onUbah={onUbah} onTurunkan={onTurunkan} onHapus={onHapus} />
           ))}
         </div>
@@ -19748,7 +19808,7 @@ function GrdSimpulRantai({ simpul, user, allUsers, onBuka, onUbah, onTurunkan, o
  * wewenang SEBELUM menyentuh penyimpanan — tombol yang lolos dari layar tetap
  * tidak bisa menembusnya.
  */
-function GrdKelolaView({ user, allUsers }) {
+function GrdKelolaView({ user, allUsers, setView }) {
   const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
   const [q, setQ] = useState('');
   const [lingkup, setLingkup] = useState('semua'); // semua | saya | tim
@@ -19757,6 +19817,7 @@ function GrdKelolaView({ user, allUsers }) {
   // Data SUNGGUHAN dari kv_store, lewat satu pintu src/grd/layanan.js.
   const [goals, setGoals] = useState([]);
   const [jejak, setJejak] = useState([]);
+  const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Pola yang sama dengan AsetView/CatatanView: kegagalan koneksi TIDAK
@@ -19764,8 +19825,8 @@ function GrdKelolaView({ user, allUsers }) {
   // goalnya hilang, dan polling hanya jalan saat tab terlihat (hemat egress).
   const muat = async () => {
     try {
-      const [g, j] = await Promise.all([GrdSvc.ambilGoal(), GrdSvc.ambilJejak()]);
-      setGoals(g); setJejak(j);
+      const [g, j, l] = await Promise.all([GrdSvc.ambilGoal(), GrdSvc.ambilJejak(), GrdSvc.ambilLead()]);
+      setGoals(g); setJejak(j); setLeads(l);
     } catch (e) {
       console.warn('Muat GRD gagal (pertahankan data lama):', e?.message || e);
     } finally { setLoading(false); }
@@ -19881,7 +19942,7 @@ function GrdKelolaView({ user, allUsers }) {
           )}
           <div className="space-y-2.5">
             {rantai.map(s => (
-              <GrdSimpulRantai key={s.goal.id} simpul={s} user={user} allUsers={allUsers}
+              <GrdSimpulRantai key={s.goal.id} simpul={s} user={user} allUsers={allUsers} leads={leads}
                 onBuka={setDetail} onUbah={tulis.bukaUbah} onTurunkan={tulis.setTurunkan} onHapus={tulis.setHapus} />
             ))}
           </div>
@@ -19890,7 +19951,7 @@ function GrdKelolaView({ user, allUsers }) {
         <div className="space-y-2.5">
           {tampil.map(g => (
             <GrdBarisGoal key={g.id} g={g} pemilik={Grd.pemilikGoal(g, allUsers)}
-              user={user} allUsers={allUsers}
+              user={user} allUsers={allUsers} leads={leads}
               onBuka={setDetail} onUbah={tulis.bukaUbah} onHapus={tulis.setHapus}
               onTurunkan={bolehTurunkan(g) ? tulis.setTurunkan : null} />
           ))}
@@ -19916,7 +19977,8 @@ function GrdKelolaView({ user, allUsers }) {
 
       {detail && (
         <GrdDetailGoal goal={detail} user={user} allUsers={allUsers}
-          semuaGoal={goals} jejak={jejak} onClose={() => setDetail(null)}
+          semuaGoal={goals} jejak={jejak} leads={leads} onClose={() => setDetail(null)}
+          onBukaLead={() => { setDetail(null); setView('grd-lead'); }}
           onUbah={(g) => { setDetail(null); tulis.bukaUbah(g); }}
           onHapus={(g) => { setDetail(null); tulis.setHapus(g); }}
           onTurunkan={(g) => { setDetail(null); tulis.setTurunkan(g); }} />
@@ -20216,7 +20278,9 @@ function GrdFormLead({ lead, goal, user, allUsers, adaSekarang, onSimpan, onClos
   };
 
   return (
-    <Modal title={lama ? 'Perbaiki Lead Measure' : 'Usulkan Lead Measure'} onClose={onClose} wide>
+    <Modal title={!lama ? 'Usulkan Lead Measure'
+      : lama.status === 'ditolak' ? 'Usulkan Lagi Lead Measure'
+      : 'Perbaiki Lead Measure'} onClose={onClose} wide>
       <div className="rounded-xl bg-slate-50 border border-slate-200/70 px-3.5 py-3">
         <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Untuk goal</div>
         <div className="text-sm font-semibold text-slate-800 mt-1">{goal.description}</div>
@@ -20224,6 +20288,22 @@ function GrdFormLead({ lead, goal, user, allUsers, adaSekarang, onSimpan, onClos
           {grdAngka(goal.base)} → {grdAngka(goal.target)} {goal.uom} · {Grd.labelPeriodeSingkat(goal.periode)}
         </div>
       </div>
+
+      {/* Catatan penilai ditempel di ATAS isian — inilah yang harus dibaca lebih
+          dulu saat memperbaiki, bukan dicari-cari di halaman sebelumnya. */}
+      {lama && lama.catatan && (lama.status === 'perbaiki' || lama.status === 'ditolak') && (
+        <div className={`mt-3 rounded-xl px-3.5 py-3 border ${lama.status === 'ditolak'
+          ? 'bg-red-50 border-red-200' : 'bg-orange-50 border-orange-200'}`}>
+          <div className={`text-[11px] font-bold uppercase tracking-wide ${
+            lama.status === 'ditolak' ? 'text-red-700' : 'text-orange-700'}`}>
+            {lama.status === 'ditolak' ? 'Alasan ditolak' : 'Yang perlu diperbaiki'}
+            {lama.penilaiNama && ` — ${lama.penilaiNama}`}
+          </div>
+          <div className={`text-[12px] mt-1 ${lama.status === 'ditolak' ? 'text-red-900' : 'text-orange-900'}`}>
+            {lama.catatan}
+          </div>
+        </div>
+      )}
 
       <div className="mt-3 text-[12px] text-slate-600 leading-relaxed bg-blue-50 border border-blue-200 rounded-xl px-3.5 py-3">
         <span className="font-bold text-blue-900">Lead measure itu tindakan, bukan hasil.</span> Tulis sesuatu yang
@@ -20273,7 +20353,8 @@ function GrdFormLead({ lead, goal, user, allUsers, adaSekarang, onSimpan, onClos
         </button>
         <button onClick={simpan} disabled={menyimpan}
           className="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-semibold text-sm">
-          {menyimpan ? 'Mengirim…' : (lama ? 'Kirim Ulang' : 'Kirim Usulan')}
+          {menyimpan ? 'Mengirim…' : !lama ? 'Kirim Usulan'
+            : lama.status === 'ditolak' ? 'Usulkan Lagi' : 'Kirim Ulang'}
         </button>
       </div>
     </Modal>
@@ -20385,9 +20466,20 @@ function GrdKartuLead({ l, user, allUsers, onNilai, onUbah }) {
             <span className="font-semibold text-slate-700">{l.targetMingguan}</span> {l.uom} / minggu
           </div>
           {l.catatan && (
-            <div className="text-[11px] text-slate-600 mt-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+            <div className={`text-[11px] mt-1.5 rounded-lg px-2.5 py-1.5 border ${
+              l.status === 'perbaiki' ? 'bg-orange-50 border-orange-200 text-orange-900'
+                : l.status === 'ditolak' ? 'bg-red-50 border-red-200 text-red-900'
+                : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
               <span className="font-semibold">Catatan {l.penilaiNama || 'penilai'}:</span> {l.catatan}
             </div>
+          )}
+          {/* Ajakan yang jelas untuk pengusul: apa langkah berikutnya. */}
+          {bisaUbah && (l.status === 'perbaiki' || l.status === 'ditolak') && onUbah && (
+            <button onClick={() => onUbah(l)}
+              className="mt-2 text-[11px] font-bold text-blue-700 hover:text-blue-800 hover:underline inline-flex items-center gap-1">
+              <RefreshCw className="w-3 h-3" />
+              {l.status === 'perbaiki' ? 'Perbaiki lalu kirim ulang' : 'Perbaiki lalu usulkan lagi'}
+            </button>
           )}
           {l.status === 'usul' && !bisaNilai && penilai && (
             <div className="text-[11px] text-slate-400 mt-1.5">Menunggu penilaian {penilai.name}.</div>
@@ -20396,8 +20488,8 @@ function GrdKartuLead({ l, user, allUsers, onNilai, onUbah }) {
         <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>{gaya.label}</span>
           <div className="flex items-center gap-1">
-            {bisaUbah && onUbah && (l.status === 'usul' || l.status === 'perbaiki') && (
-              <button onClick={() => onUbah(l)} title="Perbaiki usulan"
+            {bisaUbah && onUbah && l.status === 'usul' && (
+              <button onClick={() => onUbah(l)} title="Ubah usulan sebelum dinilai"
                 className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50">
                 <Edit2 className="w-3.5 h-3.5" />
               </button>
