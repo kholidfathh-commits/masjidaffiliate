@@ -6689,6 +6689,16 @@ function ReportsView({ user, allUsers }) {
   const weeks = useMemo(() => [...new Set(visibleReports.map(r => r.weekStart))].sort().reverse(), [visibleReports]);
   const filtered = filterWeek === 'all' ? visibleReports : visibleReports.filter(r => r.weekStart === filterWeek);
 
+  // SIAPA YANG BELUM KIRIM. Daftar laporan hanya memperlihatkan yang SUDAH masuk;
+  // yang tidak masuk tidak meninggalkan jejak apa pun — padahal justru itu yang
+  // perlu ditindaklanjuti Leader & Co-Leader, dan itulah alasan mereka diberi
+  // akses ke halaman ini. Pola yang sama sudah dipakai rekap "belum lapor harian"
+  // di Dashboard dan urutan "belum mengisi di atas" di Scoreboard.
+  // Sengaja BUKAN useMemo: hook tidak boleh ditambah setelah early return di atas.
+  const mingguDinilai = filterWeek === 'all' ? getWeekRange().start : filterWeek;
+  const sudahKirim = new Set(visibleReports.filter(r => r.weekStart === mingguDinilai).map(r => r.authorId));
+  const belumKirim = lingkupTim(user, allUsers).filter(u => !sudahKirim.has(u.id));
+
   return (
     <div className="max-w-5xl">
       <PageHeader title="Laporan Mingguan" subtitle="Pencapaian, kendala, dan rencana minggu depan"
@@ -6713,6 +6723,14 @@ function ReportsView({ user, allUsers }) {
             <option value="all">Semua Minggu</option>
             {weeks.map(w => <option key={w} value={w}>Minggu {fmtDate(w)}</option>)}
           </select>
+        </div>
+      )}
+
+      {belumKirim.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <b>{belumKirim.length} belum kirim laporan</b> untuk minggu {fmtDate(mingguDinilai)}
+          {filterWeek === 'all' && ' (minggu berjalan)'} —{' '}
+          {belumKirim.map(u => u.id === user.id ? 'Anda' : u.name).join(', ')}.
         </div>
       )}
 

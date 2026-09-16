@@ -4279,6 +4279,31 @@ cek('82k. Co-Leader melihat dirinya + stafnya, BUKAN laporan Leader-nya',
 cek('82l. Karyawan hanya melihat laporannya sendiri',
   terlihatOleh(STAF1) === 'r4', terlihatOleh(STAF1));
 
+// --- "siapa yang BELUM kirim" — yang tidak lapor tidak meninggalkan jejak ---
+cek('82m. Halaman menghitung siapa yang belum kirim laporan',
+  /const belumKirim\s*=\s*lingkupTim\(user, allUsers\)/.test(badanLap));
+cek('82n. Dihitung dari laporan yang BOLEH dilihat, bukan seluruh laporan',
+  /sudahKirim\s*=\s*new Set\(visibleReports/.test(badanLap));
+cek('82o. Saat filter "Semua Minggu", yang dinilai minggu berjalan (bukan semua sekaligus)',
+  /mingguDinilai\s*=\s*filterWeek === 'all' \? getWeekRange\(\)\.start : filterWeek/.test(badanLap));
+cek('82p. Namanya disebut supaya bisa ditindaklanjuti, bukan cuma jumlahnya',
+  /belumKirim\.map\(u => u\.id === user\.id \? 'Anda' : u\.name\)/.test(badanLap));
+cek('82q. TIDAK memakai useMemo setelah early return (aturan hooks React)',
+  badanLap.indexOf('const belumKirim') > badanLap.indexOf('return <NoAccess')
+  && !/const belumKirim\s*=\s*useMemo/.test(badanLap));
+
+// Perilakunya: lingkupTim memang berisi diri sendiri + bawahan, jadi Leader yang
+// belum menulis laporannya sendiri ikut disebut — bukan cuma menagih bawahan.
+const anggotaLeader = H.lingkupTim(LEADER, tim).map(u => u.id).join();
+cek('82r. Leader ikut dinilai bersama timnya sendiri',
+  anggotaLeader === 'u-leader,u-wakil,u-staf1,u-staf2', anggotaLeader);
+const sudahUji = new Set(['u-wakil']);
+cek('82s. Yang sudah kirim tidak ikut disebut',
+  H.lingkupTim(LEADER, tim).filter(u => !sudahUji.has(u.id)).map(u => u.id).join()
+  === 'u-leader,u-staf1,u-staf2');
+cek('82t. Karyawan hanya menilai dirinya sendiri (tidak menagih siapa pun)',
+  H.lingkupTim(STAF1, tim).map(u => u.id).join() === 'u-staf1');
+
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
