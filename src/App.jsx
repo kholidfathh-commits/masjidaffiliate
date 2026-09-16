@@ -20269,6 +20269,12 @@ function GrdJejakView({ user, allUsers, goalAwal = null }) {
   const ringkas = useMemo(() => Grd.ringkasJejakAngka(hasil.hasil), [hasil]);
   const judulGoal = useMemo(() => new Map(goals.map(g => [g.id, g])), [goals]);
 
+  // Jejak yang goalnya sudah dihapus: barisnya ada tapi tak pernah terlihat,
+  // karena setiap tampilan berangkat dari daftar goal. Justru di situ jejak
+  // paling berharga — ia satu-satunya yang bisa menjawab "dulu targetnya
+  // berapa sebelum goalnya dihapus?".
+  const yatim = useMemo(() => Grd.jejakYatim(jejak, goals), [jejak, goals]);
+
   if (loading) return <div className="text-slate-400 text-sm">Memuat jejak perubahan…</div>;
 
   return (
@@ -20308,6 +20314,14 @@ function GrdJejakView({ user, allUsers, goalAwal = null }) {
           {hanyaAngka ? 'Hanya angka' : 'Semua perubahan'}
         </button>
       </div>
+
+      {yatim.length > 0 && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <b>{yatim.length} catatan perubahan</b> menempel pada goal yang sudah dihapus, jadi tidak
+          ikut ditampilkan di daftar ini. Catatannya sengaja TIDAK dihapus — itu satu-satunya bukti
+          apa yang terjadi pada goal tersebut sebelum hilang.
+        </div>
+      )}
 
       {goalFokus && (
         <div className="mb-4 flex items-center gap-2 flex-wrap text-sm">

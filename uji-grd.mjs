@@ -4848,6 +4848,76 @@ cek('87ah. Pengubah yang akunnya sudah dihapus tetap punya nama di daftar saring
   /'Akun terhapus'/.test(fs.readFileSync(ROOT + '/src/grd/data.js', 'utf8')));
 
 // ============================================================================
+judul('88. Bentuk baris jejak, baris rusak, & jejak yatim');
+// ============================================================================
+const brsJ = (extra = {}) => ({
+  id: 'jg1:target:2026-09-10T03:00:00Z', goalId: 'jg1', field: 'target',
+  dari: 100, ke: 80, olehId: 'u-leader', olehNama: 'Leader TAP',
+  waktu: '2026-09-10T03:00:00Z', ...extra,
+});
+
+cek('88a. Skema menyebut field yang membuat jejak berguna sebagai bukti',
+  ['id', 'goalId', 'field', 'olehNama', 'waktu'].every(k => G.SKEMA_JEJAK[k] && G.SKEMA_JEJAK[k].wajib));
+cek('88b. Tiap field punya penanda versi (sejak)',
+  Object.values(G.SKEMA_JEJAK).every(f => Number.isInteger(f.sejak) && f.sejak >= 1));
+cek('88c. Baris lengkap → bentuknya utuh', G.fieldHilangJejak(brsJ()).length === 0);
+cek('88d. Tanpa "siapa" → rusak (jejak tanpa siapa tidak menjawab pertanyaan yang membuatnya ada)',
+  G.jejakRusak(brsJ({ olehNama: '' })) === true);
+cek('88e. TAPI olehId boleh kosong — proses otomatis / akun terhapus tetap sah sebagai bukti',
+  G.jejakRusak(brsJ({ olehId: '' })) === false);
+cek('88f. Tanpa waktu → rusak', G.jejakRusak(brsJ({ waktu: '' })) === true);
+cek('88g. Waktu ngawur → rusak, bukan diterima diam-diam',
+  G.jejakRusak(brsJ({ waktu: 'kemarin sore' })) === true);
+cek('88h. Field yang tidak dikenal → rusak (label "undefined" di layar itu bug, bukan data)',
+  G.jejakRusak(brsJ({ field: 'entah_apa' })) === true);
+cek('88i. Semua field yang dikenal lolos',
+  Object.keys(G.FIELD_JEJAK).every(f => !G.jejakRusak(brsJ({ field: f }))));
+cek('88j. Nilai `dari` boleh kosong — goal yang BARU DIBUAT memang tidak punya nilai lama',
+  G.jejakRusak(brsJ({ field: '_dibuat', dari: null })) === false);
+cek('88k. Baris null/rusak total dilaporkan lengkap, tidak bikin crash',
+  G.fieldHilangJejak(null).length === 5 && G.fieldHilangJejak('bukan objek').length === 5);
+
+// --- jejak yatim ---
+const goalAdaJ = [{ id: 'jg1' }, { id: 'jg2' }];
+const jjCampur = [
+  brsJ({ id: 'a', goalId: 'jg1' }),
+  brsJ({ id: 'b', goalId: 'sudah-dihapus' }),
+  brsJ({ id: 'c', goalId: 'jg2' }),
+  brsJ({ id: 'd', goalId: 'juga-dihapus' }),
+];
+const jyt = G.jejakYatim(jjCampur, goalAdaJ);
+cek('88l. Jejak yang goalnya hilang terdeteksi',
+  jyt.map(j => j.id).join() === 'b,d', jyt.map(j => j.id));
+cek('88m. Jejak yang goalnya ada tidak ikut', jyt.length === 2);
+cek('88n. Tanpa goal sama sekali → semuanya yatim', G.jejakYatim(jjCampur, []).length === 4);
+cek('88o. Daftar kosong aman',
+  G.jejakYatim([], goalAdaJ).length === 0 && G.jejakYatim(null, goalAdaJ).length === 0);
+cek('88p. Baris tanpa goalId tidak dihitung yatim (itu data rusak, bukan yatim)',
+  G.jejakYatim([brsJ({ id: 'z', goalId: '' })], goalAdaJ).length === 0);
+
+// --- menghapus goal TIDAK menghapus jejaknya ---
+const spJy = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spJy });
+const gJy = { id: 'jy1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Akan dihapus', base: 0, target: 10, uom: 'x' };
+await Svc.simpanGoal(gJy, { user: OWNER, allUsers: tim });
+await Svc.simpanGoal({ ...gJy, target: 20 }, { user: OWNER, allUsers: tim });
+const sblmHapus = spJy.jumlah('grdjejak:rec:jy1:');
+await Svc.hapusGoal(gJy, { user: OWNER, allUsers: tim });
+cek('88q. Menghapus goal TIDAK ikut menghapus jejaknya (itu satu-satunya bukti yang tersisa)',
+  spJy.jumlah('grdjejak:rec:jy1:') === sblmHapus && sblmHapus > 0,
+  { sebelum: sblmHapus, sesudah: spJy.jumlah('grdjejak:rec:jy1:') });
+const jjSisa = await Svc.ambilJejakGoal('jy1');
+cek('88r. Dan jejaknya masih bisa dibaca setelah goalnya hilang', jjSisa.length === sblmHapus);
+cek('88s. Jejak itu kini yatim — ada, tapi tak akan muncul di daftar mana pun',
+  G.jejakYatim(jjSisa, []).length === jjSisa.length);
+lepasMockGrd();
+
+cek('88t. Halaman Jejak MELAPORKAN yang yatim, tidak membiarkannya hilang diam-diam',
+  /Grd\.jejakYatim\(jejak, goals\)/.test(badanJv) && /yatim\.length > 0/.test(badanJv));
+cek('88u. Dan mengatakan kenapa tidak dihapus',
+  /sengaja TIDAK dihapus/.test(badanJv));
+
+// ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
 // ada aturan yang terlanggar — bukan regexnya yang perlu dilonggarkan.

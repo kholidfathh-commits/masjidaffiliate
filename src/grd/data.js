@@ -610,6 +610,66 @@ export const FIELD_JEJAK = {
   ownerId:     { label: 'Pemilik',        angka: false },
 };
 export const labelFieldJejak = (f) => (FIELD_JEJAK[f] || { label: f }).label;
+export const fieldJejakDikenal = (f) => Object.prototype.hasOwnProperty.call(FIELD_JEJAK, String(f || ''));
+
+/**
+ * BENTUK SATU BARIS JEJAK — satu tempat yang menyatakan apa isi sebuah baris.
+ *
+ * `sejak` menandai versi berapa sebuah field mulai ada, supaya baris lama bisa
+ * DIKENALI saat nanti ada field baru, bukan dibaca sebagai kosong.
+ *
+ * KUNCI BARIS = `grdjejak:rec:<goalId>:<field>:<waktu>`. Goal ditaruh di DEPAN
+ * supaya riwayat satu goal bisa ditarik lewat satu prefix — jejak tidak pernah
+ * dipangkas (ia bukti audit), jadi membaca SELURUH jejak tim hanya untuk membuka
+ * satu panel akan makin berat tiap bulan.
+ */
+export const SKEMA_JEJAK = {
+  id:       { wajib: true,  jenis: 'teks',  sejak: 1 },
+  goalId:   { wajib: true,  jenis: 'teks',  sejak: 1 },
+  field:    { wajib: true,  jenis: 'field', sejak: 1 },
+  dari:     { wajib: false, jenis: 'bebas', sejak: 1 },
+  ke:       { wajib: false, jenis: 'bebas', sejak: 1 },
+  olehId:   { wajib: false, jenis: 'teks',  sejak: 1 },
+  olehNama: { wajib: true,  jenis: 'teks',  sejak: 1 },
+  waktu:    { wajib: true,  jenis: 'waktu', sejak: 1 },
+};
+
+/**
+ * Field wajib yang HILANG dari sebuah baris jejak — kosong berarti bentuknya utuh.
+ *
+ * `olehId` SENGAJA tidak wajib: baris yang dibuat proses otomatis atau oleh akun
+ * yang sudah terhapus tetap sah sebagai bukti. Tapi `olehNama` WAJIB — jejak
+ * tanpa "siapa" tidak menjawab pertanyaan yang membuat jejak itu ada.
+ */
+export function fieldHilangJejak(j) {
+  const wajib = Object.keys(SKEMA_JEJAK).filter(k => SKEMA_JEJAK[k].wajib);
+  if (!j || typeof j !== 'object') return wajib;
+  return wajib.filter(k => {
+    const v = j[k];
+    if (SKEMA_JEJAK[k].jenis === 'field') return !fieldJejakDikenal(v);
+    if (SKEMA_JEJAK[k].jenis === 'waktu') {
+      return !v || Number.isNaN(new Date(v).getTime());
+    }
+    return v === undefined || v === null || v === '';
+  });
+}
+
+/** Baris jejak yang bentuknya tidak utuh — tidak bisa dipercaya sebagai bukti. */
+export const jejakRusak = (j) => fieldHilangJejak(j).length > 0;
+
+/**
+ * Jejak yang goalnya sudah TIDAK ADA lagi.
+ *
+ * Menghapus goal SENGAJA tidak menghapus jejaknya — jejak justru paling berharga
+ * tepat saat goalnya hilang, karena ia satu-satunya yang bisa menjawab "dulu
+ * targetnya berapa, dan siapa yang mengubahnya sebelum dihapus?". Masalahnya:
+ * setiap tampilan berangkat dari daftar goal, jadi baris itu ada tapi tak pernah
+ * terlihat. Dilaporkan terpisah supaya tidak hilang diam-diam.
+ */
+export function jejakYatim(jejak, goals) {
+  const ada = new Set((goals || []).map(g => g && g.id).filter(Boolean));
+  return (jejak || []).filter(j => j && j.goalId && !ada.has(j.goalId));
+}
 export const fieldJejakAngka = (f) => !!(FIELD_JEJAK[f] || {}).angka;
 
 /**
