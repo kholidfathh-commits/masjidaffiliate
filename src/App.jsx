@@ -6649,10 +6649,6 @@ function TaskForm({ task, prefill, user, assignableUsers, onSave, onClose }) {
 
 // ============ REPORTS ============
 function ReportsView({ user, allUsers }) {
-  // Pagar halaman, bukan cuma menu: menu yang disembunyikan masih bisa dicapai
-  // lewat state/deep link. Pesannya menyebut Co-Leader juga — sejak peran itu
-  // ada, "Manajer / Leader" saja membuat Co-Leader mengira dirinya tak berhak.
-  if (!isPengelola(user)) return <NoAccess text="Halaman Laporan Mingguan hanya untuk Manajer, Leader, dan Co-Leader." />;
   const [reports, setReports] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -6660,9 +6656,30 @@ function ReportsView({ user, allUsers }) {
   const [genBusy, setGenBusy] = useState(false);
   const [filterWeek, setFilterWeek] = useState('all');
   const [lightbox, setLightbox] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [gagalMuat, setGagalMuat] = useState(false);
 
-  const load = async () => setReports(await storage.getList('reports:all'));
+  // Gagal muat TIDAK mengosongkan layar: data lama dipertahankan dan kegagalannya
+  // dikatakan terus terang. Layar kosong saat koneksi putus terbaca sebagai
+  // "belum ada laporan" — itu keterangan palsu tentang pekerjaan orang.
+  const load = async () => {
+    try {
+      setReports(await storage.getList('reports:all'));
+      setGagalMuat(false);
+    } catch (e) {
+      console.warn('Muat laporan mingguan gagal (pertahankan data lama):', e?.message || e);
+      setGagalMuat(true);
+    } finally { setLoading(false); }
+  };
   useEffect(() => { load(); }, []);
+
+  // PAGAR HALAMAN — ditaruh SETELAH semua hook, bukan sebelumnya.
+  // Kalau early return berada di atas hook, peran yang turun saat orangnya masih
+  // membuka halaman ini membuat React menghitung hook lebih sedikit dari render
+  // sebelumnya → layar putih. Sejak peran bisa berubah tanpa logout, itu bukan
+  // kemungkinan teoretis. Pesannya menyebut Co-Leader juga: sejak peran itu ada,
+  // "Manajer / Leader" saja membuat Co-Leader mengira dirinya tak berhak.
+  if (!isPengelola(user)) return <NoAccess text="Halaman Laporan Mingguan hanya untuk Manajer, Leader, dan Co-Leader." />;
 
   // Anti kerja dobel: rangkum otomatis laporan-laporan HARIAN minggu ini → draft laporan mingguan
   const generateFromDaily = async () => {
@@ -6730,7 +6747,9 @@ function ReportsView({ user, allUsers }) {
   // Visibility: Manajer semua · Leader/Co-Leader = dirinya + seluruh bawahannya · Karyawan = dirinya
   const idTerlihat = lingkupTimIds(user, allUsers);
   const visibleReports = reports.filter(r => idTerlihat.has(r.authorId));
-  const weeks = useMemo(() => [...new Set(visibleReports.map(r => r.weekStart))].sort().reverse(), [visibleReports]);
+  // Sengaja BUKAN useMemo: tidak boleh ada hook setelah pagar halaman di atas,
+  // dan daftar minggu ini cuma sekumpulan string pendek — tidak perlu di-memo.
+  const weeks = [...new Set(visibleReports.map(r => r.weekStart))].sort().reverse();
   const filtered = filterWeek === 'all' ? visibleReports : visibleReports.filter(r => r.weekStart === filterWeek);
 
   // SIAPA YANG BELUM KIRIM. Daftar laporan hanya memperlihatkan yang SUDAH masuk;
@@ -6741,7 +6760,10 @@ function ReportsView({ user, allUsers }) {
   // Sengaja BUKAN useMemo: hook tidak boleh ditambah setelah early return di atas.
   const mingguDinilai = filterWeek === 'all' ? getWeekRange().start : filterWeek;
   const sudahKirim = new Set(visibleReports.filter(r => r.weekStart === mingguDinilai).map(r => r.authorId));
-  const belumKirim = lingkupTim(user, allUsers).filter(u => !sudahKirim.has(u.id));
+  // Selagi data belum sampai, JANGAN menyebut siapa pun belum lapor — daftar
+  // kosong sementara akan menuduh seluruh tim sekaligus.
+  const belumKirim = (loading || gagalMuat) ? []
+    : lingkupTim(user, allUsers).filter(u => !sudahKirim.has(u.id));
 
   return (
     <div className="max-w-5xl">
@@ -6778,8 +6800,14 @@ function ReportsView({ user, allUsers }) {
         </div>
       )}
 
-      {filtered.length === 0 ? (
-        <EmptyState icon={FileText} text="Belum ada laporan. Submit laporan pertama Anda." />
+      {loading ? (
+        <div className="text-slate-400 text-sm py-10 text-center">Memuat laporan…</div>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={FileText} text={
+          gagalMuat ? 'Laporan gagal dimuat. Periksa koneksi, lalu muat ulang halaman.'
+            : visibleReports.length === 0 ? 'Belum ada laporan. Submit laporan pertama Anda.'
+            : `Tidak ada laporan pada minggu ${fmtDate(filterWeek)}. Pilih "Semua Minggu" untuk melihat yang lain.`
+        } />
       ) : (
         <div className="space-y-3">
           {filtered.map(r => (

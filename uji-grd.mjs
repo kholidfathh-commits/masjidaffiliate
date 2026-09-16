@@ -4282,7 +4282,9 @@ cek('82l. Karyawan hanya melihat laporannya sendiri',
 
 // --- "siapa yang BELUM kirim" — yang tidak lapor tidak meninggalkan jejak ---
 cek('82m. Halaman menghitung siapa yang belum kirim laporan',
-  /const belumKirim\s*=\s*lingkupTim\(user, allUsers\)/.test(badanLap));
+  /lingkupTim\(user, allUsers\)\.filter\(u => !sudahKirim\.has\(u\.id\)\)/.test(badanLap));
+cek('82m1. TIDAK menuduh siapa pun selagi data belum sampai / gagal sampai',
+  /const belumKirim\s*=\s*\(loading \|\| gagalMuat\)\s*\?\s*\[\]/.test(badanLap), badanLap.slice(badanLap.indexOf('const belumKirim'), badanLap.indexOf('const belumKirim') + 200));
 cek('82n. Dihitung dari laporan yang BOLEH dilihat, bukan seluruh laporan',
   /sudahKirim\s*=\s*new Set\(visibleReports/.test(badanLap));
 cek('82o. Saat filter "Semua Minggu", yang dinilai minggu berjalan (bukan semua sekaligus)',
@@ -4308,6 +4310,24 @@ cek('82t. Karyawan hanya menilai dirinya sendiri (tidak menagih siapa pun)',
 // --- batas minggu: SATU rumus, dipakai Laporan Mingguan & Scoreboard ---
 const iWk = src.indexOf('const getWeekRange');
 const badanWk = src.slice(iWk, src.indexOf('};', iWk) + 2);
+// --- memuat & keadaan kosong: jangan mengarang keterangan tentang kerja orang ---
+cek('82m2. PAGAR halaman dipasang SETELAH semua hook (early return di atas hook = layar putih)',
+  badanLap.indexOf('return <NoAccess') > badanLap.lastIndexOf('useState('), 
+  { pagar: badanLap.indexOf('return <NoAccess'), useStateTerakhir: badanLap.lastIndexOf('useState(') });
+cek('82m3. Tidak ada hook dipanggil setelah pagar itu', (() => {
+  const sisa = badanLap.slice(badanLap.indexOf('return <NoAccess'));
+  return !/use(State|Effect|Memo|Callback|Ref)\s*\(/.test(sisa);
+})());
+cek('82m4. Ada keadaan MEMUAT, bukan langsung "belum ada laporan"',
+  /\{loading \? \([\s\S]{0,120}Memuat laporan/.test(badanLap));
+cek('82m5. Gagal muat dikatakan terus terang, bukan disamarkan jadi kosong',
+  /gagalMuat \? 'Laporan gagal dimuat/.test(badanLap));
+cek('82m6. Gagal muat TIDAK mengosongkan data lama',
+  /pertahankan data lama[\s\S]{0,400}setGagalMuat\(true\)/.test(badanLap));
+cek('82m7. Kosong karena FILTER minggu dibedakan dari kosong beneran',
+  /visibleReports\.length === 0 \? 'Belum ada laporan/.test(badanLap)
+  && /Tidak ada laporan pada minggu/.test(badanLap));
+
 cek('82u. getWeekRange memakai batas minggu WIB dari modul, bukan rumus sendiri',
   /Abs\.awalMingguWib\(\)/.test(badanWk), badanWk);
 cek('82v. TIDAK lagi memakai jam perangkat (new Date/getDay) untuk menentukan Senin',
