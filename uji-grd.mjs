@@ -4641,6 +4641,21 @@ cek('87aa. Rute & menu terdaftar',
   && /id: 'grd-jejak', label: 'Jejak Perubahan'/.test(src));
 cek('87ab. Polling hanya saat tab terlihat (hemat egress)', /pollWhenVisible\(muat\)/.test(badanJv));
 
+// --- nama pengubah & waktu ---
+const iWj = src.indexOf('function grdWaktuJejak(');
+const badanWj = src.slice(iWj, src.indexOf('\n}', iWj) + 2);
+cek('87ac. Waktu jejak ditampilkan dalam WIB', /timeZone: Abs\.TZ_WIB/.test(badanWj));
+cek('87ad. TAHUN ikut ditulis kalau bukan tahun ini (jejak tidak pernah dipangkas)',
+  /tahunJejak !== tahunIni \? \{ year: 'numeric' \}/.test(badanWj), badanWj);
+cek('87ae. Tahunnya dihitung WIB juga, bukan tahun perangkat',
+  /Abs\.wibDayKey\(\)\.slice\(0, 4\)/.test(badanWj) && !/getFullYear\(\)/.test(badanWj));
+cek('87af. Waktu tak terbaca → kosong, bukan "Invalid Date"',
+  /Number\.isNaN\(d\.getTime\(\)\)\) return '';/.test(badanWj));
+cek('87ag. Nama pengubah dipakai dari yang TERSIMPAN di jejak (nama saat itu), bukan dicari ulang',
+  /oleh \{j\.olehNama \|\| 'Tidak diketahui'\}/.test(badanJv));
+cek('87ah. Pengubah yang akunnya sudah dihapus tetap punya nama di daftar saring',
+  /'Akun terhapus'/.test(fs.readFileSync(ROOT + '/src/grd/data.js', 'utf8')));
+
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang

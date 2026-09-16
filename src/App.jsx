@@ -19731,13 +19731,23 @@ function grdNilaiJejak(v, field, allUsers) {
   return String(v);
 }
 
-/** Waktu jejak dalam WIB, ringkas. */
+/**
+ * Waktu jejak dalam WIB, ringkas — TAHUN ikut ditulis kalau bukan tahun ini.
+ *
+ * Jejak tidak pernah dipangkas (ia bukti audit), jadi baris tahun lalu pasti
+ * ada. Tanpa tahun, "10 Sep 14:30" dari tahun lalu tidak bisa dibedakan dari
+ * yang minggu ini — persis kesalahan yang paling merugikan pada catatan audit.
+ */
 function grdWaktuJejak(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
+  const tahunIni = Abs.wibDayKey().slice(0, 4);
+  const tahunJejak = Abs.wibDayKey(d).slice(0, 4);
   return d.toLocaleString('id-ID', {
-    timeZone: Abs.TZ_WIB, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    timeZone: Abs.TZ_WIB, day: '2-digit', month: 'short',
+    ...(tahunJejak !== tahunIni ? { year: 'numeric' } : {}),
+    hour: '2-digit', minute: '2-digit',
   });
 }
 
