@@ -2506,6 +2506,12 @@ cek('47a-9. Catatan penilai ditempel di ATAS isian form saat memperbaiki', (() =
 })());
 cek('47a-10. Judul & tombol menyesuaikan keadaan usulan',
   /Usulkan Lagi Lead Measure/.test(src) && /Usulkan Lagi'/.test(src));
+cek('47a-28. Lead AKTIF diberi tombol "Cabut", bukan "Nilai"',
+  /l\.status === 'aktif' \? 'Cabut' : 'Nilai'/.test(src));
+cek('47a-29. Judul panel ikut menyesuaikan saat mencabut',
+  /Cabut Lead Measure' : 'Nilai Usulan Lead Measure'/.test(src));
+cek('47a-30. Akibat mencabut dijelaskan (slot bebas, skor lama tetap)',
+  /Mencabutnya membebaskan satu slot/.test(src) && /Skor yang sudah tercatat tidak ikut terhapus/.test(src));
 cek('47a-5. Panel penilaian ada & dipakai halaman',
   /function GrdNilaiLeadModal\(/.test(src) && /<GrdNilaiLeadModal\b/.test(src));
 cek('47a-6. Tiga jawaban: setujui, minta perbaiki, tolak',
@@ -3898,6 +3904,85 @@ const pesanKe4 = await pesanBt(() => Svc.nilaiLead(semuaUsul[3], 'aktif', { user
 cek('75o. Pesannya menyebut batas & cara membereskannya',
   /batasnya 3/.test(pesanKe4) && /Cabut salah satunya/.test(pesanKe4), pesanKe4);
 lepasMockGrd();
+
+judul('76. Mencabut lead measure yang sudah aktif');
+const spCb = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spCb });
+const goalCb = { id: 'cb1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(goalCb, { user: OWNER, allUsers: tim });
+const pesanCb = async (fn) => { try { await fn(); return ''; } catch (e) { return e.message; } };
+const buatAktif = async (d) => {
+  const u = await Svc.usulkanLead(
+    { goalId: 'cb1', ownerId: 'u-staf1', description: d, targetMingguan: 3, uom: 'Konten' },
+    { user: STAF1, allUsers: tim, goal: goalCb });
+  return Svc.nilaiLead(u, 'aktif', { user: LEADER, allUsers: tim });
+};
+const a1 = await buatAktif('A');
+const a2 = await buatAktif('B');
+const a3 = await buatAktif('C');
+cek('76a. Tiga aktif, slot penuh', L.leadAktif(await Svc.ambilLeadGoal('cb1'), 'cb1').length === 3);
+cek('76b. Usulan baru ditolak', /batasnya 3/.test(await pesanCb(() => Svc.usulkanLead(
+  { goalId: 'cb1', ownerId: 'u-staf1', description: 'D', targetMingguan: 1, uom: 'x' },
+  { user: STAF1, allUsers: tim, goal: goalCb }))));
+
+cek('76c. Alur membolehkan aktif → ditolak (mencabut)', L.bolehPindahStatus('aktif', 'ditolak'));
+cek('76d. Mencabut WAJIB disertai catatan',
+  /Tulis catatan singkat/.test(await pesanCb(() => Svc.nilaiLead(a3, 'ditolak', { user: LEADER, allUsers: tim }))));
+cek('76e. PEMILIK tidak bisa mencabut sendiri (sama seperti menilai)',
+  /tidak bisa menilai usulan Anda sendiri/.test(
+    await pesanCb(() => Svc.nilaiLead(a3, 'ditolak', { user: STAF1, allUsers: tim, catatan: 'x' }))));
+
+await Svc.nilaiLead(a3, 'ditolak', { user: LEADER, allUsers: tim, catatan: 'Tidak jalan.' });
+cek('76f. Setelah dicabut, aktif tinggal dua',
+  L.leadAktif(await Svc.ambilLeadGoal('cb1'), 'cb1').length === 2);
+cek('76g. Slot terbebas → usulan baru boleh lagi',
+  (await pesanCb(() => Svc.usulkanLead(
+    { goalId: 'cb1', ownerId: 'u-staf1', description: 'D', targetMingguan: 1, uom: 'x' },
+    { user: STAF1, allUsers: tim, goal: goalCb }))) === '');
+cek('76h. Pencabutan tercatat di riwayat', (() => {
+  const l = spCb.baris.get('grdlead:rec:cb1:' + a3.id);
+  return (l.riwayat || []).some(r => r.aksi === 'ditolak' && /Tidak jalan/.test(r.catatan));
+})());
+cek('76i. Alasan pencabutan tersimpan di catatannya', (() => {
+  const l = spCb.baris.get('grdlead:rec:cb1:' + a3.id);
+  return /Tidak jalan/.test(l.catatan);
+})());
+lepasMockGrd();
+
+judul('77. Keputusan atasan ditegakkan di server (SQL)');
+const sqlKp = fs.readFileSync(ROOT + '/supabase-grd-rpc.sql', 'utf8');
+const blokLead = (() => {
+  const i = sqlKp.indexOf('function public.grd_simpan_lead');
+  return sqlKp.slice(i, sqlKp.indexOf('$$;', i));
+})();
+cek('77a. Server menolak pengusul menilai usulannya sendiri',
+  /tidak bisa menilai usulan Anda sendiri/.test(blokLead));
+cek('77b. Server memeriksa ALUR status, bukan menerima apa saja',
+  /Perpindahan status/.test(blokLead) && /v_status_lama/.test(blokLead));
+cek('77c. Status lama dibaca dari BARISNYA, bukan dari argumen',
+  /select value->>'status' into v_status_lama/.test(blokLead));
+cek('77d. Semua perpindahan sah tercantum', (() => {
+  return /'usul'\s+and p_lead->>'status' in \('aktif', 'perbaiki', 'ditolak'\)/.test(blokLead)
+    && /'perbaiki' and p_lead->>'status' = 'usul'/.test(blokLead)
+    && /'ditolak'  and p_lead->>'status' = 'usul'/.test(blokLead)
+    && /'aktif'    and p_lead->>'status' in \('perbaiki', 'ditolak'\)/.test(blokLead);
+})());
+cek('77e. Peta status di SQL sepadan dengan ALUR_LEAD di aplikasi', (() => {
+  // Bukan menjalankan SQL-nya — memastikan tiap perpindahan yang sah di
+  // ALUR_LEAD juga muncul di SQL, dan tidak ada yang kelebihan.
+  const pasangan = [];
+  for (const dari of Object.keys(L.ALUR_LEAD)) {
+    for (const ke of L.ALUR_LEAD[dari]) pasangan.push([dari, ke]);
+  }
+  return pasangan.every(([dari, ke]) => {
+    const re = new RegExp(`'${dari}'[^\\n]*'status'\\s*(=|in)[^\\n]*'${ke}'`);
+    return re.test(blokLead);
+  });
+})());
+cek('77f. Peringatan menjaga sinkron dengan ALUR_LEAD ditulis',
+  /harus sama dengan ALUR_LEAD/.test(blokLead));
+cek('77g. Batas tiga aktif juga ditegakkan di server',
+  /sudah punya 3 lead measure aktif/.test(blokLead));
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

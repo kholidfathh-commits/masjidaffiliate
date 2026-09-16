@@ -192,6 +192,7 @@ as $$
 declare
   v_id text;
   v_goal text;
+  v_status_lama text;
 begin
   v_id := p_lead->>'id';
   v_goal := p_lead->>'goalId';
@@ -232,11 +233,32 @@ begin
   if not public.grd_boleh_tulis(p_lead->>'ownerId') then
     raise exception 'Anda tidak berwenang mengubah lead measure milik orang itu.';
   end if;
+
   -- MENILAI beda dari mengubah: pengusul tidak boleh menilai usulannya sendiri.
   if auth.uid() is not null
      and p_lead->>'status' in ('aktif', 'ditolak', 'perbaiki')
      and auth.uid()::text = p_lead->>'ownerId' then
     raise exception 'Anda tidak bisa menilai usulan Anda sendiri.';
+  end if;
+
+  -- ALUR STATUS diperiksa di server juga, bukan hanya di aplikasi. Tanpa ini,
+  -- pemanggil bisa mengirim status apa saja — termasuk melompat dari 'ditolak'
+  -- langsung ke 'aktif' tanpa pernah diusulkan ulang, yang membuat persetujuan
+  -- kehilangan artinya. Peta di bawah harus sama dengan ALUR_LEAD di
+  -- src/grd/lead.js.
+  select value->>'status' into v_status_lama
+  from public.kv_store
+  where key = 'grdlead:rec:' || v_goal || ':' || v_id;
+
+  if v_status_lama is not null and v_status_lama <> p_lead->>'status' then
+    if not (
+      (v_status_lama = 'usul'     and p_lead->>'status' in ('aktif', 'perbaiki', 'ditolak'))
+      or (v_status_lama = 'perbaiki' and p_lead->>'status' = 'usul')
+      or (v_status_lama = 'ditolak'  and p_lead->>'status' = 'usul')
+      or (v_status_lama = 'aktif'    and p_lead->>'status' in ('perbaiki', 'ditolak'))
+    ) then
+      raise exception 'Perpindahan status % → % tidak sah.', v_status_lama, p_lead->>'status';
+    end if;
   end if;
   -- ==========================================================================
 

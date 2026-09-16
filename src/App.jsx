@@ -20449,7 +20449,8 @@ function GrdNilaiLeadModal({ lead, goal, user, allUsers, adaSekarang, onNilai, o
   };
 
   return (
-    <Modal title="Nilai Usulan Lead Measure" onClose={onClose} wide>
+    <Modal title={l.status === 'aktif' ? 'Cabut Lead Measure' : 'Nilai Usulan Lead Measure'}
+      onClose={onClose} wide>
       <div className="rounded-xl bg-slate-50 border border-slate-200/70 px-3.5 py-3">
         <div className="text-sm font-semibold text-slate-800">{l.description}</div>
         <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
@@ -20465,6 +20466,13 @@ function GrdNilaiLeadModal({ lead, goal, user, allUsers, adaSekarang, onNilai, o
           </div>
         )}
       </div>
+
+      {l.status === 'aktif' && (
+        <div className="mt-3 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-[12px] text-slate-600">
+          Lead measure ini sedang <span className="font-semibold">aktif</span>. Mencabutnya membebaskan satu slot
+          dan menghentikan pengisian skor mingguannya. Skor yang sudah tercatat tidak ikut terhapus.
+        </div>
+      )}
 
       {slotPenuh && (
         <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-[12px] text-amber-800">
@@ -20497,7 +20505,9 @@ function GrdNilaiLeadModal({ lead, goal, user, allUsers, adaSekarang, onNilai, o
 
       <div className="mt-4">
         <GrdField label="Catatan"
-          hint="Wajib kalau meminta perbaikan atau menolak — supaya pengusul tahu apa yang kurang.">
+          hint={l.status === 'aktif'
+            ? 'Wajib — supaya pemiliknya tahu kenapa lead measure ini dicabut.'
+            : 'Wajib kalau meminta perbaikan atau menolak — supaya pengusul tahu apa yang kurang.'}>
           <textarea value={catatan} onChange={e => { setCatatan(e.target.value); setPesan(''); }}
             rows={3} placeholder="Contoh: Targetnya terlalu rendah untuk mengejar goal, coba 10/minggu."
             className={GRD_INPUT} />
@@ -20578,9 +20588,14 @@ function GrdKartuLead({ l, user, allUsers, onNilai, onUbah }) {
               </button>
             )}
             {bisaNilai && onNilai && Lead.ALUR_LEAD[l.status]?.length > 0 && (
+              // Lead yang SUDAH aktif tidak "dinilai" lagi — ia dicabut. Pesan
+              // batas tiga berkali-kali menyuruh "cabut salah satunya dulu", dan
+              // tombol berlabel "Nilai" membuat jalan keluarnya tidak ketemu.
               <button onClick={() => onNilai(l)}
-                className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
-                Nilai
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg ${l.status === 'aktif'
+                  ? 'bg-white border border-slate-300 text-slate-700 hover:border-red-300 hover:text-red-700'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                {l.status === 'aktif' ? 'Cabut' : 'Nilai'}
               </button>
             )}
           </div>
