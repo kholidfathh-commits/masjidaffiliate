@@ -1066,7 +1066,8 @@ const BACKUP_KEYS = [
   // Manajemen Sampel: master, log pemakaian (SUMBER KEBENARAN, tak tergantikan), cache ringkasan
   Sampel.SAMPEL_BACKUP_KEY, Sampel.PAKAI_BACKUP_KEY, Sampel.STAT_BACKUP_KEY,
   // GRD: goal + jejak perubahan angka (jejak = bukti audit, tak tergantikan)
-  Grd.GOAL_BACKUP_KEY, Grd.JEJAK_BACKUP_KEY,
+  // + template per peran yang diubah tim (satu baris, seperti app:settings)
+  Grd.GOAL_BACKUP_KEY, Grd.JEJAK_BACKUP_KEY, Grd.TEMPLATE_KEY,
   'img:store', // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
   ...LMS_BACKUP_KEYS // LMS: jalur, kursus, isi materi, enrollment, progres, kuis, tugas, validasi, modul bacaan
 ];
@@ -19193,7 +19194,11 @@ function GrdFormGoal({ goal, user, allUsers, periodeAktif, jenisAktif, onSimpan,
   // Template mengikuti peran PEMILIK yang dipilih, bukan peran orang yang sedang
   // mengisi — atasan yang membuatkan goal untuk stafnya butuh contoh goal STAF.
   const peranPemilik = (allUsers || []).find(u => u && u.id === form.ownerId)?.role || 'operasional';
-  const template = Grd.templateUntuk(peranPemilik);
+  // Template yang diubah tim dimuat sekali; selama belum termuat (atau gagal),
+  // yang dipakai tetap template bawaan supaya form tidak pernah kosong.
+  const [templateTim, setTemplateTim] = useState(null);
+  useEffect(() => { GrdSvc.ambilTemplate().then(setTemplateTim).catch(() => setTemplateTim(null)); }, []);
+  const template = Grd.templateUntuk(peranPemilik, templateTim);
   const pakaiTemplate = (t) => {
     const g = Grd.terapkanTemplate(t, { ownerId: form.ownerId, periode: form.periode });
     setForm(f => ({
@@ -19622,10 +19627,21 @@ function GrdKelolaView({ user, allUsers }) {
       // Rencananya disusun ULANG di layanan dari goal induk — bukan dikirim dari
       // layar — supaya isian yang sudah usang di modal tidak bisa lolos menembus
       // pemeriksaan wewenang.
-      const dibuat = await GrdSvc.turunkanGoal(g, { user, allUsers, bagiRata: g._bagiRata, goalAda: goals });
+      const { dibuat, gagal, dilewati } = await GrdSvc.turunkanGoal(
+        g, { user, allUsers, bagiRata: g._bagiRata, goalAda: goals });
       setTurunkan(null);
       await muat();
-      if (dibuat.length === 0) alert('Semua bawahan sudah punya goal turunan dari goal ini.');
+      // Kegagalan sebagian TIDAK boleh lewat diam-diam — pengguna harus tahu
+      // siapa yang goalnya belum tersimpan supaya bisa mengulang.
+      if (gagal.length > 0) {
+        alert(`⚠️ ${dibuat.length} goal dibuat, tapi ${gagal.length} gagal:\n`
+          + gagal.map(x => `· ${x.nama} — ${x.alasan}`).join('\n')
+          + '\n\nTekan "Turunkan" lagi untuk mencoba yang gagal saja.');
+      } else if (dibuat.length === 0) {
+        alert(dilewati > 0
+          ? 'Semua bawahan sudah punya goal turunan dari goal ini.'
+          : 'Tidak ada bawahan langsung yang bisa dituruni goal ini.');
+      }
     } catch (e) { alert('⚠️ ' + (e?.message || e)); }
   };
   // Tombol turunkan hanya muncul kalau pemilik goal memang punya bawahan langsung.
