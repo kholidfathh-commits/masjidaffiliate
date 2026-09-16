@@ -4086,6 +4086,142 @@ cek('79q. Owner: lead kedua cabang terbaca', qOwner.hasil.length === 4);
 cek('79r. Tanpa argumen sama sekali tidak error', (await Svc.queryLead()).hasil.length >= 0);
 lepasMockGrd();
 
+judul('80. Lead measure yatim (goalnya sudah dihapus)');
+const goalsAda = [goalDari('u-staf1', { id: 'ga1' }), goalDari('u-staf2', { id: 'ga2' })];
+const leadCampur = [
+  lm({ id: 'y1', goalId: 'ga1', status: 'aktif' }),
+  lm({ id: 'y2', goalId: 'sudah-dihapus', status: 'aktif' }),
+  lm({ id: 'y3', goalId: 'ga2', status: 'usul' }),
+  lm({ id: 'y4', goalId: 'juga-dihapus', status: 'ditolak' }),
+];
+const yatim = L.leadYatim(leadCampur, goalsAda);
+cek('80a. Lead yang goalnya hilang terdeteksi',
+  yatim.map(l => l.id).sort().join() === 'y2,y4', yatim.map(l => l.id));
+cek('80b. Lead yang goalnya ada TIDAK ikut', !yatim.some(l => ['y1', 'y3'].includes(l.id)));
+cek('80c. Status apa pun bisa yatim (bukan hanya yang aktif)',
+  yatim.some(l => l.status === 'ditolak'));
+cek('80d. Tanpa goal sama sekali → semuanya yatim',
+  L.leadYatim(leadCampur, []).length === 4);
+cek('80e. Daftar kosong aman',
+  L.leadYatim([], goalsAda).length === 0 && L.leadYatim(null, goalsAda).length === 0);
+cek('80f. Lead tanpa goalId tidak dihitung yatim (itu data rusak, bukan yatim)',
+  L.leadYatim([lm({ id: 'z', goalId: '' })], goalsAda).length === 0);
+
+const spYt = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spYt });
+const gYt = { id: 'yt1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Akan dihapus', base: 0, target: 10, uom: 'x' };
+await Svc.simpanGoal(gYt, { user: OWNER, allUsers: tim });
+const lYt = await Svc.usulkanLead(
+  { goalId: 'yt1', ownerId: 'u-staf1', description: 'Ikut yatim', targetMingguan: 2, uom: 'x' },
+  { user: STAF1, allUsers: tim, goal: gYt });
+await Svc.hapusGoal(gYt, { user: OWNER, allUsers: tim });
+
+cek('80g. Menghapus goal TIDAK ikut menghapus lead-nya (bisa keliru & tak bisa dikembalikan)',
+  spYt.jumlah('grdlead:rec:yt1:') === 1);
+const qYt = await Svc.queryLead({ user: OWNER, allUsers: tim, periode: '2026-09' });
+cek('80h. Lead yatim TIDAK muncul di daftar biasa', !qYt.hasil.some(l => l.id === lYt.id));
+cek('80i. Tapi DILAPORKAN terpisah, tidak hilang diam-diam',
+  qYt.yatim.some(l => l.id === lYt.id), qYt.yatim.map(l => l.id));
+await Svc.simpanGoal(gYt, { user: OWNER, allUsers: tim });
+const qPulih = await Svc.queryLead({ user: OWNER, allUsers: tim, periode: '2026-09' });
+cek('80k. Setelah goal dibuat ulang, lead-nya muncul lagi & tidak yatim',
+  qPulih.hasil.some(l => l.id === lYt.id) && qPulih.yatim.length === 0);
+lepasMockGrd();
+
+// ============================================================================
+judul('81. Bentuk baris skor, baris yang tak bisa dinilai, & skor yatim');
+// ============================================================================
+const brs81 = (extra = {}) => ({
+  id: '2026-09-14:la', leadId: 'la', goalId: 'g1', ownerId: 'u-staf1',
+  minggu: '2026-09-14', nilai: 6, target: 5, uom: 'Konten', ...extra,
+});
+
+cek('81a. Skema menyebut field yang menentukan menang/kalah',
+  ['leadId', 'minggu', 'nilai', 'target'].every(k => SB.SKEMA_SKOR[k] && SB.SKEMA_SKOR[k].wajib));
+cek('81b. Tiap field skema punya penanda versi (sejak) supaya migrasi bisa dilacak',
+  Object.values(SB.SKEMA_SKOR).every(f => Number.isInteger(f.sejak) && f.sejak >= 1));
+cek('81c. Baris lengkap → tidak ada field hilang', SB.fieldHilangSkor(brs81()).length === 0);
+
+// --- BEDA PENTING: "bentuknya tidak utuh" BUKAN berarti "tidak bisa dinilai" ---
+cek('81d. Baris tanpa goalId dilaporkan bentuknya tidak utuh',
+  SB.fieldHilangSkor(brs81({ goalId: '' })).includes('goalId'));
+cek('81e. TAPI baris itu tetap bisa dinilai menang/kalah (bukan "rusak")',
+  SB.skorRusak(brs81({ goalId: '' })) === false && SB.menang(brs81({ goalId: '' })) === true);
+
+cek('81f. Baris tanpa target TIDAK BISA dinilai → rusak', SB.skorRusak(brs81({ target: 0 })) === true);
+cek('81g. Baris rusak dibaca "rusak", BUKAN "kalah" (tuduhan palsu)',
+  SB.hasilSkor(brs81({ target: 0 })) === 'rusak');
+cek('81h. Baris rusak punya gaya tampilannya sendiri di layar',
+  SB.gayaHasil('rusak').label === 'Data rusak' && SB.gayaHasil('rusak') !== SB.gayaHasil('kalah'));
+cek('81i. Minggu tak sah juga rusak', SB.skorRusak(brs81({ minggu: 'bukan-tanggal' })) === true);
+cek('81j. Tanpa leadId rusak (tak bisa ditempelkan ke mana pun)',
+  SB.skorRusak(brs81({ leadId: '' })) === true);
+cek('81k. NILAI NOL bukan kerusakan — "dikerjakan nol kali" itu jawaban, dan itu kalah',
+  SB.skorRusak(brs81({ nilai: 0 })) === false && SB.hasilSkor(brs81({ nilai: 0 })) === 'kalah');
+cek('81l. Aturan rusak = aturan pintu masuk yang sama, bukan salinan kedua',
+  SB.skorRusak(brs81({ target: 0 })) === (SB.validasiSkor(brs81({ target: 0 })) !== ''));
+
+// --- rekap: yang rusak tidak boleh menyelinap jadi angka kalah ---
+const leadRk = [lm({ id: 'la', status: 'aktif' }), lm({ id: 'lb', status: 'aktif' })];
+const skorRk = [
+  brs81({ id: 'x1', leadId: 'la', nilai: 6, target: 5 }),          // menang
+  brs81({ id: 'x2', leadId: 'lb', nilai: 1, target: 0 }),          // rusak
+];
+const rkRusak = SB.rekapMinggu(skorRk, leadRk, '2026-09-14');
+cek('81m. Rekap menghitung yang rusak terpisah', rkRusak.rusak === 1, rkRusak);
+cek('81n. Yang rusak TIDAK menambah angka kalah', rkRusak.kalah === 0, rkRusak.kalah);
+cek('81o. Yang rusak dihitung "belum diisi" (jujur: memang belum ada angka yang terbaca)',
+  rkRusak.kosong === 1, rkRusak.kosong);
+cek('81p. Persen menang tidak ikut rusak (1 dari 1 yang terisi)', rkRusak.persenMenang === 100);
+const orgRusak = SB.rekapPerOrang(skorRk, leadRk, '2026-09-14', tim);
+cek('81q. Rekap per orang juga memisahkan yang rusak',
+  orgRusak[0].rusak === 1 && orgRusak[0].kalah === 0, orgRusak[0]);
+
+// --- skor yatim: lead measure-nya sudah tidak ada ---
+const skorCampur = [
+  brs81({ id: 'y1', leadId: 'la' }),
+  brs81({ id: 'y2', leadId: 'lead-sudah-hilang' }),
+  brs81({ id: 'y3', leadId: 'lb' }),
+];
+const skYatim = SB.skorYatim(skorCampur, leadRk);
+cek('81r. Skor yang lead-nya hilang terdeteksi',
+  skYatim.map(s => s.id).join() === 'y2', skYatim.map(s => s.id));
+cek('81s. Skor yang lead-nya masih ada TIDAK ikut', skYatim.length === 1);
+cek('81t. Tanpa lead sama sekali → semuanya yatim', SB.skorYatim(skorCampur, []).length === 3);
+cek('81u. Daftar kosong aman',
+  SB.skorYatim([], leadRk).length === 0 && SB.skorYatim(null, leadRk).length === 0);
+
+// --- bentuk KUNCI: satu lead, satu minggu, satu baris — dijaga kuncinya ---
+const spSk3 = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spSk3 });
+const gSk3 = { id: 'gk1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Goal skor', base: 0, target: 40, uom: 'Konten' };
+await Svc.simpanGoal(gSk3, { user: OWNER, allUsers: tim });
+let lSk3 = await Svc.usulkanLead(
+  { goalId: 'gk1', ownerId: 'u-staf1', description: 'Konten tayang', targetMingguan: 5, uom: 'Konten' },
+  { user: STAF1, allUsers: tim, goal: gSk3 });
+lSk3 = await Svc.nilaiLead(lSk3, 'aktif', { user: WAKIL, allUsers: tim });
+
+const mgLalu = SB.geserMinggu(SB.mingguIni(), -1);
+await Svc.simpanSkor({ lead: lSk3, minggu: mgLalu, nilai: 2 }, { user: STAF1, allUsers: tim });
+await Svc.simpanSkor({ lead: lSk3, minggu: mgLalu, nilai: 7 }, { user: STAF1, allUsers: tim });
+cek('81v. Mengisi ulang minggu yang sama MENGGANTI, tidak menumpuk baris',
+  spSk3.jumlah(`grdskor:rec:${mgLalu}:`) === 1, spSk3.jumlah(`grdskor:rec:${mgLalu}:`));
+const skMgLalu = await Svc.ambilSkorMinggu(mgLalu);
+cek('81w. Yang tersimpan angka terakhir, bukan yang pertama',
+  skMgLalu.length === 1 && skMgLalu[0].nilai === 7, skMgLalu.map(s => s.nilai));
+
+await Svc.simpanSkor({ lead: lSk3, minggu: SB.mingguIni(), nilai: 5 }, { user: STAF1, allUsers: tim });
+cek('81x. Minggu ditaruh di DEPAN kunci → satu minggu bisa dibaca tanpa menarik semua riwayat',
+  spSk3.prefixDiminta.some(p => p === `grdskor:rec:${mgLalu}:`), spSk3.prefixDiminta);
+cek('81y. Dua minggu berbeda = dua baris berbeda',
+  spSk3.jumlah('grdskor:rec:') === 2, spSk3.jumlah('grdskor:rec:'));
+cek('81z. Target DISALIN saat dicatat (riwayat lama tidak ikut berubah)',
+  skMgLalu[0].target === 5);
+lepasMockGrd();
+
+cek('81aa. Halaman Scoreboard MEMBERI TAHU kalau ada baris yang tak bisa dinilai',
+  /rekap\.rusak\s*>\s*0/.test(src) && /tidak bisa dinilai/.test(src));
+
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang

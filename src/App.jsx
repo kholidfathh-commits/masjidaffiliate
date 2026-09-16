@@ -21334,6 +21334,16 @@ function GrdScoreboardView({ user, allUsers }) {
           value={rekap.terisi ? `${rekap.persenMenang}%` : '—'} color="blue" />
       </div>
 
+      {/* Baris skor yang tidak bisa dinilai TIDAK boleh diam-diam terhitung kalah —
+          itu tuduhan palsu. Ditampilkan hanya kalau memang ada. */}
+      {rekap.rusak > 0 && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <b>{rekap.rusak} skor minggu ini tidak bisa dinilai</b> — datanya tidak lengkap
+          (mis. target mingguannya kosong). Sementara ini dihitung sebagai <b>belum diisi</b>,
+          bukan kalah. Isi ulang skornya untuk memperbaiki.
+        </div>
+      )}
+
       {/* TREN ANTAR-MINGGU — arahnya membaik atau memburuk. Ditaruh sebelum
           daftar karena pertanyaan "pekan ini bagaimana?" baru berarti kalau
           dibandingkan dengan pekan-pekan sebelumnya. */}
