@@ -19,7 +19,7 @@
 //   langsung memberi tahu minggu yang mana.
 // ============================================================================
 
-import { wibDayKey, geserHari } from '../absensi/logika.js';
+import { wibDayKey, geserHari, awalMingguWib, akhirMingguWib } from '../absensi/logika.js';
 import { isManajemen, idBawahanTransitif } from '../peran/hierarki.js';
 import { normalisasiLead } from './lead.js';
 import { bolehTulisMilik } from './data.js';
@@ -35,31 +35,12 @@ const angka = (v, fallback = 0) => {
 
 const RE_HARI = /^\d{4}-\d{2}-\d{2}$/;
 
-/**
- * Hari dalam seminggu untuk sebuah tanggal WIB (0 = Minggu ... 6 = Sabtu).
- * Tanggalnya SUDAH dalam WIB, jadi diperlakukan sebagai UTC supaya penanggalan
- * tidak bergeser lagi oleh zona waktu perangkat.
- */
-function hariKe(dk) {
-  const d = new Date(`${dk}T00:00:00Z`);
-  return Number.isNaN(d.getTime()) ? -1 : d.getUTCDay();
-}
-
-/** Senin dari minggu yang memuat tanggal ini. '' bila tanggalnya tidak sah. */
-export function awalMinggu(dk = wibDayKey()) {
-  const s = String(dk || '');
-  if (!RE_HARI.test(s)) return '';
-  const h = hariKe(s);
-  if (h < 0) return '';
-  const mundur = (h + 6) % 7;   // Senin → 0, Minggu → 6
-  return geserHari(s, -mundur);
-}
-
-/** Minggu (Ahad) penutup dari minggu yang memuat tanggal ini. */
-export function akhirMinggu(dk = wibDayKey()) {
-  const senin = awalMinggu(dk);
-  return senin ? geserHari(senin, 6) : '';
-}
+// Batas minggu SENGAJA tidak dihitung ulang di sini. Rumusnya tinggal di
+// src/absensi/logika.js bersama aturan tanggal WIB lain, karena halaman Laporan
+// Mingguan memakai batas yang SAMA — dan dua salinan rumus Senin yang menyimpang
+// berarti satu laporan masuk ke minggu yang berbeda dari skornya.
+export const awalMinggu = awalMingguWib;
+export const akhirMinggu = akhirMingguWib;
 
 /** Kunci minggu = tanggal Senin-nya. Dipakai sebagai id periode pengisian. */
 export const mingguKey = (dk = wibDayKey()) => awalMinggu(dk);

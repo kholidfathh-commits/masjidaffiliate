@@ -39,6 +39,41 @@ export const geserHari = (dk, n) => {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 };
+// ====== BATAS MINGGU (WIB) ======
+// RUMAHNYA DI SINI, bukan di modul yang kebetulan memakainya duluan: "minggu
+// itu mulai hari apa" adalah aturan penanggalan WIB, sama seperti awalBulan.
+// Scoreboard GRD dan halaman Laporan Mingguan sama-sama memakai yang INI —
+// tiga salinan rumus Senin pasti menyimpang suatu hari, dan kalau menyimpang,
+// laporan orang masuk ke kotak minggu yang berbeda tanpa ada yang sadar.
+
+const RE_HARI_WIB = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Hari dalam seminggu untuk tanggal WIB (0 = Minggu ... 6 = Sabtu), −1 bila tak sah.
+ * Tanggalnya SUDAH WIB, jadi diperlakukan sebagai UTC supaya tidak bergeser lagi
+ * oleh zona waktu perangkat.
+ */
+export function hariKeWib(dk) {
+  const d = new Date(`${dk}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? -1 : d.getUTCDay();
+}
+
+/** Senin dari minggu yang memuat tanggal WIB ini. '' bila tanggalnya tidak sah. */
+export function awalMingguWib(dk = wibDayKey()) {
+  const s = String(dk || '');
+  if (!RE_HARI_WIB.test(s)) return '';
+  const h = hariKeWib(s);
+  if (h < 0) return '';
+  const mundur = (h + 6) % 7;   // Senin → 0, Minggu → 6
+  return geserHari(s, -mundur);
+}
+
+/** Ahad penutup dari minggu yang memuat tanggal WIB ini. */
+export function akhirMingguWib(dk = wibDayKey()) {
+  const senin = awalMingguWib(dk);
+  return senin ? geserHari(senin, 6) : '';
+}
+
 /** Tanggal 1 pada bulan yang sama. */
 export const awalBulan = (dk) => `${String(dk).slice(0, 7)}-01`;
 /** Tanggal terakhir pada bulan yang sama (28/29/30/31 — tahun kabisat ikut benar). */

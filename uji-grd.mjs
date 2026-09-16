@@ -21,6 +21,7 @@ import * as SB from './src/grd/scoreboard.js';
 import { goalContoh } from './src/grd/contoh.js';
 import * as Svc from './src/grd/layanan.js';
 import * as H from './src/peran/hierarki.js';
+import * as Abs from './src/absensi/logika.js';
 import { storageMock, rpcMock, lepasMockGrd } from './src/grd/mock.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -4303,6 +4304,18 @@ cek('82s. Yang sudah kirim tidak ikut disebut',
   === 'u-leader,u-staf1,u-staf2');
 cek('82t. Karyawan hanya menilai dirinya sendiri (tidak menagih siapa pun)',
   H.lingkupTim(STAF1, tim).map(u => u.id).join() === 'u-staf1');
+
+// --- batas minggu: SATU rumus, dipakai Laporan Mingguan & Scoreboard ---
+const iWk = src.indexOf('const getWeekRange');
+const badanWk = src.slice(iWk, src.indexOf('};', iWk) + 2);
+cek('82u. getWeekRange memakai batas minggu WIB dari modul, bukan rumus sendiri',
+  /Abs\.awalMingguWib\(\)/.test(badanWk), badanWk);
+cek('82v. TIDAK lagi memakai jam perangkat (new Date/getDay) untuk menentukan Senin',
+  !/new Date\(\)/.test(badanWk) && !/getDay\(\)/.test(badanWk), badanWk);
+cek('82w. Scoreboard memakai rumus yang PERSIS SAMA, bukan salinan',
+  SB.awalMinggu === Abs.awalMingguWib && SB.akhirMinggu === Abs.akhirMingguWib);
+cek('82x. Dan hasilnya memang sama untuk tanggal yang sama',
+  SB.awalMinggu('2026-09-20') === Abs.awalMingguWib('2026-09-20'));
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

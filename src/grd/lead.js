@@ -380,6 +380,24 @@ export function urutkanLead(daftar) {
   });
 }
 
+/**
+ * Lead measure YATIM — goal yang ditempelinya sudah tidak ada.
+ *
+ * Terjadi kalau goal dihapus: lead-nya tetap tersimpan, tapi tidak akan pernah
+ * muncul lagi karena semua kueri menyaring lewat goal. Baris seperti itu diam
+ * memakan tempat dan ikut terbaca tiap `ambilLead()`.
+ *
+ * Sengaja TIDAK dihapus otomatis saat goalnya dihapus: penghapusan goal bisa
+ * keliru dan bisa dibatalkan dengan membuat ulang goalnya, sedangkan lead yang
+ * sudah terlanjur terhapus tidak bisa dikembalikan. Jadi ia dilaporkan saja,
+ * dan pengelola yang memutuskan.
+ */
+export function leadYatim(daftar, goals) {
+  const adaGoal = new Set((goals || []).map(g => g && g.id).filter(Boolean));
+  return (daftar || []).map(normalisasiLead).filter(Boolean)
+    .filter(l => l.goalId && !adaGoal.has(l.goalId));
+}
+
 /** Ringkasan seluruh lead measure yang terlihat — untuk kartu statistik. */
 export function ringkasLead(daftar) {
   const bersih = (daftar || []).map(normalisasiLead).filter(Boolean);

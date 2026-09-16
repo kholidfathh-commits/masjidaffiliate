@@ -324,6 +324,30 @@ cek('X6. Izin dobel pada tanggal sama → dipilih satu (yang terbaru dibuat)', (
   return A.izinPadaTanggal([a, b], ACUAN).id === 'b';
 })());
 
+judul('Y. Batas minggu WIB (Senin–Ahad) — dipakai Scoreboard & Laporan Mingguan');
+// Rumahnya di sini supaya tidak ada dua salinan rumus "Senin" yang bisa
+// menyimpang. Kalau menyimpang, laporan seseorang masuk ke kotak minggu yang
+// berbeda dari skornya dan tidak ada yang sadar.
+cek('Y1. Senin tetap Senin itu juga', A.awalMingguWib('2026-09-14') === '2026-09-14');
+cek('Y2. Selasa mundur ke Senin', A.awalMingguWib('2026-09-15') === '2026-09-14');
+cek('Y3. Ahad mundur ke Senin yang sama (BUKAN maju ke besok)',
+  A.awalMingguWib('2026-09-20') === '2026-09-14', A.awalMingguWib('2026-09-20'));
+cek('Y4. Senin berikutnya sudah minggu baru', A.awalMingguWib('2026-09-21') === '2026-09-21');
+cek('Y5. Ahad penutupnya 6 hari setelah Senin', A.akhirMingguWib('2026-09-15') === '2026-09-20');
+cek('Y6. Minggu boleh menyeberang bulan', A.awalMingguWib('2026-10-01') === '2026-09-28');
+cek('Y7. Minggu boleh menyeberang tahun', A.awalMingguWib('2027-01-01') === '2026-12-28');
+cek('Y8. Tanggal tak sah → kosong, bukan tebakan',
+  A.awalMingguWib('bukan-tanggal') === '' && A.akhirMingguWib('') === '');
+cek('Y9. hariKeWib: 0 = Ahad, 1 = Senin',
+  A.hariKeWib('2026-09-20') === 0 && A.hariKeWib('2026-09-14') === 1);
+// Tengah malam WIB = 17:00 UTC hari sebelumnya.
+cek('Y10. Ahad malam WIB (masih 2026-09-20) tetap di minggu yang dimulai 14 Sep',
+  A.awalMingguWib(A.wibDayKey('2026-09-20T16:00:00Z')) === '2026-09-14',
+  A.wibDayKey('2026-09-20T16:00:00Z'));
+cek('Y11. Senin dini hari WIB (Ahad malam UTC) sudah masuk minggu BARU — inilah kasus yang dulu salah',
+  A.awalMingguWib(A.wibDayKey('2026-09-20T19:00:00Z')) === '2026-09-21',
+  A.wibDayKey('2026-09-20T19:00:00Z'));
+
 // ============================================================================
 console.log(`\n${'='.repeat(60)}`);
 console.log(`RINGKASAN: ${lulus} LULUS, ${gagal} GAGAL`);

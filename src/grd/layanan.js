@@ -584,6 +584,9 @@ export async function queryLead({
     perluSayaPerbaiki: Lead.perluSayaPerbaiki(user, hasil),
     komitmenSaya: Lead.komitmenMingguan(user, hasil),
     goalTanpaLead: dalamPeriode.filter(g => Lead.leadAktif(hasil, g.id).length === 0),
+    // Lead yang goalnya sudah dihapus — dihitung dari SELURUH goal, bukan hanya
+    // periode ini, supaya goal periode lain tidak salah dikira hilang.
+    yatim: Lead.leadYatim(semuaLead, semuaGoal),
   };
 }
 

@@ -858,12 +858,17 @@ const fmtDateTime = d => {
 const fmtNumber = n => new Intl.NumberFormat('id-ID').format(n || 0);
 const fmtRupiah = n => 'Rp ' + fmtNumber(n);
 const daysUntil = d => d ? Math.ceil((new Date(d) - new Date()) / 86400000) : null;
+// Rentang minggu laporan — Senin s/d Ahad menurut WIB.
+//
+// DULU dihitung dari `new Date()` perangkat. Akibatnya nyata: pada Senin dini
+// hari WIB, perangkat yang zonanya bukan Asia/Jakarta masih menghitung Senin
+// pekan SEBELUMNYA, jadi laporan orang itu masuk ke kotak minggu yang berbeda
+// dari rekan-rekannya — tidak muncul di "minggu ini", dan ia tetap terhitung
+// belum lapor padahal sudah. Sekarang memakai batas minggu WIB yang sama
+// dengan Scoreboard (src/absensi/logika.js), bukan salinan ketiga.
 const getWeekRange = (offset = 0) => {
-  const now = new Date(); now.setDate(now.getDate() + offset * 7);
-  const day = now.getDay();
-  const monday = new Date(now.setDate(now.getDate() - day + (day === 0 ? -6 : 1)));
-  const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
-  return { start: dayKey(monday), end: dayKey(sunday) };
+  const senin = Abs.geserHari(Abs.awalMingguWib(), offset * 7);
+  return { start: senin, end: Abs.geserHari(senin, 6) };
 };
 
 // Kompres file gambar → dataURL JPEG (dipakai: feedback, laporan, selfie absen)
