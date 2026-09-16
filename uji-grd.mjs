@@ -4618,6 +4618,41 @@ for (const mode of Tiket.URUT_TIKET.map(u => u.id)) {
 cek('86j. Tiket tanpa kaitan tetap sah (kaitan boleh kosong selamanya)',
   Tiket.urutkanTiket(tanpaKaitan).length === 3);
 
+// --- REGRESI TIKET LAMA: record yang dibuat SEBELUM kaitan GRD ada ---
+// Bentuknya tidak punya field `leadId` sama sekali (bukan string kosong).
+const tkLama = [
+  { id: 'L1', title: 'Tiket lama', assigneeId: 'u-staf1', createdById: 'u-leader',
+    status: 'todo', priority: 'medium', deadline: '2026-09-01', createdAt: '2026-08-01T02:00:00Z' },
+  { id: 'L2', title: 'Tiket lama 2', assigneeId: 'u-staf2', createdById: 'u-owner',
+    status: 'done', priority: 'low', createdAt: '2026-08-02T02:00:00Z' },
+];
+cek('86k. Tiket lama tanpa field leadId tetap bisa diurutkan di semua mode',
+  Tiket.URUT_TIKET.every(u => Tiket.urutkanTiket(tkLama, u.id).length === 2));
+cek('86l. Tiket lama TIDAK pernah muncul sebagai tiket terkait goal mana pun',
+  L.tiketUntukGoal(tkLama, lGl, 'gx').hasil.length === 0);
+cek('86m. Campuran tiket lama & baru: yang lama dilewati, yang baru tetap terhitung',
+  L.tiketUntukGoal([...tkLama, ...tkt], lGl, 'gx', { hariIni: '2026-09-16' }).total === 4);
+cek('86n. leadId undefined tidak pernah dibaca sebagai kaitan kosong yang cocok',
+  L.tiketUntukGoal([{ id: 'X', title: 'x', status: 'todo' }],
+    [lm({ id: '', goalId: 'gx', ownerId: 'u-staf1', status: 'aktif' })], 'gx').hasil.length === 0);
+cek('86o. Waktu dibuat tiket lama tetap terbaca (tidak ikut rusak oleh field baru)',
+  Tiket.isoDibuat(tkLama[0]) === new Date('2026-08-01T02:00:00Z').toISOString(),
+  Tiket.isoDibuat(tkLama[0]));
+cek('86p. Hak lihat tiket lama tidak berubah sedikit pun', (() => {
+  const lihat = (viewer, t) => viewer.role === 'owner' || viewer.role === 'manajer'
+    || t.assigneeId === viewer.id || t.createdById === viewer.id;
+  // Bandingkan dengan aturan yang BENAR-BENAR ada di App.jsx (dibaca sebagai teks),
+  // bukan dengan salinan di kepala penulis uji.
+  const i = src.indexOf('canSeeTask: (viewer, task) => {');
+  const b = src.slice(i, src.indexOf('},', i));
+  const cocok = /viewer\.role === 'owner' \|\| viewer\.role === 'manajer'/.test(b)
+    && /task\.assigneeId === viewer\.id \|\| task\.createdById === viewer\.id/.test(b);
+  return cocok && lihat(STAF1, tkLama[0]) === true && lihat(STAF2, tkLama[0]) === false
+    && lihat(OWNER, tkLama[0]) === true && lihat(LEADER, tkLama[1]) === false;
+})());
+cek('86q. Leader TIDAK otomatis melihat tiket bawahannya — aturan lama itu tetap utuh',
+  /Leader TIDAK lagi otomatis melihat seluruh tiket bawahannya/.test(src));
+
 // ============================================================================
 judul('87. Jejak lintas goal — bahan halaman Jejak Perubahan Angka');
 // ============================================================================
