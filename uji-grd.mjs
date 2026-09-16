@@ -4665,6 +4665,18 @@ cek('87al. Panel Riwayat di detail goal ikut menulis satuan (dua tempat, satu ke
   const b = src.slice(src.indexOf('function GrdDetailGoal('), src.indexOf('function GrdSimpul('));
   return /Grd\.fieldJejakAngka\(j\.field\) && g\.uom/.test(b);
 })());
+cek('87al2. Penanda NAIK/TURUN juga ada di panel Riwayat detail goal, bukan cuma di halaman Jejak', (() => {
+  const b = src.slice(src.indexOf('function GrdDetailGoal('), src.indexOf('function GrdSimpul('));
+  return /Grd\.arahJejak\(j\) === 'turun'/.test(b) && /Grd\.arahJejak\(j\) === 'naik'/.test(b);
+})());
+cek('87al3. Warnanya seragam di dua tempat: turun = amber, naik = emerald', (() => {
+  const b = src.slice(src.indexOf('function GrdDetailGoal('), src.indexOf('function GrdSimpul('));
+  const turunSama = /'turun' && <span[^>]*bg-amber-100 text-amber-800/.test(b)
+    && /'turun' && <span[^>]*bg-amber-100 text-amber-800/.test(badanJv);
+  const naikSama = /'naik' && <span[^>]*bg-emerald-100 text-emerald-700/.test(b)
+    && /'naik' && <span[^>]*bg-emerald-100 text-emerald-700/.test(badanJv);
+  return turunSama && naikSama;
+})());
 cek('87am. Field bukan-angka TIDAK diberi satuan (periode/pemilik tak bersatuan)',
   G.fieldJejakAngka('periode') === false && G.fieldJejakAngka('ownerId') === false
   && G.fieldJejakAngka('target') === true && G.fieldJejakAngka('actual') === true);

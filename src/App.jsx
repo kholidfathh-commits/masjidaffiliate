@@ -19376,6 +19376,12 @@ function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], leads = []
                       <span className="font-semibold text-slate-800">{grdNilaiJejak(j.ke, j.field, allUsers)}</span>
                       {/* Satuan sekali di belakang pasangannya — sama seperti halaman Jejak. */}
                       {Grd.fieldJejakAngka(j.field) && g.uom && <span className="text-slate-500"> {g.uom}</span>}
+                      {/* Penanda arah dipasang di SINI juga, bukan cuma di halaman Jejak.
+                          Target yang diturunkan diam-diam justru paling sering dilihat dari
+                          detail goalnya — kalau penandanya cuma ada di satu tempat, yang
+                          membuka tempat satunya tidak pernah melihatnya. */}
+                      {Grd.arahJejak(j) === 'turun' && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">TURUN</span>}
+                      {Grd.arahJejak(j) === 'naik' && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">NAIK</span>}
                     </span>
                   )}
                   <div className="text-slate-400 mt-0.5">oleh {j.olehNama}</div>
