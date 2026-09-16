@@ -280,6 +280,51 @@ export function terapkanTemplateLead(template, goal) {
   });
 }
 
+/**
+ * PILIHAN LEAD MEASURE UNTUK SEBUAH TIKET.
+ *
+ * Menjawab "pekerjaan ini menyumbang komitmen mingguan yang mana?" — jadi yang
+ * layak ditawarkan hanya lead measure AKTIF milik PIC tiket itu. Usulan yang
+ * belum disetujui belum jadi komitmen apa pun, dan lead orang lain tidak bisa
+ * disumbang oleh tiket ini.
+ *
+ * DITARUH DI MODUL MURNI, bukan di dalam komponen, karena urutannya adalah
+ * keputusan yang perlu bisa diuji: batas 1–3 itu PER GOAL (bukan per orang) dan
+ * lead periode lama tetap berstatus aktif, jadi daftarnya bisa panjang dan bisa
+ * memuat dua lead berjudul sama dari periode berbeda. Yang periodenya BERJALAN
+ * ditaruh di atas — tiket baru hampir selalu menyumbang komitmen yang sedang
+ * berjalan.
+ *
+ * `periodeBerjalan` dioper dari luar (bukan dibaca dari jam di dalam sini)
+ * supaya fungsinya tetap murni dan hasilnya bisa diuji tanpa bergantung tanggal
+ * saat uji dijalankan.
+ */
+export function pilihanLeadUntukTiket(leads, goals, pemilikId, periodeBerjalan = []) {
+  const id = String(pemilikId || '');
+  if (!id) return [];
+  const perGoal = new Map((goals || []).map(g => g && g.id ? [g.id, g] : [null, null]).filter(x => x[0]));
+  const berjalan = new Set((periodeBerjalan || []).filter(Boolean));
+
+  return (leads || []).map(normalisasiLead).filter(Boolean)
+    .filter(l => l.status === 'aktif' && l.ownerId === id)
+    .map(l => {
+      const g = perGoal.get(l.goalId) || null;
+      return {
+        id: l.id,
+        lead: l,
+        goal: g,
+        // Goal yang sudah dihapus TIDAK disembunyikan: lead-nya masih aktif dan
+        // masih dikerjakan orangnya. Menyembunyikannya membuat kaitan yang sah
+        // mendadak tidak bisa dipilih lagi tanpa penjelasan apa pun.
+        berjalan: !!g && berjalan.has(g.periode),
+        urut: `${g ? g.description : 'zzz'}|${l.description}`,
+      };
+    })
+    .sort((a, b) => (a.berjalan === b.berjalan)
+      ? a.urut.localeCompare(b.urut)
+      : (a.berjalan ? -1 : 1));
+}
+
 // ====== HAK AKSES ======
 /**
  * Boleh MENGUSULKAN lead measure untuk goal ini? Pemilik goalnya, atau atasannya.

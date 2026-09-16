@@ -552,6 +552,27 @@ export async function nilaiLead(lead, statusBaru, { user, allUsers, catatan = ''
  * apa yang menunggu penilaian SAYA, dan usulan SAYA yang dikembalikan — supaya
  * halaman tidak menghitungnya sendiri dan tidak ada sisi yang terlupa.
  */
+/**
+ * SATU PINTU untuk panel "Lead Measure Terkait" di form tiket.
+ *
+ * Halaman Tiket dibuka jauh lebih sering daripada halaman GRD, jadi bacaannya
+ * ditaruh di sini — satu tempat yang bisa dioptimalkan nanti tanpa menyentuh
+ * komponennya. Egress project ini pernah over-kuota sampai layanannya dibatasi.
+ *
+ * Gerbangnya sama dengan halaman GRD lain: goal disaring lewat muatKonteksGrd,
+ * jadi lead dari cabang yang tidak boleh dilihat tidak pernah ikut keluar.
+ */
+export async function cariLeadTiket({ pemilikId, user = null, allUsers = [] } = {}) {
+  if (!pemilikId) return { pilihan: [], leads: [], goals: [] };
+  const k = await muatKonteksGrd({ user, allUsers, butuh: ['goal', 'lead'] });
+  const berjalan = [Grd.periodeSaatIni('bulan'), Grd.periodeSaatIni('kuartal')];
+  return {
+    pilihan: Lead.pilihanLeadUntukTiket(k.leads, k.goalTerlihat, pemilikId, berjalan),
+    leads: k.leads,
+    goals: k.goalTerlihat,
+  };
+}
+
 export async function queryLead({
   user = null, allUsers = [], periode = '', status = 'semua',
   kata = '', goals = null, leads = null,

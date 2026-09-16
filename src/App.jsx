@@ -6674,49 +6674,35 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Ketik untuk
  */
 function GrdPilihLeadTiket({ user, allUsers, pemilikId, value, onChange }) {
   const [leads, setLeads] = useState([]);
-  const [goals, setGoals] = useState([]);
+  const [pilihanSvc, setPilihanSvc] = useState([]);
   const [siap, setSiap] = useState(false);
 
+  // Satu pintu: penyaringan & urutannya ada di src/grd/layanan.js + lead.js,
+  // bukan di komponen ini — supaya bisa diuji tanpa merender React.
   useEffect(() => {
     let batal = false;
     (async () => {
       try {
-        const k = await GrdSvc.muatKonteksGrd({ user, allUsers, butuh: ['goal', 'lead'] });
-        if (!batal) { setLeads(k.leads); setGoals(k.goalTerlihat); }
+        const r = await GrdSvc.cariLeadTiket({ pemilikId, user, allUsers });
+        if (!batal) { setPilihanSvc(r.pilihan); setLeads(r.leads); }
       } catch (e) {
         // Diam-diam mundur: tiket harus tetap bisa dibuat walau GRD tak terbaca.
         console.warn('Muat lead measure untuk tiket gagal (panel disembunyikan):', e?.message || e);
       } finally { if (!batal) setSiap(true); }
     })();
     return () => { batal = true; };
-  }, []);
+  }, [pemilikId]);
 
   // Daftar ini bisa panjang: batas 1–3 berlaku PER GOAL, bukan per orang, dan
   // lead dari periode lama tetap berstatus aktif. Jadi periodenya ikut ditulis
   // (tanpa itu dua lead berjudul sama dari kuartal berbeda tak bisa dibedakan)
   // dan yang periodenya berjalan ditaruh di ATAS — tiket baru hampir selalu
   // menyumbang komitmen yang sedang berjalan.
-  const pilihan = useMemo(() => {
-    const perGoal = new Map(goals.map(g => [g.id, g]));
-    const pBulan = Grd.periodeSaatIni('bulan');
-    const pKuartal = Grd.periodeSaatIni('kuartal');
-    const berjalan = (g) => !!g && (g.periode === pBulan || g.periode === pKuartal);
-    return leads
-      .filter(l => l.status === 'aktif' && l.ownerId === pemilikId)
-      .map(l => {
-        const g = perGoal.get(l.goalId);
-        return {
-          value: l.id,
-          _berjalan: berjalan(g),
-          _urut: `${g ? g.description : 'zzz'}|${l.description}`,
-          label: `${l.description} · ${l.targetMingguan} ${l.uom}/minggu`
-            + (g ? ` — ${g.description} (${Grd.labelPeriodeSingkat(g.periode)})` : ' — goal sudah dihapus'),
-        };
-      })
-      .sort((a, b) => (a._berjalan === b._berjalan)
-        ? a._urut.localeCompare(b._urut)
-        : (a._berjalan ? -1 : 1));
-  }, [leads, goals, pemilikId]);
+  const pilihan = useMemo(() => pilihanSvc.map(o => ({
+    value: o.id,
+    label: `${o.lead.description} · ${o.lead.targetMingguan} ${o.lead.uom}/minggu`
+      + (o.goal ? ` — ${o.goal.description} (${Grd.labelPeriodeSingkat(o.goal.periode)})` : ' — goal sudah dihapus'),
+  })), [pilihanSvc]);
 
   // Tiket lama boleh menunjuk lead yang kini tidak aktif / bukan milik PIC baru.
   // Kaitannya TIDAK dibuang diam-diam — itu keputusan orang, bukan sampah data.

@@ -4394,20 +4394,49 @@ const jPnl = src.indexOf('function TaskForm(');
 cek('84a. Panel pemilih lead measure ada', iPnl > 0 && jPnl > iPnl);
 const badanPnl = src.slice(iPnl, jPnl);
 
+// Logikanya TIDAK di dalam komponen — ia di src/grd/lead.js supaya bisa diuji
+// tanpa merender React. Jadi yang diuji di bawah ini PERILAKUNYA, bukan teks JSX-nya.
+const glTk = [
+  goalDari('u-staf1', { id: 'gt1', periode: '2026-09', description: 'Konten TAP' }),
+  goalDari('u-staf1', { id: 'gt2', periode: '2026-Q3', description: 'Kuartalan' }),
+  goalDari('u-staf1', { id: 'gt3', periode: '2026-05', description: 'Periode lama' }),
+];
+const llTk = [
+  lm({ id: 'p1', goalId: 'gt1', ownerId: 'u-staf1', status: 'aktif', description: 'Zeta konten' }),
+  lm({ id: 'p2', goalId: 'gt3', ownerId: 'u-staf1', status: 'aktif', description: 'Alfa lama' }),
+  lm({ id: 'p3', goalId: 'gt1', ownerId: 'u-staf1', status: 'usul', description: 'Belum disetujui' }),
+  lm({ id: 'p4', goalId: 'gt1', ownerId: 'u-staf2', status: 'aktif', description: 'Punya orang lain' }),
+  lm({ id: 'p5', goalId: 'gt2', ownerId: 'u-staf1', status: 'aktif', description: 'Kuartalan aktif' }),
+];
+const pTk = L.pilihanLeadUntukTiket(llTk, glTk, 'u-staf1', ['2026-09', '2026-Q3']);
 cek('84b. Hanya menawarkan lead measure yang SUDAH AKTIF (usulan belum jadi komitmen)',
-  /l\.status === 'aktif'/.test(badanPnl));
+  !pTk.some(o => o.id === 'p3'), pTk.map(o => o.id));
 cek('84c. Dan hanya milik PIC tiket itu (lead orang lain tak bisa disumbang tiket ini)',
-  /l\.ownerId === pemilikId/.test(badanPnl));
+  !pTk.some(o => o.id === 'p4'), pTk.map(o => o.id));
+cek('84c1. Tanpa PIC → tidak ada yang ditawarkan', L.pilihanLeadUntukTiket(llTk, glTk, '').length === 0);
+cek('84c2. Lead yang goalnya sudah dihapus TIDAK disembunyikan (masih dikerjakan orangnya)',
+  L.pilihanLeadUntukTiket([lm({ id: 'px', goalId: 'hilang', ownerId: 'u-staf1', status: 'aktif' })],
+    glTk, 'u-staf1').length === 1);
 cek('84d. Selalu ada jalan keluar "tidak dikaitkan" (kaitan bisa dilepas lagi)',
   /\{ value: '', label: '— Tidak dikaitkan —' \}/.test(badanPnl));
 cek('84d1. Bisa DICARI dengan mengetik, sama seperti kolom PIC',
   /<SearchableSelect/.test(badanPnl));
-cek('84d2. Periode ikut ditulis — batas 1–3 itu PER GOAL, jadi daftarnya bisa panjang',
-  /labelPeriodeSingkat\(g\.periode\)/.test(badanPnl));
-cek('84d3. Lead periode berjalan ditaruh di ATAS',
-  /_berjalan \? -1 : 1/.test(badanPnl) && /periodeSaatIni\('bulan'\)/.test(badanPnl));
+cek('84d2. Periode ikut ditulis di tiap baris (dua lead serupa beda periode harus bisa dibedakan)',
+  /labelPeriodeSingkat\(o\.goal\.periode\)/.test(badanPnl));
+cek('84d3. Lead periode BERJALAN ditaruh di atas, walau abjadnya belakangan',
+  pTk[0].id === 'p1' || pTk[0].id === 'p5', pTk.map(o => `${o.id}:${o.berjalan}`));
+cek('84d3b. Yang periodenya lewat turun ke bawah meski abjadnya duluan ("Alfa lama")',
+  pTk[pTk.length - 1].id === 'p2', pTk.map(o => o.id));
 cek('84d4. Bulan DAN kuartal sama-sama dihitung berjalan (periode GRD memang dua jenis)',
-  /periodeSaatIni\('kuartal'\)/.test(badanPnl));
+  pTk.filter(o => o.berjalan).map(o => o.id).sort().join() === 'p1,p5',
+  pTk.map(o => `${o.id}:${o.berjalan}`));
+cek('84d4b. Layanan yang menentukan periode berjalan, bukan komponennya', (() => {
+  const svc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+  return /periodeSaatIni\('bulan'\)/.test(svc) && /periodeSaatIni\('kuartal'\)/.test(svc);
+})());
+cek('84d4c. Urutan di dalam kelompok tetap tertentu (abjad goal lalu tindakan)',
+  L.pilihanLeadUntukTiket(llTk, glTk, 'u-staf1', ['2026-09', '2026-Q3']).map(o => o.id).join()
+  === pTk.map(o => o.id).join());
 cek('84d5. Lead yang goalnya sudah dihapus tetap terbaca, tidak jadi baris kosong',
   /goal sudah dihapus/.test(badanPnl));
 cek('84e. Gagal muat GRD → panel menghilang, tiket tetap bisa dibuat',
@@ -4416,10 +4445,27 @@ cek('84f. PIC tanpa lead aktif → panel tidak muncul sama sekali (bukan dropdow
   /if \(pilihan\.length === 0 && !value\) return null;/.test(badanPnl));
 cek('84g. Kaitan LAMA yang kini tidak aktif tetap ditampilkan, tidak dibuang diam-diam',
   /diLuarPilihan/.test(badanPnl) && /kaitan lama/.test(badanPnl));
-cek('84h. Datanya lewat pintu layanan GRD, bukan baca storage langsung',
-  /GrdSvc\.muatKonteksGrd\(/.test(badanPnl) && !/storage\.(get|set)/.test(badanPnl));
-cek('84i. Hanya meminta goal & lead — tidak ikut menarik skor/jejak (hemat egress)',
-  /butuh: \['goal', 'lead'\]/.test(badanPnl));
+cek('84h. Datanya lewat SATU pintu layanan, bukan baca storage langsung',
+  /GrdSvc\.cariLeadTiket\(/.test(badanPnl) && !/storage\.(get|set)/.test(badanPnl));
+cek('84i. Layanannya hanya meminta goal & lead — tidak ikut menarik skor/jejak (hemat egress)', (() => {
+  const svc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+  const i = svc.indexOf('export async function cariLeadTiket(');
+  const b = svc.slice(i, svc.indexOf('\n}', i));
+  return /butuh: \['goal', 'lead'\]/.test(b);
+})());
+cek('84i1. Tanpa PIC, layanan tidak membaca apa pun', (() => {
+  const svc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+  const i = svc.indexOf('export async function cariLeadTiket(');
+  return /if \(!pemilikId\) return \{ pilihan: \[\], leads: \[\], goals: \[\] \};/
+    .test(svc.slice(i, svc.indexOf('\n}', i)));
+})());
+cek('84i2. Layanannya memakai goalTerlihat (sudah digerbangi), bukan seluruh goal', (() => {
+  const svc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+  const i = svc.indexOf('export async function cariLeadTiket(');
+  return /k\.goalTerlihat/.test(svc.slice(i, svc.indexOf('\n}', i)));
+})());
+cek('84i3. Dimuat ulang saat PIC diganti (lead PIC lama tidak boleh tertinggal di daftar)',
+  /\}, \[pemilikId\]\);/.test(badanPnl));
 
 // --- kaitan terpilih terlihat di DETAIL tiket, bukan cuma di form edit ---
 const iKt = src.indexOf('function GrdKaitanLeadTiket(');
