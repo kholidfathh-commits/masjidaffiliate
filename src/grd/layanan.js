@@ -20,6 +20,7 @@
 // ============================================================================
 
 import * as Grd from './data.js';
+import { isManajemen } from '../peran/hierarki.js';
 
 const _dep = { storage: null, log: null, rpc: null };
 
@@ -101,9 +102,27 @@ export async function ambilGoalPeriode(periode) {
   return Grd.goalPeriode(await ambilGoal(), periode);
 }
 
-/** Seluruh catatan jejak perubahan. */
+/**
+ * SELURUH catatan jejak. Dipakai backup dan rekap lintas goal saja — untuk
+ * menampilkan riwayat SATU goal, pakai `ambilJejakGoal` yang jauh lebih hemat.
+ */
 export async function ambilJejak() {
   return await st().listByPrefix(Grd.JEJAK_REC_PREFIX);
+}
+
+/**
+ * Riwayat SATU goal saja, ditarik lewat prefix — bukan dengan membaca seluruh
+ * jejak tim lalu menyaringnya di memori. Bedanya nyata: jejak tidak pernah
+ * dipangkas, jadi cara lama akan makin berat setiap bulan.
+ *
+ * Hasilnya tetap disaring ulang berdasarkan `goalId`: kalau ada id goal tak
+ * lazim yang memuat ':', prefixnya bisa menangkap jejak goal lain.
+ */
+export async function ambilJejakGoal(goalId) {
+  const prefix = Grd.prefixJejakGoal(goalId);
+  if (!prefix) return [];
+  const baris = await st().listByPrefix(prefix);
+  return Grd.riwayatGoal(baris, String(goalId));
 }
 
 /**
@@ -155,13 +174,16 @@ export async function ambilDetailGoal(goalId, { allUsers = [], goals = null, jej
   const goal = semua.map(Grd.normalisasiGoal).find(g => g && g.id === id);
   if (!goal) return null;
 
-  const catatan = jejak || await ambilJejak();
+  // Riwayat ditarik khusus goal ini — jauh lebih hemat daripada membaca seluruh
+  // jejak tim. `jejak` yang dioper (mis. dari halaman yang sudah memuatnya)
+  // tetap dihormati supaya tidak ada perjalanan ke server yang sia-sia.
+  const riwayat = jejak ? Grd.riwayatGoal(jejak, id) : await ambilJejakGoal(id);
   return {
     goal,
     pemilik: Grd.pemilikGoal(goal, allUsers),
     induk: Grd.goalInduk(goal, semua),
     turunan: Grd.goalTurunan(goal, semua),
-    riwayat: Grd.riwayatGoal(catatan, id),
+    riwayat,
     persen: Grd.persenCapaian(goal),
     status: Grd.statusCapaian(goal),
     sisa: Grd.sisaMenujuTarget(goal),
@@ -219,6 +241,78 @@ export async function cariGoal({
     mencari: String(kata || '').trim() !== '' || (!!divisi && divisi !== 'all') || !!ownerId,
     semuaGoal: semua,
   };
+}
+
+/**
+ * Template goal per peran: bawaan digabung dengan yang diubah tim.
+ * Gagal baca TIDAK mematikan fitur — jatuh ke template bawaan, karena template
+ * hanya alat bantu mengisi form dan tidak boleh menghalangi pembuatan goal.
+ */
+export async function ambilTemplate() {
+  try {
+    const tersimpan = await st().get(Grd.TEMPLATE_KEY);
+    return Grd.gabungTemplate(tersimpan);
+  } catch (e) {
+    console.warn('Baca template GRD gagal, pakai bawaan:', e?.message || e);
+    return Grd.gabungTemplate(null);
+  }
+}
+
+/**
+ * DAFTAR TEMPLATE untuk halaman pengelolaan — satu panggilan menghasilkan semua
+ * yang dibutuhkan layar: isi template tiap peran, penanda mana yang sudah
+ * diubah tim, dan apakah pengguna ini berwenang mengubahnya.
+ *
+ * `bisaUbah` dikembalikan dari sini (bukan dihitung ulang di komponen) supaya
+ * jawabannya selalu sama dengan yang ditegakkan `simpanTemplate` — tombol yang
+ * muncul di layar tidak pernah berbeda dengan yang sebenarnya diizinkan.
+ */
+export async function daftarTemplate({ user = null } = {}) {
+  let tersimpan = null;
+  try { tersimpan = await st().get(Grd.TEMPLATE_KEY); }
+  catch (e) {
+    console.warn('Baca template GRD gagal, pakai bawaan:', e?.message || e);
+    tersimpan = null;
+  }
+  const perPeran = Grd.ringkasTemplate(tersimpan);
+  return {
+    perPeran,
+    template: Grd.gabungTemplate(tersimpan),
+    diubah: perPeran.filter(r => r.diubah).map(r => r.peran),
+    bisaUbah: isManajemen(user),
+    totalTemplate: perPeran.reduce((t, r) => t + r.jumlah, 0),
+  };
+}
+
+/**
+ * Simpan template sebuah peran. Hanya pengelola (Owner/Manajer) — template itu
+ * contoh yang dilihat SEMUA orang, jadi bukan milik satu tim.
+ * Daftar kosong berarti "kembalikan ke bawaan".
+ */
+export async function simpanTemplate(peran, daftar, { user } = {}) {
+  if (!Grd.ROLE_KEYS_GRD.includes(peran)) throw new GrdDitolak('Peran tidak dikenal.');
+  if (!isManajemen(user)) throw new GrdDitolak('Hanya Owner/Manajer yang boleh mengubah template.');
+
+  const kosong = !daftar || daftar.length === 0;
+  if (!kosong) {
+    const salah = Grd.validasiDaftarTemplate(daftar);
+    if (salah) throw new GrdDitolak(salah);
+  }
+
+  let tersimpan = {};
+  try { tersimpan = (await st().get(Grd.TEMPLATE_KEY)) || {}; } catch { tersimpan = {}; }
+
+  const berikut = { ...tersimpan };
+  if (kosong) delete berikut[peran];
+  else berikut[peran] = daftar.map(Grd.normalisasiTemplate).filter(Boolean);
+
+  const ok = await st().set(Grd.TEMPLATE_KEY, berikut);
+  if (!ok) throw new GrdDitolak('Gagal menyimpan template. Coba lagi.');
+
+  catatAktivitas(kosong
+    ? `mengembalikan template goal peran ${peran} ke bawaan`
+    : `mengubah template goal peran ${peran}`, user && user.name);
+  return Grd.gabungTemplate(berikut);
 }
 
 // ============================================================================
@@ -285,9 +379,17 @@ export async function hapusGoal(goal, { user, allUsers } = {}) {
 }
 
 /**
- * Turunkan goal ke seluruh bawahan langsung pemiliknya.
- * Rencananya disusun fungsi murni, lalu ditulis satu per satu supaya kegagalan
- * di tengah tidak membatalkan yang sudah berhasil.
+ * Turunkan goal ke SELURUH bawahan langsung pemiliknya — inti "sekali klik".
+ *
+ * Ditulis satu per satu, bukan sekali borong: kalau satu penulisan gagal
+ * (koneksi putus di tengah), yang sudah berhasil tetap tersimpan dan pengguna
+ * bisa mengulang tanpa membuat duplikat — bawahan yang sudah punya turunan
+ * otomatis dilewati pada percobaan berikutnya.
+ *
+ * Mengembalikan { dibuat, gagal, dilewati } — BUKAN sekadar daftar yang
+ * berhasil. Kegagalan sebagian harus bisa diberitahukan; kalau hanya
+ * mengembalikan yang berhasil, layar akan melaporkan "selesai" padahal ada
+ * anggota yang goalnya tidak pernah tersimpan.
  */
 export async function turunkanGoal(goal, { user, allUsers, bagiRata, goalAda } = {}) {
   const g = Grd.normalisasiGoal(goal);
@@ -297,24 +399,41 @@ export async function turunkanGoal(goal, { user, allUsers, bagiRata, goalAda } =
   }
 
   const ada = goalAda || await ambilGoal();
+  const semuaBawahan = Grd.bawahanUntukTurunan(g, allUsers);
   const rencana = Grd.rencanaTurunan(g, allUsers, { bagiRata, goalAda: ada });
-  if (rencana.length === 0) return [];
+  const dilewati = semuaBawahan.length - rencana.length;
 
   const dibuat = [];
+  const gagal = [];
   for (const r of rencana) {
+    const nama = (Grd.pemilikGoal(r, allUsers) || {}).name || 'Anggota';
     const baru = { ...r, id: buatId() };
-    const viaRpc = await lewatRpc('grd_simpan_goal', { p_goal: baru });
-    if (!viaRpc.pakai) {
-      const ok = await st().set(Grd.GOAL_REC_PREFIX + baru.id, baru);
-      if (!ok) continue; // satu gagal tidak membatalkan yang lain
+
+    // Rencana datang dari fungsi murni, tapi tetap diperiksa: kalau ada satuan
+    // atau angka yang bikin goalnya tidak sah, lebih baik ketahuan di sini
+    // daripada tersimpan sebagai goal rusak yang tidak bisa dihitung.
+    const salah = Grd.validasiGoal(baru);
+    if (salah) { gagal.push({ ownerId: r.ownerId, nama, alasan: salah }); continue; }
+
+    try {
+      const viaRpc = await lewatRpc('grd_simpan_goal', { p_goal: baru });
+      if (!viaRpc.pakai) {
+        const ok = await st().set(Grd.GOAL_REC_PREFIX + baru.id, baru);
+        if (!ok) { gagal.push({ ownerId: r.ownerId, nama, alasan: 'Gagal menyimpan.' }); continue; }
+      }
+    } catch (e) {
+      gagal.push({ ownerId: r.ownerId, nama, alasan: (e && e.message) || 'Gagal menyimpan.' });
+      continue;
     }
+
     dibuat.push(baru);
     await tulisJejak(Grd.catatPerubahan(null, baru, user));
   }
+
   if (dibuat.length) {
     catatAktivitas(`menurunkan goal "${g.description}" ke ${dibuat.length} anggota`, user && user.name);
   }
-  return dibuat;
+  return { dibuat, gagal, dilewati };
 }
 
 /** Tulis catatan jejak. Jejak yang gagal tidak boleh membatalkan simpan goalnya. */

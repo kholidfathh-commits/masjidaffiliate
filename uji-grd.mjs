@@ -893,10 +893,18 @@ cek('17d-29. Hapus goal pakai konfirmasi (modal, bukan confirm bawaan)',
   /function GrdHapusGoalModal\(/.test(src) && /<GrdHapusGoalModal\b/.test(src));
 cek('17d-30. Konfirmasi hapus memberi tahu dampak ke goal turunan',
   /dampakHapusGoal/.test(src));
+cek('17d-27b. Halaman melaporkan kegagalan sebagian saat menurunkan goal',
+  /gagal\.length > 0/.test(src) && /gagal\.map\(x => `· \$\{x\.nama\}/.test(src));
 cek('17d-27. Tombol turunkan ke bawahan ada + modalnya',
   /function GrdTurunkanModal\(/.test(src) && /<GrdTurunkanModal\b/.test(src) && /rencanaTurunan/.test(src));
 cek('17d-28. Tombol turunkan hanya muncul kalau pemiliknya punya bawahan',
   /bolehTurunkan/.test(src) && /bawahanUntukTurunan/.test(src));
+cek('17d-25b. Template tim ikut BACKUP_KEYS (aturan wajib no.3)', (() => {
+  const i = src.indexOf('const BACKUP_KEYS = [');
+  return /Grd\.TEMPLATE_KEY/.test(src.slice(i, src.indexOf('];', i)));
+})());
+cek('17d-25c. Form memuat template yang diubah tim, bawaan sebagai jaring pengaman',
+  /GrdSvc\.ambilTemplate\(\)/.test(src) && /Grd\.templateUntuk\(peranPemilik, templateTim\)/.test(src));
 cek('17d-25. Form punya pemilih template per peran',
   /Grd\.templateUntuk/.test(src) && /Grd\.terapkanTemplate/.test(src));
 cek('17d-26. Template mengikuti peran PEMILIK goal, bukan peran pengisi form',
@@ -1037,10 +1045,13 @@ function storagePalsu(awal = {}) {
   return {
     baris,
     gagalSet: false,
+    prefixDiminta: [],
     async listByPrefix(prefix) {
+      this.prefixDiminta.push(prefix);
       return [...baris.entries()].filter(([k]) => k.startsWith(prefix))
         .sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v);
     },
+    async get(k) { return baris.has(k) ? baris.get(k) : null; },
     async set(k, v) { if (this.gagalSet) return false; baris.set(k, v); return true; },
     async delete(k) { baris.delete(k); return true; },
   };
@@ -1138,7 +1149,7 @@ cek('19u. Owner boleh menghapus', !sp.baris.has('grdgoal:rec:sv1'));
 sp = storagePalsu(); Svc.initGrd({ storage: sp });
 const gIndukSvc = { id: 'ind1', ownerId: 'u-leader', periode: '2026-09', description: 'GMV tim', base: 0, target: 900, uom: 'Juta Rupiah' };
 await Svc.simpanGoal(gIndukSvc, { user: LEADER, allUsers: tim });
-const hasilTurun = await Svc.turunkanGoal(gIndukSvc, { user: LEADER, allUsers: tim });
+const hasilTurun = (await Svc.turunkanGoal(gIndukSvc, { user: LEADER, allUsers: tim })).dibuat;
 cek('19v. Turunkan membuat goal untuk tiap bawahan langsung', hasilTurun.length === 2, hasilTurun.length);
 cek('19w. Tiap turunan punya id sendiri (tidak saling menimpa)',
   new Set(hasilTurun.map(g => g.id)).size === 2);
@@ -1146,7 +1157,8 @@ cek('19x. Turunan menunjuk goal induk', hasilTurun.every(g => g.parentId === 'in
 cek('19y. Turunan tersimpan sebagai baris terpisah',
   hasilTurun.every(g => sp.baris.has('grdgoal:rec:' + g.id)));
 const turunLagi = await Svc.turunkanGoal(gIndukSvc, { user: LEADER, allUsers: tim });
-cek('19z-2. Klik turunkan kedua kali menghasilkan 0 goal baru', turunLagi.length === 0, turunLagi.length);
+cek('19z-2. Klik turunkan kedua kali menghasilkan 0 goal baru', turunLagi.dibuat.length === 0, turunLagi.dibuat.length);
+cek('19z-2b. Yang dilewati dilaporkan, bukan disembunyikan', turunLagi.dilewati === 2, turunLagi.dilewati);
 
 ditolak = '';
 try { await Svc.turunkanGoal(gIndukSvc, { user: STAF1, allUsers: tim }); }
@@ -1177,7 +1189,7 @@ judul('20. Endpoint detail goal (satu panggilan, konteks lengkap)');
 const spD = storagePalsu(); Svc.initGrd({ storage: spD });
 const dIndukG = { id: 'd-induk', ownerId: 'u-leader', periode: '2026-09', description: 'GMV tim', base: 0, target: 900, uom: 'Juta Rupiah' };
 await Svc.simpanGoal(dIndukG, { user: LEADER, allUsers: tim });
-const dAnak = await Svc.turunkanGoal(dIndukG, { user: LEADER, allUsers: tim });
+const dAnak = (await Svc.turunkanGoal(dIndukG, { user: LEADER, allUsers: tim })).dibuat;
 await Svc.simpanGoal({ ...dIndukG, target: 1000 },
   { user: LEADER, allUsers: tim, goalLama: dIndukG });
 
@@ -1421,7 +1433,7 @@ Svc.initGrd({ storage: spE, rpc: rpcPalsu({ rekam: rekamE }) });
 const turunRpc = await Svc.turunkanGoal(
   { id: 'e1', ownerId: 'u-leader', periode: '2026-09', description: 'GMV tim', base: 0, target: 900, uom: 'Juta' },
   { user: LEADER, allUsers: tim, goalAda: [] });
-cek('25o. Turunkan ikut lewat RPC', turunRpc.length === 2
+cek('25o. Turunkan ikut lewat RPC', turunRpc.dibuat.length === 2
   && rekamE.filter(r => r.nama === 'grd_simpan_goal').length === 2);
 
 // --- tanpa rpc disuntik sama sekali ---
@@ -1458,6 +1470,410 @@ cek('26g. Menandai di mana pagar sesungguhnya nanti dipasang',
   /PAGAR SESUNGGUHNYA/.test(sqlRpc));
 cek('26h. security invoker (tidak memberi hak lebih besar diam-diam)',
   /security invoker/.test(sqlRpc) && !/security definer/.test(sqlRpc));
+
+judul('27. Turunkan goal — kegagalan sebagian harus dilaporkan');
+const spT = storagePalsu(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spT });
+const gT = { id: 't1', ownerId: 'u-leader', periode: '2026-09', description: 'GMV tim', base: 0, target: 900, uom: 'Juta' };
+await Svc.simpanGoal(gT, { user: LEADER, allUsers: tim });
+
+const okSemua = await Svc.turunkanGoal(gT, { user: LEADER, allUsers: tim, goalAda: [] });
+cek('27a. Bentuk kembalian { dibuat, gagal, dilewati }',
+  Array.isArray(okSemua.dibuat) && Array.isArray(okSemua.gagal) && typeof okSemua.dilewati === 'number');
+cek('27b. Semua berhasil → gagal kosong', okSemua.dibuat.length === 2 && okSemua.gagal.length === 0);
+cek('27c. Tidak ada yang dilewati pada percobaan pertama', okSemua.dilewati === 0);
+
+// storage yang SELALU gagal menulis
+const spGagal = storagePalsu(); spGagal.gagalSet = true;
+Svc.initGrd({ storage: spGagal });
+const semuaGagal = await Svc.turunkanGoal(gT, { user: LEADER, allUsers: tim, goalAda: [] });
+cek('27d. Semua gagal → dibuat kosong, gagal terisi',
+  semuaGagal.dibuat.length === 0 && semuaGagal.gagal.length === 2, semuaGagal);
+cek('27e. Kegagalan menyebut NAMA orangnya (bisa ditindaklanjuti)',
+  semuaGagal.gagal.every(x => x.nama && x.nama !== 'Anggota'), semuaGagal.gagal.map(x => x.nama));
+cek('27f. Kegagalan menyebut alasannya', semuaGagal.gagal.every(x => !!x.alasan));
+cek('27g. Kegagalan membawa ownerId (untuk mencoba ulang)',
+  semuaGagal.gagal.every(x => !!x.ownerId));
+
+// sebagian sudah punya turunan → dilewati, bukan dobel
+const spSebagian = storagePalsu(); Svc.initGrd({ storage: spSebagian });
+const sudahAda = [{
+  id: 'sudah', ownerId: 'u-wakil', parentId: 't1', periode: '2026-09',
+  description: 'GMV tim', base: 0, target: 450, uom: 'Juta',
+}];
+const sebagian = await Svc.turunkanGoal(gT, { user: LEADER, allUsers: tim, goalAda: sudahAda });
+cek('27h. Yang sudah punya dilewati', sebagian.dilewati === 1, sebagian.dilewati);
+cek('27i. Sisanya tetap dibuat', sebagian.dibuat.length === 1 && sebagian.dibuat[0].ownerId === 'u-staf2');
+cek('27j. Tidak ada yang gagal', sebagian.gagal.length === 0);
+
+// pemilik tanpa bawahan
+const tanpaBawahan = await Svc.turunkanGoal(
+  { id: 't2', ownerId: 'u-staf1', periode: '2026-09', description: 'x', base: 0, target: 5, uom: 'x' },
+  { user: STAF1, allUsers: tim, goalAda: [] });
+cek('27k. Pemilik tanpa bawahan → semuanya kosong, bukan error',
+  tanpaBawahan.dibuat.length === 0 && tanpaBawahan.gagal.length === 0 && tanpaBawahan.dilewati === 0);
+
+cek('27l. Goal yang sudah dibuat TETAP tersimpan walau ada yang gagal', (() => {
+  return spSebagian.baris.has('grdgoal:rec:' + sebagian.dibuat[0].id);
+})());
+cek('27m. Jejak hanya ditulis untuk yang BENAR-BENAR berhasil', (() => {
+  const jejak = [...spGagal.baris.keys()].filter(k => k.startsWith('grdjejak:rec:'));
+  return jejak.length === 0; // semua gagal → tidak ada jejak
+})());
+Svc.setJalurGrd('auto');
+
+judul('28. Template goal per peran yang bisa diubah tim');
+cek('28a. Kunci simpanan template', G.TEMPLATE_KEY === 'grd:templates');
+cek('28b. Daftar peran template diambil dari hierarki.js (satu sumber)',
+  G.ROLE_KEYS_GRD.join() === 'owner,manajer,leader,wakil,operasional', G.ROLE_KEYS_GRD);
+
+cek('28c. Template bawaan dipakai saat belum ada simpanan', (() => {
+  const g = G.gabungTemplate(null);
+  return g.leader === G.TEMPLATE_GOAL.leader && g.operasional === G.TEMPLATE_GOAL.operasional;
+})());
+cek('28d. Peran yang diatur memakai simpanan', (() => {
+  const g = G.gabungTemplate({ leader: [{ description: 'Khusus tim', base: 0, target: 5, uom: 'Sesi' }] });
+  return g.leader.length === 1 && g.leader[0].description === 'Khusus tim';
+})());
+cek('28e. Peran LAIN tetap bawaan (tidak ikut terhapus)', (() => {
+  const g = G.gabungTemplate({ leader: [{ description: 'X', base: 0, target: 1, uom: 'y' }] });
+  return g.operasional === G.TEMPLATE_GOAL.operasional;
+})());
+cek('28f. Simpanan rusak untuk satu peran → peran itu balik ke bawaan', (() => {
+  const g = G.gabungTemplate({ leader: [{ description: '', base: 0, target: 0, uom: '' }] });
+  return g.leader === G.TEMPLATE_GOAL.leader;
+})());
+cek('28g. Simpanan bukan array diabaikan', (() => {
+  const g = G.gabungTemplate({ leader: 'bukan array' });
+  return g.leader === G.TEMPLATE_GOAL.leader;
+})());
+cek('28h. Semua peran selalu punya template', (() => {
+  const g = G.gabungTemplate({});
+  return G.ROLE_KEYS_GRD.every(r => Array.isArray(g[r]) && g[r].length > 0);
+})());
+cek('28i. Template hasil gabungan semuanya lolos validasi goal', (() => {
+  const g = G.gabungTemplate({ manajer: [{ description: 'Uji', base: 0, target: 9, uom: 'Orang' }] });
+  return Object.values(g).flat().every(t =>
+    G.validasiGoal(G.terapkanTemplate(t, { ownerId: 'u1', periode: '2026-09' })) === '');
+})());
+
+cek('28j. normalisasiTemplate menolak yang tidak layak', (() => {
+  return G.normalisasiTemplate(null) === null
+    && G.normalisasiTemplate({ description: '', uom: 'x', base: 0, target: 1 }) === null
+    && G.normalisasiTemplate({ description: 'a', uom: '', base: 0, target: 1 }) === null
+    && G.normalisasiTemplate({ description: 'a', uom: 'x', base: 5, target: 5 }) === null;
+})());
+cek('28k. normalisasiTemplate merapikan yang layak', (() => {
+  const t = G.normalisasiTemplate({ description: '  A  ', uom: ' Konten ', base: '0', target: '9', lain: 'buang' });
+  return t.description === 'A' && t.uom === 'Konten' && t.base === 0 && t.target === 9 && t.lain === undefined;
+})());
+
+cek('28l. validasiDaftarTemplate menolak deskripsi kosong',
+  /deskripsi wajib/.test(G.validasiDaftarTemplate([{ description: '', uom: 'x', base: 0, target: 1 }])));
+cek('28m. Menolak satuan kosong',
+  /satuan wajib/.test(G.validasiDaftarTemplate([{ description: 'a', uom: '', base: 0, target: 1 }])));
+cek('28n. Menolak base === target',
+  /sama dengan base/.test(G.validasiDaftarTemplate([{ description: 'a', uom: 'x', base: 2, target: 2 }])));
+cek('28o. Menyebut template KE-BERAPA yang salah',
+  /ke-2/.test(G.validasiDaftarTemplate([
+    { description: 'a', uom: 'x', base: 0, target: 1 },
+    { description: '', uom: 'x', base: 0, target: 1 },
+  ])));
+cek('28p. Daftar sah → lolos',
+  G.validasiDaftarTemplate([{ description: 'a', uom: 'x', base: 0, target: 1 }]) === '');
+cek('28q. Bukan array ditolak', G.validasiDaftarTemplate('x') !== '');
+
+judul('29. Layanan template');
+const spTpl = storagePalsu(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spTpl });
+const tplAwal = await Svc.ambilTemplate();
+cek('29a. Tanpa simpanan → template bawaan', tplAwal.leader === G.TEMPLATE_GOAL.leader);
+
+let tolakTpl = '';
+try { await Svc.simpanTemplate('leader', [{ description: 'X', uom: 'y', base: 0, target: 1 }], { user: STAF1 }); }
+catch (e) { tolakTpl = e.message; }
+cek('29b. Staf TIDAK boleh mengubah template', /Hanya Owner\/Manajer/.test(tolakTpl), tolakTpl);
+cek('29c. Ditolak → tidak ada baris template tertulis', !spTpl.baris.has('grd:templates'));
+
+tolakTpl = '';
+try { await Svc.simpanTemplate('leader', [{ description: 'X', uom: 'y', base: 0, target: 1 }], { user: LEADER }); }
+catch (e) { tolakTpl = e.message; }
+cek('29d. Leader pun TIDAK boleh (template dilihat semua orang)', /Hanya Owner\/Manajer/.test(tolakTpl));
+
+tolakTpl = '';
+try { await Svc.simpanTemplate('ngawur', [{ description: 'X', uom: 'y', base: 0, target: 1 }], { user: OWNER }); }
+catch (e) { tolakTpl = e.message; }
+cek('29e. Peran tidak dikenal ditolak', /Peran tidak dikenal/.test(tolakTpl));
+
+tolakTpl = '';
+try { await Svc.simpanTemplate('leader', [{ description: '', uom: 'y', base: 0, target: 1 }], { user: OWNER }); }
+catch (e) { tolakTpl = e.message; }
+cek('29f. Template tidak sah ditolak sebelum disimpan', /deskripsi wajib/.test(tolakTpl));
+
+const sesudah = await Svc.simpanTemplate('leader',
+  [{ description: 'Goal tim khusus', uom: 'Sesi', base: 0, target: 8 }], { user: OWNER });
+cek('29g. Owner boleh menyimpan', sesudah.leader[0].description === 'Goal tim khusus');
+cek('29h. Tersimpan sebagai SATU baris grd:templates', spTpl.baris.has('grd:templates'));
+cek('29i. Peran lain tidak ikut tertulis ke simpanan',
+  Object.keys(spTpl.baris.get('grd:templates')).join() === 'leader');
+const tplBaru = await Svc.ambilTemplate();
+cek('29k. Hasil baca ulang memuat perubahan', tplBaru.leader[0].description === 'Goal tim khusus');
+cek('29l. Peran lain tetap bawaan setelah perubahan', tplBaru.operasional === G.TEMPLATE_GOAL.operasional);
+
+const dikembalikan = await Svc.simpanTemplate('leader', [], { user: OWNER });
+cek('29m. Daftar kosong = kembali ke bawaan', dikembalikan.leader === G.TEMPLATE_GOAL.leader);
+cek('29n. Entri peran dihapus dari simpanan, bukan disimpan kosong',
+  !Object.prototype.hasOwnProperty.call(spTpl.baris.get('grd:templates'), 'leader'));
+
+Svc.initGrd({ storage: { async get() { throw new Error('koneksi putus'); },
+  async listByPrefix() { return []; }, async set() { return true; }, async delete() { return true; } } });
+const tplGagal = await Svc.ambilTemplate();
+cek('29p. Baca gagal → template bawaan, bukan kosong', tplGagal.operasional === G.TEMPLATE_GOAL.operasional);
+Svc.initGrd({ storage: spTpl });
+Svc.setJalurGrd('auto');
+
+judul('30. Daftar template per peran');
+cek('30a. templateDiubah: belum ada simpanan → false',
+  !G.templateDiubah(null, 'leader') && !G.templateDiubah({}, 'leader'));
+cek('30b. templateDiubah: ada simpanan sah → true',
+  G.templateDiubah({ leader: [{ description: 'A', uom: 'x', base: 0, target: 1 }] }, 'leader'));
+cek('30c. templateDiubah: simpanan RUSAK semua → false (yang dipakai tetap bawaan)',
+  !G.templateDiubah({ leader: [{ description: '', uom: '', base: 0, target: 0 }] }, 'leader'));
+cek('30d. templateDiubah: bukan array → false', !G.templateDiubah({ leader: 'x' }, 'leader'));
+cek('30e. templateDiubah: peran lain tidak terpengaruh',
+  !G.templateDiubah({ leader: [{ description: 'A', uom: 'x', base: 0, target: 1 }] }, 'operasional'));
+
+const ringkasTpl = G.ringkasTemplate({ leader: [{ description: 'Khusus', uom: 'Sesi', base: 0, target: 8 }] });
+cek('30f. Satu baris per peran', ringkasTpl.length === G.ROLE_KEYS_GRD.length);
+cek('30g. Urut mengikuti ROLE_KEYS (Owner di atas)',
+  ringkasTpl.map(r => r.peran).join() === 'owner,manajer,leader,wakil,operasional',
+  ringkasTpl.map(r => r.peran));
+cek('30h. Peran yang diubah ditandai',
+  ringkasTpl.find(r => r.peran === 'leader').diubah === true);
+cek('30i. Peran lain ditandai belum diubah',
+  ringkasTpl.filter(r => r.peran !== 'leader').every(r => r.diubah === false));
+cek('30j. Jumlah template ikut dihitung',
+  ringkasTpl.find(r => r.peran === 'leader').jumlah === 1);
+cek('30k. Tiap peran selalu punya daftar berisi',
+  ringkasTpl.every(r => Array.isArray(r.daftar) && r.daftar.length > 0));
+cek('30l. Tanpa simpanan sama sekali → semua bawaan, tidak ada yang "diubah"', (() => {
+  const r = G.ringkasTemplate(null);
+  return r.every(x => x.diubah === false) && r.every(x => x.jumlah > 0);
+})());
+
+const spDt = storagePalsu(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spDt });
+const dt1 = await Svc.daftarTemplate({ user: STAF1 });
+cek('30m. Staf boleh MELIHAT daftar template', dt1.perPeran.length === 5);
+cek('30n. Staf TIDAK boleh mengubah (bisaUbah=false)', dt1.bisaUbah === false);
+cek('30o. Belum ada yang diubah', dt1.diubah.length === 0);
+cek('30p. Total template dihitung', dt1.totalTemplate > 0);
+
+const dt2 = await Svc.daftarTemplate({ user: OWNER });
+cek('30q. Owner boleh mengubah (bisaUbah=true)', dt2.bisaUbah === true);
+cek('30r. Manajer juga boleh', (await Svc.daftarTemplate({ user: orang('u-manajer') })).bisaUbah === true);
+cek('30s. Leader TIDAK boleh', (await Svc.daftarTemplate({ user: LEADER })).bisaUbah === false);
+cek('30t. Tanpa user → tidak boleh (default menolak)',
+  (await Svc.daftarTemplate()).bisaUbah === false);
+
+await Svc.simpanTemplate('wakil', [{ description: 'Pendampingan khusus', uom: 'Sesi', base: 0, target: 6 }], { user: OWNER });
+const dt3 = await Svc.daftarTemplate({ user: OWNER });
+cek('30u. Peran yang baru diubah muncul di daftar `diubah`', dt3.diubah.join() === 'wakil', dt3.diubah);
+cek('30v. Isinya ikut berubah',
+  dt3.perPeran.find(r => r.peran === 'wakil').daftar[0].description === 'Pendampingan khusus');
+cek('30w. `template` siap dipakai langsung oleh form',
+  dt3.template.wakil[0].description === 'Pendampingan khusus');
+cek('30x. Peran lain tetap bawaan', dt3.template.leader === G.TEMPLATE_GOAL.leader);
+
+Svc.initGrd({ storage: { async get() { throw new Error('putus'); },
+  async listByPrefix() { return []; }, async set() { return true; }, async delete() { return true; } } });
+const dtGagal = await Svc.daftarTemplate({ user: OWNER });
+cek('30y. Gagal baca → daftar tetap terisi bawaan, bukan kosong',
+  dtGagal.perPeran.length === 5 && dtGagal.totalTemplate > 0);
+cek('30z. Gagal baca → tidak ada yang salah ditandai "diubah"', dtGagal.diubah.length === 0);
+Svc.initGrd({ storage: spDt }); Svc.setJalurGrd('auto');
+
+judul('31. Riwayat perubahan: dibaca per goal, bukan seluruh tim');
+cek('31a. Prefix jejak satu goal', G.prefixJejakGoal('abc') === 'grdjejak:rec:abc:');
+cek('31b. Id kosong → prefix kosong (jangan sampai menarik SEMUA jejak)',
+  G.prefixJejakGoal('') === '' && G.prefixJejakGoal(null) === '');
+cek('31c. Prefix diakhiri titik dua sebagai pemisah',
+  G.prefixJejakGoal('x').endsWith(':'));
+cek('31d. Kunci jejak yang ditulis cocok dengan prefixnya', (() => {
+  const j = G.catatPerubahan(null, { id: 'gx', ownerId: 'u', periode: '2026-09',
+    description: 'a', base: 0, target: 1, uom: 'x' }, { id: 'u', name: 'U' }, '2026-09-16T00:00:00.000Z');
+  return (G.JEJAK_REC_PREFIX + j[0].id).startsWith(G.prefixJejakGoal('gx'));
+})());
+
+const spJ = storagePalsu(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spJ });
+const gA = { id: 'ja', ownerId: 'u-staf1', periode: '2026-09', description: 'Goal A', base: 0, target: 10, uom: 'x' };
+const gB = { id: 'jb', ownerId: 'u-staf2', periode: '2026-09', description: 'Goal B', base: 0, target: 10, uom: 'x' };
+await Svc.simpanGoal(gA, { user: OWNER, allUsers: tim });
+await Svc.simpanGoal(gB, { user: OWNER, allUsers: tim });
+await Svc.simpanGoal({ ...gA, target: 20 }, { user: OWNER, allUsers: tim, goalLama: gA });
+await Svc.simpanGoal({ ...gB, target: 30 }, { user: OWNER, allUsers: tim, goalLama: gB });
+
+const jejakA = await Svc.ambilJejakGoal('ja');
+cek('31e. Hanya jejak goal itu yang kembali', jejakA.length === 2, jejakA.length);
+cek('31f. Tidak ada jejak goal lain yang bocor', jejakA.every(j => j.goalId === 'ja'));
+cek('31g. Terbaru di atas tetap berlaku', jejakA[0].waktu >= jejakA[1].waktu);
+
+spJ.prefixDiminta = [];
+await Svc.ambilJejakGoal('ja');
+cek('31h. Membaca lewat prefix SPESIFIK goal, bukan seluruh jejak',
+  spJ.prefixDiminta.length === 1 && spJ.prefixDiminta[0] === 'grdjejak:rec:ja:',
+  spJ.prefixDiminta);
+cek('31i. TIDAK pernah meminta prefix jejak global', !spJ.prefixDiminta.includes('grdjejak:rec:'));
+
+cek('31j. Goal tanpa riwayat → kosong, tanpa menyentuh server',
+  (await Svc.ambilJejakGoal('tidak-ada')).length === 0);
+spJ.prefixDiminta = [];
+const kosongJ = await Svc.ambilJejakGoal('');
+cek('31l. Id kosong benar-benar tidak memanggil storage',
+  kosongJ.length === 0 && spJ.prefixDiminta.length === 0, spJ.prefixDiminta);
+
+// detail goal ikut jalur hemat
+spJ.prefixDiminta = [];
+const detailHemat = await Svc.ambilDetailGoal('ja', { allUsers: tim });
+cek('31m. Panel detail ikut memakai jalur hemat',
+  spJ.prefixDiminta.includes('grdjejak:rec:ja:') && !spJ.prefixDiminta.includes('grdjejak:rec:'),
+  spJ.prefixDiminta);
+cek('31n. Riwayat di panel detail tetap lengkap', detailHemat.riwayat.length === 2);
+
+spJ.prefixDiminta = [];
+const detailDioper = await Svc.ambilDetailGoal('ja', {
+  allUsers: tim, goals: [gA], jejak: await Svc.ambilJejak(),
+});
+cek('31o. Jejak yang sudah dioper dipakai apa adanya (tanpa baca ulang)',
+  detailDioper.riwayat.length === 2
+  && !spJ.prefixDiminta.includes('grdjejak:rec:ja:'));
+
+const cekId = await Svc.turunkanGoal(
+  { id: 'jc', ownerId: 'u-leader', periode: '2026-09', description: 'C', base: 0, target: 9, uom: 'x' },
+  { user: LEADER, allUsers: tim, goalAda: [] });
+cek('31q. Id yang dibuat layanan tidak memuat ":"',
+  cekId.dibuat.every(g => !String(g.id).includes(':')), cekId.dibuat.map(g => g.id));
+const jejakTurunan = await Svc.ambilJejakGoal(cekId.dibuat[0].id);
+cek('31s. Riwayat goal turunan terbaca', jejakTurunan.length === 1 && jejakTurunan[0].field === '_dibuat');
+Svc.setJalurGrd('auto');
+
+// ============================================================================
+judul('32. SKENARIO UTUH — roll down dari perusahaan sampai staf');
+// Uji alur, bukan potongan: goal perusahaan diturunkan berjenjang, lalu
+// diperiksa lewat kedua sudut pandang (pohon ORANG & rantai GOAL) dan lewat
+// panel detail. Kalau salah satu lapisan bergeser sendiri, blok ini yang jatuh.
+// ============================================================================
+const spSkenario = storagePalsu();
+Svc.setJalurGrd('kv');
+Svc.initGrd({ storage: spSkenario });
+
+// 1) Owner membuat goal perusahaan (kuartalan).
+const goalPerusahaan = {
+  id: 'sk-corp', ownerId: 'u-owner', periode: '2026-Q3',
+  description: 'GMV Al-Kahfi Corp', base: 0, target: 12, uom: 'Miliar Rupiah',
+};
+await Svc.simpanGoal(goalPerusahaan, { user: OWNER, allUsers: tim });
+cek('32a. Goal perusahaan tersimpan', (await Svc.ambilGoal()).length === 1);
+
+// 2) Owner menurunkan ke bawahan langsungnya (Leader).
+const turun1 = await Svc.turunkanGoal(goalPerusahaan, { user: OWNER, allUsers: tim });
+cek('32b. Turun ke bawahan langsung Owner', turun1.dibuat.length === 1, turun1.dibuat.length);
+cek('32c. Yang dituruni memang Leader', turun1.dibuat[0].ownerId === 'u-leader');
+cek('32d. Target utuh (satu bawahan → tidak terbagi)', turun1.dibuat[0].target === 12);
+cek('32e. Periode kuartal ikut turun', turun1.dibuat[0].periode === '2026-Q3');
+
+// 3) Leader menurunkan lagi ke bawahannya (Co-Leader + staf).
+const goalLeader = turun1.dibuat[0];
+const turun2 = await Svc.turunkanGoal(goalLeader, { user: LEADER, allUsers: tim });
+cek('32f. Leader menurunkan ke 2 bawahan langsung', turun2.dibuat.length === 2);
+cek('32g. Target dibagi rata (satuan Rupiah bisa dijumlah)',
+  turun2.dibuat.every(g => g.target === 6), turun2.dibuat.map(g => g.target));
+cek('32h. Semua menunjuk goal Leader sebagai induk',
+  turun2.dibuat.every(g => g.parentId === goalLeader.id));
+
+// 4) Co-Leader menurunkan ke stafnya — lapis KEEMPAT.
+const goalWakil = turun2.dibuat.find(g => g.ownerId === 'u-wakil');
+const turun3 = await Svc.turunkanGoal(goalWakil, { user: orang('u-wakil'), allUsers: tim });
+cek('32i. Co-Leader bisa menurunkan lagi (bukan batas 2 lapis lama)', turun3.dibuat.length === 1);
+cek('32j. Sampai ke staf paling bawah', turun3.dibuat[0].ownerId === 'u-staf1');
+cek('32k. Targetnya ikut mengecil berjenjang', turun3.dibuat[0].target === 6);
+
+// 5) Periksa lewat POHON ORANG.
+const qSk = await Svc.queryPohon({ users: tim, periode: '2026-Q3' });
+cek('32l. Total goal seluruh jenjang', qSk.ringkas.totalGoal === 5, qSk.ringkas.totalGoal);
+cek('32m. Semua orang tetap muncul', G.ratakanPohon(qSk.pohon).length === tim.length);
+cek('32n. Goal menempel pada pemilik yang tepat di tiap jenjang', (() => {
+  const datar = G.ratakanPohon(qSk.pohon);
+  const punya = (id) => (datar.find(s => s.user.id === id) || {}).goals || [];
+  return punya('u-owner').length === 1 && punya('u-leader').length === 1
+    && punya('u-wakil').length === 1 && punya('u-staf1').length === 1
+    && punya('u-staf2').length === 1;
+})());
+cek('32o. Manajer yang tidak ikut jalur tetap tanpa goal', (() => {
+  const s = G.ratakanPohon(qSk.pohon).find(x => x.user.id === 'u-manajer');
+  return s.goals.length === 0;
+})());
+
+// 6) Periksa lewat RANTAI GOAL (sudut pandang kedua).
+const rantaiSk = G.rantaiGoal(qSk.semuaGoal);
+cek('32p. Rantai punya SATU akar: goal perusahaan',
+  rantaiSk.length === 1 && rantaiSk[0].goal.id === 'sk-corp', rantaiSk.map(r => r.goal.id));
+cek('32q. Kedalaman rantai 4 lapis', (() => {
+  return Math.max(...G.ratakanRantai(rantaiSk).map(s => s.level)) === 3;
+})(), G.ratakanRantai(rantaiSk).map(s => s.level));
+cek('32r. Semua goal masuk rantai (tidak ada yang yatim)',
+  G.ratakanRantai(rantaiSk).length === 5);
+cek('32s. Dua sudut pandang menghitung goal yang SAMA',
+  G.ratakanRantai(rantaiSk).length === qSk.ringkas.totalGoal);
+
+// 7) Panel detail di tengah rantai.
+const detailTengah = await Svc.ambilDetailGoal(goalLeader.id, { allUsers: tim });
+cek('32t. Detail menemukan induknya (goal perusahaan)', detailTengah.induk.id === 'sk-corp');
+cek('32u. Detail menemukan 2 turunannya', detailTengah.turunan.length === 2);
+cek('32v. Pemiliknya benar', detailTengah.pemilik.id === 'u-leader');
+cek('32w. Riwayat mencatat goal ini dibuat', detailTengah.riwayat.some(j => j.field === '_dibuat'));
+
+// 8) Hapus goal tengah → rantai putus, turunannya TIDAK ikut hilang.
+const dampakTengah = G.dampakHapusGoal(goalLeader, qSk.semuaGoal);
+cek('32x. Dampak hapus dihitung sebelum tombol ditekan', dampakTengah.total === 3, dampakTengah);
+await Svc.hapusGoal(goalLeader, { user: OWNER, allUsers: tim });
+const sesudahHapus = await Svc.ambilGoal();
+cek('32y. Goal tengah hilang', !sesudahHapus.some(g => g.id === goalLeader.id));
+cek('32z. Turunannya TETAP ada (hanya rantainya putus)', sesudahHapus.length === 4);
+cek('32z-2. Turunan yatim naik jadi akar rantai',
+  G.rantaiGoal(sesudahHapus).length === 3, G.rantaiGoal(sesudahHapus).map(r => r.goal.id));
+
+judul('33. Per-record: dua orang menulis bersamaan tidak saling menimpa');
+// Inilah alasan goal disimpan satu baris per goal, bukan satu array besar.
+const spBarengan = storagePalsu();
+Svc.initGrd({ storage: spBarengan });
+const gStaf1 = { id: 'br1', ownerId: 'u-staf1', periode: '2026-09', description: 'Punya Andi', base: 0, target: 30, uom: 'Konten' };
+const gStaf2 = { id: 'br2', ownerId: 'u-staf2', periode: '2026-09', description: 'Punya Budi', base: 0, target: 10, uom: 'Produk' };
+
+await Promise.all([
+  Svc.simpanGoal(gStaf1, { user: STAF1, allUsers: tim }),
+  Svc.simpanGoal(gStaf2, { user: STAF2, allUsers: tim }),
+]);
+cek('33a. Dua penulisan bersamaan sama-sama selamat',
+  spBarengan.baris.has('grdgoal:rec:br1') && spBarengan.baris.has('grdgoal:rec:br2'));
+cek('33b. Isi masing-masing utuh',
+  spBarengan.baris.get('grdgoal:rec:br1').description === 'Punya Andi'
+  && spBarengan.baris.get('grdgoal:rec:br2').description === 'Punya Budi');
+cek('33c. Menempati baris berbeda (bukan satu array yang ditimpa)',
+  [...spBarengan.baris.keys()].filter(k => k.startsWith('grdgoal:rec:')).length === 2);
+
+await Promise.all([
+  Svc.simpanGoal({ ...gStaf1, target: 40 }, { user: STAF1, allUsers: tim, goalLama: gStaf1 }),
+  Svc.simpanGoal({ ...gStaf2, target: 20 }, { user: STAF2, allUsers: tim, goalLama: gStaf2 }),
+]);
+cek('33d. Perubahan bersamaan juga tidak saling menimpa',
+  spBarengan.baris.get('grdgoal:rec:br1').target === 40
+  && spBarengan.baris.get('grdgoal:rec:br2').target === 20);
+cek('33e. Jejak keduanya tercatat terpisah', (() => {
+  const j1 = [...spBarengan.baris.values()].filter(v => v && v.goalId === 'br1' && v.field === 'target');
+  const j2 = [...spBarengan.baris.values()].filter(v => v && v.goalId === 'br2' && v.field === 'target');
+  return j1.length === 1 && j2.length === 1;
+})());
+cek('33f. Jejak tiap goal terpisah prefixnya',
+  (await Svc.ambilJejakGoal('br1')).every(j => j.goalId === 'br1'));
+Svc.setJalurGrd('auto');
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

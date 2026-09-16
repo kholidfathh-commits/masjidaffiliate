@@ -18,7 +18,7 @@
 // ============================================================================
 
 import { wibDayKey } from '../absensi/logika.js';
-import { atasanId, pangkat, isManajemen, isPengawas, butuhAtasan, bawahanLangsung, idBawahanTransitif } from '../peran/hierarki.js';
+import { ROLE_KEYS, atasanId, pangkat, isManajemen, isPengawas, butuhAtasan, bawahanLangsung, idBawahanTransitif } from '../peran/hierarki.js';
 
 // ====== KUNCI PENYIMPANAN ======
 // PER-RECORD (1 baris = 1 goal) supaya dua orang yang menyimpan bersamaan tidak
@@ -260,9 +260,102 @@ export const TEMPLATE_GOAL = {
   ],
 };
 
-/** Template untuk sebuah peran — peran tak dikenal jatuh ke template karyawan. */
-export function templateUntuk(peran) {
+/**
+ * Kunci simpanan template yang DIUBAH tim.
+ *
+ * Sengaja SATU baris, bukan per-record seperti goal: template jarang diubah dan
+ * hanya boleh diubah pengelola, jadi risiko dua orang menimpa bersamaan sangat
+ * kecil — berbeda dengan goal yang ditulis banyak orang tiap hari. Bentuknya
+ * seperti `app:settings`, dan karena itu WAJIB ikut BACKUP_KEYS.
+ */
+export const TEMPLATE_KEY = 'grd:templates';
+
+/** Peran yang punya template. Diekspor ulang dari hierarki.js — SATU sumber daftar peran. */
+export const ROLE_KEYS_GRD = ROLE_KEYS;
+
+/** Bentuk satu template yang aman dipakai. null bila tidak layak dipakai sama sekali. */
+export function normalisasiTemplate(t) {
+  if (!t || typeof t !== 'object') return null;
+  const base = angka(t.base, 0);
+  const target = angka(t.target, 0);
+  const description = String(t.description || '').trim();
+  const uom = String(t.uom || '').trim();
+  if (!description || !uom || base === target) return null;
+  return { description, base, target, uom };
+}
+
+/**
+ * Template BAWAAN digabung dengan yang diubah tim.
+ *
+ * Penggabungannya PER PERAN, bukan per item: peran yang pernah diatur memakai
+ * daftar simpanan, peran yang belum pernah disentuh tetap memakai bawaan.
+ * Dibuat begini supaya menambah peran baru di kode tidak menghapus template
+ * yang sudah diatur tim, dan sebaliknya — simpanan rusak untuk satu peran tidak
+ * menghilangkan template peran lain.
+ */
+export function gabungTemplate(tersimpan) {
+  const hasil = {};
+  for (const peran of ROLE_KEYS) {
+    const dari = tersimpan && Array.isArray(tersimpan[peran]) ? tersimpan[peran] : null;
+    const bersih = dari ? dari.map(normalisasiTemplate).filter(Boolean) : [];
+    hasil[peran] = bersih.length ? bersih : (TEMPLATE_GOAL[peran] || TEMPLATE_GOAL.operasional);
+  }
+  return hasil;
+}
+
+/**
+ * Template untuk sebuah peran. `tersimpan` opsional — tanpa itu memakai bawaan,
+ * jadi pemanggil lama tetap jalan. Peran tak dikenal jatuh ke template karyawan.
+ */
+export function templateUntuk(peran, tersimpan) {
+  if (tersimpan) {
+    const gabung = gabungTemplate(tersimpan);
+    return gabung[peran] || gabung.operasional;
+  }
   return TEMPLATE_GOAL[peran] || TEMPLATE_GOAL.operasional;
+}
+
+/**
+ * Apakah template peran ini sudah DIUBAH tim (bukan lagi bawaan)?
+ * Simpanan yang isinya rusak semua dianggap belum diubah — karena yang benar-
+ * benar dipakai tetap template bawaan, dan menandainya "diubah" akan
+ * menyesatkan pengelola.
+ */
+export function templateDiubah(tersimpan, peran) {
+  const d = tersimpan && tersimpan[peran];
+  if (!Array.isArray(d)) return false;
+  return d.map(normalisasiTemplate).filter(Boolean).length > 0;
+}
+
+/**
+ * Ringkasan template untuk halaman pengelolaan: satu baris per peran, lengkap
+ * dengan penanda apakah sudah diubah tim atau masih bawaan.
+ * Urutannya mengikuti ROLE_KEYS (Owner di atas), bukan urutan objek simpanan —
+ * supaya daftarnya tidak berubah-ubah susunannya.
+ */
+export function ringkasTemplate(tersimpan) {
+  const gabung = gabungTemplate(tersimpan);
+  return ROLE_KEYS.map(peran => ({
+    peran,
+    daftar: gabung[peran],
+    jumlah: gabung[peran].length,
+    diubah: templateDiubah(tersimpan, peran),
+  }));
+}
+
+/** Pesan kesalahan pertama saat menyimpan template sebuah peran, atau '' bila sah. */
+export function validasiDaftarTemplate(daftar) {
+  if (!Array.isArray(daftar)) return 'Daftar template tidak terbaca.';
+  if (daftar.length === 0) return 'Isi minimal satu template, atau kosongkan untuk kembali ke bawaan.';
+  for (let i = 0; i < daftar.length; i++) {
+    const t = daftar[i];
+    if (!String(t && t.description || '').trim()) return `Template ke-${i + 1}: deskripsi wajib diisi.`;
+    if (!String(t && t.uom || '').trim()) return `Template ke-${i + 1}: satuan wajib diisi.`;
+    if (angka(t && t.base, 0) === angka(t && t.target, 0)) {
+      return `Template ke-${i + 1}: target tidak boleh sama dengan base.`;
+    }
+  }
+  return '';
 }
 
 /**
@@ -547,6 +640,24 @@ export function catatPerubahan(goalLama, goalBaru, oleh, waktu = new Date().toIS
     keluar.push(buat(f, a[f], b[f]));
   }
   return keluar;
+}
+
+/**
+ * Prefix baris jejak MILIK SATU GOAL.
+ *
+ * Bentuk kunci jejak adalah `grdjejak:rec:<goalId>:<field>:<waktu>`, jadi
+ * riwayat satu goal bisa ditarik dengan satu prefix — tidak perlu membaca
+ * SELURUH jejak seluruh tim hanya untuk membuka satu panel detail. Ini penting:
+ * jejak tidak pernah dipangkas (ia bukti audit), jadi jumlahnya hanya bertambah,
+ * dan egress Supabase di project ini pernah kehabisan kuota.
+ *
+ * Id goal yang dibuat aplikasi tidak pernah memuat ':' — pemanggil tetap
+ * menyaring ulang berdasarkan `goalId` sebagai jaring pengaman untuk data lama
+ * atau hasil impor yang bentuknya tidak terduga.
+ */
+export function prefixJejakGoal(goalId) {
+  const id = String(goalId || '');
+  return id ? `${JEJAK_REC_PREFIX}${id}:` : '';
 }
 
 /** Riwayat satu goal — TERBARU DI ATAS. */
