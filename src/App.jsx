@@ -1679,6 +1679,7 @@ export default function App() {
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
             {view === 'grd-tree' && <GrdTreeView user={currentUser} allUsers={allUsers} />}
             {view === 'grd-kelola' && <GrdKelolaView user={currentUser} allUsers={allUsers} />}
+            {view === 'grd-akses' && <GrdAksesView user={currentUser} allUsers={allUsers} />}
             {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'aset' && <AsetView user={currentUser} />}
             {view === 'sampel' && <SampelView user={currentUser} allUsers={allUsers}
@@ -2345,7 +2346,8 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       label: 'Goal (GRD)',
       items: [
         { id: 'grd-tree', label: 'Pohon Goal', icon: Network, show: true },
-        { id: 'grd-kelola', label: 'Kelola Goal', icon: Target, show: true }
+        { id: 'grd-kelola', label: 'Kelola Goal', icon: Target, show: true },
+        { id: 'grd-akses', label: 'Kontrol Akses', icon: Eye, show: isPengelola(user) }
       ]
     },
     {
@@ -18633,6 +18635,77 @@ function useGrdPeriode() {
   return { jenis, periode, setPeriode, gantiJenis };
 }
 
+/**
+ * Jalur TULIS bersama untuk halaman-halaman GRD (form, hapus, turunkan).
+ *
+ * Ditaruh di satu tempat supaya Pohon Goal dan Kelola Goal memakai alur yang
+ * sama persis — termasuk pemeriksaan wewenang dan penanganan kegagalannya.
+ * Kalau tiap halaman punya salinannya sendiri, cepat atau lambat salah satu
+ * ketinggalan saat aturannya berubah.
+ */
+function useGrdTulis({ user, allUsers, goals, muatUlang }) {
+  const [formBuka, setFormBuka] = useState(false);
+  const [draf, setDraf] = useState(null);
+  const [hapus, setHapus] = useState(null);
+  const [turunkan, setTurunkan] = useState(null);
+
+  const tutupForm = () => { setFormBuka(false); setDraf(null); };
+  const bukaBaru = () => { setDraf(null); setFormBuka(true); };
+  const bukaUbah = (g) => { setDraf(g); setFormBuka(true); };
+
+  /**
+   * Mengembalikan '' bila berhasil, atau PESAN kesalahan bila ditolak.
+   * Sengaja tidak memanggil alert(): form masih terbuka dan isian pengguna masih
+   * di layar, jadi pesannya lebih berguna ditempel di form daripada di kotak
+   * dialog yang menutupi apa yang baru saja diketik.
+   */
+  const simpanGoal = async (g) => {
+    try {
+      await GrdSvc.simpanGoal(g, { user, allUsers, goalLama: draf });
+      tutupForm();
+      await muatUlang();
+      return '';
+    } catch (e) { return (e && e.message) || 'Gagal menyimpan goal.'; }
+  };
+
+  const jalankanHapus = async (g) => {
+    try {
+      await GrdSvc.hapusGoal(g, { user, allUsers });
+      setHapus(null);
+      await muatUlang();
+    } catch (e) { alert('⚠️ ' + (e?.message || e)); }
+  };
+
+  const jalankanTurunkan = async (g) => {
+    try {
+      // Rencananya disusun ULANG di layanan dari goal induk — bukan dikirim dari
+      // layar — supaya isian yang sudah usang di modal tidak lolos menembus
+      // pemeriksaan wewenang.
+      const { dibuat, gagal, dilewati } = await GrdSvc.turunkanGoal(
+        g, { user, allUsers, bagiRata: g._bagiRata, goalAda: goals });
+      setTurunkan(null);
+      await muatUlang();
+      // Kegagalan sebagian TIDAK boleh lewat diam-diam — pengguna harus tahu
+      // siapa yang goalnya belum tersimpan supaya bisa mengulang.
+      if (gagal.length > 0) {
+        alert(`⚠️ ${dibuat.length} goal dibuat, tapi ${gagal.length} gagal:\n`
+          + gagal.map(x => `· ${x.nama} — ${x.alasan}`).join('\n')
+          + '\n\nTekan "Turunkan" lagi untuk mencoba yang gagal saja.');
+      } else if (dibuat.length === 0) {
+        alert(dilewati > 0
+          ? 'Semua bawahan sudah punya goal turunan dari goal ini.'
+          : 'Tidak ada bawahan langsung yang bisa dituruni goal ini.');
+      }
+    } catch (e) { alert('⚠️ ' + (e?.message || e)); }
+  };
+
+  return {
+    formBuka, draf, hapus, turunkan,
+    setHapus, setTurunkan, bukaBaru, bukaUbah, tutupForm,
+    simpanGoal, jalankanHapus, jalankanTurunkan,
+  };
+}
+
 /** Pemilih periode: jenis (bulan/kuartal) + geser mundur-maju + daftar pilihan. */
 function GrdPemilihPeriode({ jenis, periode, onJenis, onPeriode }) {
   const pilihan = useMemo(() => Grd.daftarPeriode(jenis, periode), [jenis, periode]);
@@ -18682,7 +18755,7 @@ function grdAngka(n) {
   return Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('id-ID') : String(Math.round(v * 100) / 100);
 }
 
-function GrdKartuGoal({ g, bolehUbah, onBuka }) {
+function GrdKartuGoal({ g, bolehUbah, onBuka, onUbah }) {
   const persen = Grd.persenCapaian(g);
   const gaya = Grd.gayaStatus(Grd.statusCapaian(g));
   return (
@@ -18702,6 +18775,15 @@ function GrdKartuGoal({ g, bolehUbah, onBuka }) {
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>{gaya.label}</span>
           <span className="font-display font-bold text-sm text-slate-700 tabular-nums w-11 text-right">{persen}%</span>
+          {/* Tombol ubah HANYA untuk yang berwenang. Menyembunyikannya bukan
+              pengamanan — layanan tetap memeriksa ulang — tapi memunculkan tombol
+              yang pasti ditolak itu menyesatkan. */}
+          {bolehUbah && onUbah && (
+            <button onClick={e => { e.stopPropagation(); onUbah(g); }} title="Ubah goal"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50">
+              <Edit2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
       <div className="mt-2.5 h-1.5 rounded-full bg-slate-100 overflow-hidden">
@@ -18728,7 +18810,7 @@ function GrdBaris({ label, children }) {
  * siapa, dan diturunkan lagi ke berapa goal) — itu yang membedakan panel ini
  * dari sekadar kartu, karena "roll down" baru terasa kalau rantainya kelihatan.
  */
-function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], onClose }) {
+function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], onClose, onUbah, onHapus, onTurunkan }) {
   const g = Grd.normalisasiGoal(goal);
   if (!g) return null;
   const pemilik = Grd.pemilikGoal(g, allUsers);
@@ -18855,11 +18937,32 @@ function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], onClose })
         )}
       </div>
 
-      <div className="mt-4 text-[11px] text-slate-500">
-        {bolehUbah
-          ? 'Anda berwenang mengubah goal ini.'
-          : 'Anda hanya bisa melihat goal ini — yang berwenang mengubah adalah pemiliknya dan atasannya.'}
-      </div>
+      {bolehUbah ? (
+        <div className="flex items-center gap-2 mt-5">
+          {onUbah && (
+            <button onClick={() => onUbah(g)}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm inline-flex items-center gap-2">
+              <Edit2 className="w-4 h-4" /> Ubah Goal
+            </button>
+          )}
+          {onTurunkan && Grd.bawahanUntukTurunan(g, allUsers).length > 0 && (
+            <button onClick={() => onTurunkan(g)}
+              className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm inline-flex items-center gap-2">
+              <Network className="w-4 h-4" /> Turunkan
+            </button>
+          )}
+          {onHapus && (
+            <button onClick={() => onHapus(g)}
+              className="ml-auto text-slate-400 hover:text-red-600 hover:bg-red-50 px-3 py-2 rounded-lg font-semibold text-sm inline-flex items-center gap-1.5">
+              <Trash2 className="w-4 h-4" /> Hapus
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="mt-4 text-[11px] text-slate-500">
+          Anda hanya bisa melihat goal ini — yang berwenang mengubah adalah pemiliknya dan atasannya.
+        </div>
+      )}
     </Modal>
   );
 }
@@ -18876,7 +18979,7 @@ function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], onClose })
  * berapa goal, rata capaian) tetap tampil supaya melipat tidak berarti
  * kehilangan informasi.
  */
-function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal }) {
+function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal, onUbahGoal }) {
   const u = simpul.user;
   const peran = ROLES[u.role] || ROLES.operasional;
   const PeranIcon = peran.icon;
@@ -18926,8 +19029,12 @@ function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal }) {
           </div>
 
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            <span className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-slate-100 text-slate-600">
+            <span className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-slate-100 text-slate-600"
+              title={simpul.tersembunyi > 0
+                ? `${simpul.goals.length} terlihat, ${simpul.tersembunyi} di luar kewenangan Anda`
+                : undefined}>
               {simpul.goals.length} goal
+              {simpul.tersembunyi > 0 && <span className="text-slate-400"> +{simpul.tersembunyi}</span>}
             </span>
             {punyaAnak && (
               <span className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-slate-100 text-slate-600 hidden sm:inline"
@@ -18953,8 +19060,20 @@ function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal }) {
         {simpul.goals.length > 0 ? (
           <div className="mt-3 space-y-2 pl-9">
             {simpul.goals.map(g => (
-              <GrdKartuGoal key={g.id} g={g} bolehUbah={Grd.bisaUbahGoal(user, g, allUsers)} onBuka={onBukaGoal} />
+              <GrdKartuGoal key={g.id} g={g} bolehUbah={Grd.bisaUbahGoal(user, g, allUsers)}
+                onBuka={onBukaGoal} onUbah={onUbahGoal} />
             ))}
+            {simpul.tersembunyi > 0 && (
+              <div className="text-[11px] text-slate-400 italic inline-flex items-center gap-1.5">
+                <EyeOff className="w-3 h-3" />
+                {simpul.tersembunyi} goal lain tidak ditampilkan — di luar kewenangan Anda.
+              </div>
+            )}
+          </div>
+        ) : simpul.tersembunyi > 0 ? (
+          <div className="mt-2.5 pl-9 text-[11px] text-slate-400 italic inline-flex items-center gap-1.5">
+            <EyeOff className="w-3 h-3" />
+            {simpul.tersembunyi} goal tidak ditampilkan — di luar kewenangan Anda.
           </div>
         ) : (
           <div className="mt-2.5 pl-9 text-[11px] text-slate-400 italic">Belum punya goal periode ini.</div>
@@ -18973,7 +19092,7 @@ function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal }) {
         <div className="mt-2.5 ml-4 sm:ml-7 pl-4 sm:pl-6 border-l-2 border-slate-200 space-y-2.5">
           {simpul.anak.map(a => (
             <GrdSimpul key={a.user.id} simpul={a} user={user} allUsers={allUsers}
-              terlipat={terlipat} onToggle={onToggle} onBukaGoal={onBukaGoal} />
+              terlipat={terlipat} onToggle={onToggle} onBukaGoal={onBukaGoal} onUbahGoal={onUbahGoal} />
           ))}
         </div>
       )}
@@ -18995,7 +19114,13 @@ function GrdTreeView({ user, allUsers }) {
   };
   useEffect(() => { muat(); const iv = setInterval(pollWhenVisible(muat), 60000); return () => clearInterval(iv); }, []);
 
-  const pohonPenuh = useMemo(() => Grd.bangunPohonGoal({ users: allUsers, goals, periode }), [allUsers, goals, periode]);
+  // STRUKTUR pohon tetap utuh untuk semua orang; yang mengikuti kewenangan
+  // adalah ISI goalnya. Goal di luar kewenangan dihitung sebagai `tersembunyi`
+  // pada simpulnya, bukan dibuang — supaya tidak tampak "belum punya goal".
+  const pohonPenuh = useMemo(() => Grd.bangunPohonGoal({
+    users: allUsers, goals, periode,
+    bolehLihat: (g) => Grd.bisaLihatGoal(user, g, allUsers),
+  }), [allUsers, goals, periode, user]);
 
   const [q, setQ] = useState('');
   const [filterDiv, setFilterDiv] = useState('all');
@@ -19015,6 +19140,7 @@ function GrdTreeView({ user, allUsers }) {
   const bawaan = useMemo(() => new Set(Grd.idCabang(pohon, 2)), [pohon]);
   const [ubahan, setUbahan] = useState(null);
   const [detail, setDetail] = useState(null);
+  const tulis = useGrdTulis({ user, allUsers, goals, muatUlang: muat });
   // Saat mencari, semua cabang dibuka: hasil yang cocok tidak boleh tersembunyi
   // di balik cabang yang kebetulan sedang terlipat.
   const KOSONG = useMemo(() => new Set(), []);
@@ -19113,14 +19239,32 @@ function GrdTreeView({ user, allUsers }) {
         <div className="space-y-3">
           {pohon.map(s => (
             <GrdSimpul key={s.user.id} simpul={s} user={user} allUsers={allUsers}
-              terlipat={terlipat} onToggle={toggle} onBukaGoal={setDetail} />
+              terlipat={terlipat} onToggle={toggle}
+              onBukaGoal={setDetail} onUbahGoal={tulis.bukaUbah} />
           ))}
         </div>
       )}
 
       {detail && (
         <GrdDetailGoal goal={detail} user={user} allUsers={allUsers}
-          semuaGoal={goals} onClose={() => setDetail(null)} />
+          semuaGoal={goals} onClose={() => setDetail(null)}
+          onUbah={(g) => { setDetail(null); tulis.bukaUbah(g); }}
+          onHapus={(g) => { setDetail(null); tulis.setHapus(g); }}
+          onTurunkan={(g) => { setDetail(null); tulis.setTurunkan(g); }} />
+      )}
+
+      {tulis.formBuka && (
+        <GrdFormGoal goal={tulis.draf} user={user} allUsers={allUsers}
+          periodeAktif={periode} jenisAktif={jenis}
+          onSimpan={tulis.simpanGoal} onClose={tulis.tutupForm} />
+      )}
+      {tulis.hapus && (
+        <GrdHapusGoalModal goal={tulis.hapus} allUsers={allUsers} goalAda={goals}
+          onHapus={tulis.jalankanHapus} onClose={() => tulis.setHapus(null)} />
+      )}
+      {tulis.turunkan && (
+        <GrdTurunkanModal goal={tulis.turunkan} allUsers={allUsers} goalAda={goals}
+          onTurunkan={tulis.jalankanTurunkan} onClose={() => tulis.setTurunkan(null)} />
       )}
     </div>
   );
@@ -19222,7 +19366,8 @@ function GrdFormGoal({ goal, user, allUsers, periodeAktif, jenisAktif, onSimpan,
   const pratinjauSiap = form.base !== '' && form.target !== ''
     && Number(form.base) !== Number(form.target);
 
-  const simpan = () => {
+  const [menyimpan, setMenyimpan] = useState(false);
+  const simpan = async () => {
     const calonGoal = {
       ...(lama || {}),
       ...form,
@@ -19230,7 +19375,13 @@ function GrdFormGoal({ goal, user, allUsers, periodeAktif, jenisAktif, onSimpan,
     };
     const salah = Grd.validasiGoal(calonGoal);
     if (salah) { setPesan(salah); return; }
-    onSimpan(Grd.normalisasiGoal(calonGoal));
+
+    setMenyimpan(true);
+    // Penolakan dari layanan (wewenang, koneksi) ditempel di form, bukan di
+    // alert — isian pengguna tetap utuh dan bisa langsung diperbaiki.
+    const salahServer = await onSimpan(Grd.normalisasiGoal(calonGoal));
+    setMenyimpan(false);
+    if (salahServer) setPesan(salahServer);
   };
 
   return (
@@ -19329,9 +19480,9 @@ function GrdFormGoal({ goal, user, allUsers, periodeAktif, jenisAktif, onSimpan,
           className="px-4 py-2 rounded-lg font-semibold text-sm text-slate-600 hover:bg-slate-100">
           Batal
         </button>
-        <button onClick={simpan}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">
-          {lama ? 'Simpan Perubahan' : 'Buat Goal'}
+        <button onClick={simpan} disabled={menyimpan}
+          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-semibold text-sm">
+          {menyimpan ? 'Menyimpan…' : (lama ? 'Simpan Perubahan' : 'Buat Goal')}
         </button>
       </div>
     </Modal>
@@ -19579,8 +19730,6 @@ function GrdKelolaView({ user, allUsers }) {
   const [q, setQ] = useState('');
   const [lingkup, setLingkup] = useState('semua'); // semua | saya | tim
   const [detail, setDetail] = useState(null);
-  const [formBuka, setFormBuka] = useState(false);
-  const [draf, setDraf] = useState(null);
 
   // Data SUNGGUHAN dari kv_store, lewat satu pintu src/grd/layanan.js.
   const [goals, setGoals] = useState([]);
@@ -19600,50 +19749,9 @@ function GrdKelolaView({ user, allUsers }) {
   };
   useEffect(() => { muat(); const iv = setInterval(pollWhenVisible(muat), 60000); return () => clearInterval(iv); }, []);
 
-  // Semua tulis lewat layanan: hak akses & validasi diperiksa DI SANA, bukan di
-  // sini — jadi tombol yang lolos dari layar tetap tidak bisa menembusnya.
-  const simpanGoal = async (g) => {
-    try {
-      await GrdSvc.simpanGoal(g, { user, allUsers, goalLama: draf });
-      setFormBuka(false); setDraf(null);
-      await muat();
-    } catch (e) { alert('⚠️ ' + (e?.message || e)); }
-  };
-  const bukaBaru = () => { setDraf(null); setFormBuka(true); };
-  const bukaUbah = (g) => { setDraf(g); setFormBuka(true); };
+  // Satu jalur tulis yang sama dengan halaman Pohon Goal.
+  const tulis = useGrdTulis({ user, allUsers, goals, muatUlang: muat });
 
-  const [hapus, setHapus] = useState(null);
-  const jalankanHapus = async (g) => {
-    try {
-      await GrdSvc.hapusGoal(g, { user, allUsers });
-      setHapus(null); setDetail(null);
-      await muat();
-    } catch (e) { alert('⚠️ ' + (e?.message || e)); }
-  };
-
-  const [turunkan, setTurunkan] = useState(null);
-  const jalankanTurunkan = async (g) => {
-    try {
-      // Rencananya disusun ULANG di layanan dari goal induk — bukan dikirim dari
-      // layar — supaya isian yang sudah usang di modal tidak bisa lolos menembus
-      // pemeriksaan wewenang.
-      const { dibuat, gagal, dilewati } = await GrdSvc.turunkanGoal(
-        g, { user, allUsers, bagiRata: g._bagiRata, goalAda: goals });
-      setTurunkan(null);
-      await muat();
-      // Kegagalan sebagian TIDAK boleh lewat diam-diam — pengguna harus tahu
-      // siapa yang goalnya belum tersimpan supaya bisa mengulang.
-      if (gagal.length > 0) {
-        alert(`⚠️ ${dibuat.length} goal dibuat, tapi ${gagal.length} gagal:\n`
-          + gagal.map(x => `· ${x.nama} — ${x.alasan}`).join('\n')
-          + '\n\nTekan "Turunkan" lagi untuk mencoba yang gagal saja.');
-      } else if (dibuat.length === 0) {
-        alert(dilewati > 0
-          ? 'Semua bawahan sudah punya goal turunan dari goal ini.'
-          : 'Tidak ada bawahan langsung yang bisa dituruni goal ini.');
-      }
-    } catch (e) { alert('⚠️ ' + (e?.message || e)); }
-  };
   // Tombol turunkan hanya muncul kalau pemilik goal memang punya bawahan langsung.
   const bolehTurunkan = (g) => Grd.bawahanUntukTurunan(g, allUsers).length > 0;
   const periodeIni = useMemo(() => Grd.goalPeriode(goals, periode), [goals, periode]);
@@ -19686,7 +19794,7 @@ function GrdKelolaView({ user, allUsers }) {
       <PageHeader title="Kelola Goal"
         subtitle={`Goal yang boleh Anda urus — ${Grd.labelPeriode(periode)}`}
         action={
-          <button onClick={bukaBaru}
+          <button onClick={tulis.bukaBaru}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
             <Plus className="w-4 h-4" /> Goal Baru
           </button>
@@ -19751,7 +19859,7 @@ function GrdKelolaView({ user, allUsers }) {
           <div className="space-y-2.5">
             {rantai.map(s => (
               <GrdSimpulRantai key={s.goal.id} simpul={s} allUsers={allUsers}
-                onBuka={setDetail} onUbah={bukaUbah} onTurunkan={setTurunkan} onHapus={setHapus} />
+                onBuka={setDetail} onUbah={tulis.bukaUbah} onTurunkan={tulis.setTurunkan} onHapus={tulis.setHapus} />
             ))}
           </div>
         </>
@@ -19759,33 +19867,225 @@ function GrdKelolaView({ user, allUsers }) {
         <div className="space-y-2.5">
           {tampil.map(g => (
             <GrdBarisGoal key={g.id} g={g} pemilik={Grd.pemilikGoal(g, allUsers)}
-              onBuka={setDetail} onUbah={bukaUbah} onHapus={setHapus}
-              onTurunkan={bolehTurunkan(g) ? setTurunkan : null} />
+              onBuka={setDetail} onUbah={tulis.bukaUbah} onHapus={tulis.setHapus}
+              onTurunkan={bolehTurunkan(g) ? tulis.setTurunkan : null} />
           ))}
         </div>
       )}
 
 
-      {formBuka && (
-        <GrdFormGoal goal={draf} user={user} allUsers={allUsers}
+      {tulis.formBuka && (
+        <GrdFormGoal goal={tulis.draf} user={user} allUsers={allUsers}
           periodeAktif={periode} jenisAktif={jenis}
-          onSimpan={simpanGoal} onClose={() => { setFormBuka(false); setDraf(null); }} />
+          onSimpan={tulis.simpanGoal} onClose={tulis.tutupForm} />
       )}
 
-      {hapus && (
-        <GrdHapusGoalModal goal={hapus} allUsers={allUsers} goalAda={goals}
-          onHapus={jalankanHapus} onClose={() => setHapus(null)} />
+      {tulis.hapus && (
+        <GrdHapusGoalModal goal={tulis.hapus} allUsers={allUsers} goalAda={goals}
+          onHapus={tulis.jalankanHapus} onClose={() => tulis.setHapus(null)} />
       )}
 
-      {turunkan && (
-        <GrdTurunkanModal goal={turunkan} allUsers={allUsers} goalAda={goals}
-          onTurunkan={jalankanTurunkan} onClose={() => setTurunkan(null)} />
+      {tulis.turunkan && (
+        <GrdTurunkanModal goal={tulis.turunkan} allUsers={allUsers} goalAda={goals}
+          onTurunkan={tulis.jalankanTurunkan} onClose={() => tulis.setTurunkan(null)} />
       )}
 
       {detail && (
         <GrdDetailGoal goal={detail} user={user} allUsers={allUsers}
-          semuaGoal={goals} jejak={jejak} onClose={() => setDetail(null)} />
+          semuaGoal={goals} jejak={jejak} onClose={() => setDetail(null)}
+          onUbah={(g) => { setDetail(null); tulis.bukaUbah(g); }}
+          onHapus={(g) => { setDetail(null); tulis.setHapus(g); }}
+          onTurunkan={(g) => { setDetail(null); tulis.setTurunkan(g); }} />
       )}
+    </div>
+  );
+}
+
+/** Satu kartu prinsip akses di halaman Kontrol Akses. */
+function GrdKartuPrinsip({ icon: Icon, judul, isi }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/70 p-4 shadow-sm shadow-slate-200/40">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+          <Icon className="w-3.5 h-3.5" />
+        </div>
+        <div className="font-bold text-sm text-slate-800">{judul}</div>
+      </div>
+      <div className="text-[12px] text-slate-600 leading-relaxed">{isi}</div>
+    </div>
+  );
+}
+
+/**
+ * HALAMAN KONTROL AKSES DATA GRD.
+ *
+ * Gunanya membuat aturan akses BISA DIPERIKSA tanpa membaca kode: siapa melihat
+ * sejauh apa, siapa boleh mengubah goal siapa, dan kenapa. Aturannya sendiri
+ * tidak tinggal di sini — semuanya dihitung fungsi murni di src/grd/data.js yang
+ * memakai src/peran/hierarki.js, fungsi yang sama yang menolak permintaan di
+ * layanan. Halaman ini cuma menampilkannya.
+ *
+ * Yang ditampilkan juga bukan janji keamanan: selama app belum memakai Supabase
+ * Auth, ini pagar PRODUK (menentukan apa yang muncul & boleh ditekan), bukan
+ * pagar kriptografis. Itu dinyatakan terbuka di halaman, bukan disembunyikan.
+ */
+function GrdAksesView({ user, allUsers }) {
+  const [goals, setGoals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [ujiOrang, setUjiOrang] = useState(user.id);
+  const [ujiGoal, setUjiGoal] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try { setGoals(await GrdSvc.ambilGoal()); }
+      catch (e) { console.warn('Muat goal gagal (pertahankan data lama):', e?.message || e); }
+      finally { setLoading(false); }
+    })();
+  }, []);
+
+  const matriks = useMemo(() => Grd.matriksAkses(allUsers, goals), [allUsers, goals]);
+  const orangUji = allUsers.find(u => u && u.id === ujiOrang) || user;
+  const goalUji = goals.find(g => g && g.id === ujiGoal) || null;
+  const hasilUji = goalUji ? Grd.alasanUbahGoal(orangUji, goalUji, allUsers) : null;
+  const hasilLihat = goalUji ? Grd.alasanLihatGoal(orangUji, goalUji, allUsers) : null;
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat data akses…</div>;
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="Kontrol Akses Data GRD"
+        subtitle="Siapa boleh melihat dan mengubah goal — beserta alasannya" />
+
+      <div className="grid md:grid-cols-3 gap-3 mb-5">
+        <GrdKartuPrinsip icon={Eye} judul="Lihat Sesuai Peran"
+          isi="Struktur pohon terlihat semua orang. Isi goalnya: milik sendiri, milik bawahan, dan milik atasan ke atas — supaya jelas goalnya turunan dari mana. Goal cabang lain yang sejajar tidak ditampilkan." />
+        <GrdKartuPrinsip icon={UserCheck} judul="Ubah Sesuai Atasan"
+          isi="Yang boleh mengubah sebuah goal hanya pemiliknya dan atasannya — berjenjang, mengikuti data atasan langsung, bukan jabatan yang dipatok." />
+        <GrdKartuPrinsip icon={Link2} judul="Satu Jalur Layanan"
+          isi="Semua baca-tulis lewat satu modul layanan. Wewenang diperiksa di sana, bukan dengan menyembunyikan tombol di layar." />
+      </div>
+
+      {/* Pernyataan terbuka soal batas keamanannya. */}
+      <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex items-start gap-2.5">
+        <AlertCircle className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
+        <div className="text-[12px] text-slate-600 leading-relaxed">
+          <span className="font-bold text-slate-700">Sejauh mana ini mengunci?</span> Aturan di bawah ditegakkan
+          di aplikasi, dan berlaku untuk semua orang yang memakai aplikasi ini. Ia belum menjadi kunci di sisi
+          database — penutupnya Supabase Auth + RLS, dan jalurnya sudah disiapkan lewat modul layanan
+          supaya nanti tidak perlu mengubah tampilan. Batasan ini berlaku untuk seluruh app, bukan khusus GRD.
+        </div>
+      </div>
+
+      {/* Pemeriksa: jawab pertanyaan konkret "boleh tidak?" */}
+      <div className="bg-white rounded-2xl border border-slate-200/70 p-4 mb-6 shadow-sm shadow-slate-200/40">
+        <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">Periksa Satu Kasus</div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 mb-1.5">Anggota</label>
+            <select value={ujiOrang} onChange={e => setUjiOrang(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800">
+              {matriks.map(r => (
+                <option key={r.user.id} value={r.user.id}>
+                  {r.user.name}{r.user.id === user.id ? ' (saya)' : ''} — {ROLES[r.user.role]?.label || 'Karyawan'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 mb-1.5">Goal</label>
+            <select value={ujiGoal} onChange={e => setUjiGoal(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800">
+              <option value="">— pilih goal —</option>
+              {goals.map(g => {
+                const p = Grd.pemilikGoal(g, allUsers);
+                return (
+                  <option key={g.id} value={g.id}>
+                    {g.description} · {p ? p.name : 'pemilik hilang'}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        </div>
+
+        {goals.length === 0 && (
+          <div className="mt-3 text-[12px] text-slate-500">
+            Belum ada goal untuk diperiksa. Buat dulu di halaman Kelola Goal.
+          </div>
+        )}
+
+        {hasilUji && (
+          <div className="mt-3 grid sm:grid-cols-2 gap-2.5">
+            <div className={`rounded-xl px-3.5 py-3 border ${hasilLihat.boleh
+              ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+              <div className={`text-sm font-bold ${hasilLihat.boleh ? 'text-emerald-800' : 'text-red-800'}`}>
+                {hasilLihat.boleh ? '✓ Boleh melihat' : '✕ Tidak boleh melihat'}
+              </div>
+              <div className={`text-[12px] mt-1 ${hasilLihat.boleh ? 'text-emerald-700' : 'text-red-700'}`}>
+                {hasilLihat.alasan}
+              </div>
+            </div>
+            <div className={`rounded-xl px-3.5 py-3 border ${hasilUji.boleh
+              ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+              <div className={`text-sm font-bold ${hasilUji.boleh ? 'text-emerald-800' : 'text-red-800'}`}>
+                {hasilUji.boleh ? '✓ Boleh mengubah' : '✕ Tidak boleh mengubah'}
+              </div>
+              <div className={`text-[12px] mt-1 ${hasilUji.boleh ? 'text-emerald-700' : 'text-red-700'}`}>
+                {hasilUji.alasan}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Matriks seluruh anggota */}
+      <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2.5">
+        Hak Akses Seluruh Anggota
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm bg-white rounded-2xl border border-slate-200/70 overflow-hidden">
+          <thead>
+            <tr className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+              <th className="text-left font-bold px-3.5 py-2.5">Anggota</th>
+              <th className="text-left font-bold px-3.5 py-2.5">Lingkup Lihat</th>
+              <th className="text-right font-bold px-3.5 py-2.5">Bawahan</th>
+              <th className="text-right font-bold px-3.5 py-2.5">Goal Sendiri</th>
+              <th className="text-right font-bold px-3.5 py-2.5">Boleh Ubah</th>
+            </tr>
+          </thead>
+          <tbody>
+            {matriks.map(r => {
+              const gaya = Grd.gayaLingkup(r.lingkup);
+              const aku = r.user.id === user.id;
+              return (
+                <tr key={r.user.id} className={`border-t border-slate-100 ${aku ? 'bg-blue-50/40' : ''}`}>
+                  <td className="px-3.5 py-2.5">
+                    <span className="inline-flex items-center gap-2">
+                      <Avatar person={r.user} size="xs" />
+                      <span className="font-semibold text-slate-800">{r.user.name}</span>
+                      {aku && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-600 text-white">Saya</span>}
+                    </span>
+                    <div className="text-[11px] text-slate-400 mt-0.5 ml-8">
+                      {displayJobTitle(r.user) || divLabel(r.user.division)}
+                    </div>
+                  </td>
+                  <td className="px-3.5 py-2.5">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>
+                      {gaya.label}
+                    </span>
+                  </td>
+                  <td className="px-3.5 py-2.5 text-right tabular-nums text-slate-600">{r.jumlahBawahan}</td>
+                  <td className="px-3.5 py-2.5 text-right tabular-nums text-slate-600">{r.goalSendiri}</td>
+                  <td className="px-3.5 py-2.5 text-right tabular-nums font-semibold text-slate-800">
+                    {r.jumlahBisaUbah}
+                    <span className="text-slate-400 font-normal"> / {r.totalGoal}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
