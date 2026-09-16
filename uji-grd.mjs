@@ -996,17 +996,26 @@ cek('17d-63. Status menyebut berapa goal terlihat & bisa diubah',
   /Anda melihat/.test(src) && /boleh mengubah/.test(src));
 cek('17d-64. Status menampilkan jalur data yang sedang dipakai',
   /GrdSvc\.jalurGrd\(\)/.test(src) && /lewat fungsi server \(RPC\)/.test(src));
+cek('17d-65. Baris goal memakai helper izin terpadu',
+  /Grd\.izinGoal\(user, g, allUsers\)/.test(src));
+cek('17d-66. Tombol turunkan memakai izin.turunkan, bukan izin.ubah',
+  /\(izin \? izin\.turunkan : bolehUbah\)/.test(src));
 cek('17d-59. Baris goal memeriksa wewenangnya SENDIRI (tidak mengandalkan pemanggil)', (() => {
   const i = src.indexOf('function GrdBarisGoal(');
   const j = src.indexOf('function GrdSimpulRantai(');
   const blok = src.slice(i, j);
-  return /const bolehUbah = !user \|\| Grd\.bisaUbahGoal\(user, g, allUsers\)/.test(blok);
+  // Sejak ada helper izin terpadu, pemeriksaannya lewat Grd.izinGoal — tapi
+  // intinya sama: baris ini menghitung sendiri, tidak menerima dari pemanggil.
+  return /const izin = user \? Grd\.izinGoal\(user, g, allUsers\) : null/.test(blok)
+    && /const bolehUbah = !izin \|\| izin\.ubah/.test(blok);
 })());
-cek('17d-60. Ketiga tombol aksi digerbangi wewenang yang sama', (() => {
+cek('17d-60. Ketiga tombol aksi sama-sama digerbangi izin', (() => {
   const i = src.indexOf('function GrdBarisGoal(');
   const j = src.indexOf('function GrdSimpulRantai(');
   const blok = src.slice(i, j);
-  return (blok.match(/\{bolehUbah && on(Ubah|Hapus|Turunkan) && \(/g) || []).length === 3;
+  const ubahHapus = (blok.match(/\{bolehUbah && on(Ubah|Hapus) && \(/g) || []).length;
+  const turun = /\(izin \? izin\.turunkan : bolehUbah\) && onTurunkan && \(/.test(blok);
+  return ubahHapus === 2 && turun;
 })());
 cek('17d-61. user & allUsers benar-benar dioper ke baris goal',
   /<GrdBarisGoal[^>]*user=\{user\}/.test(src.replace(/\n/g, ' ')));
@@ -3484,6 +3493,130 @@ cek('67g. Harapan & kenyataan diperiksa untuk SEMUA 49 kombinasi, bukan sebagian
   let n = 0;
   for (const p of Object.keys(HARAPAN_LIHAT)) n += Object.keys(HARAPAN_LIHAT[p]).length;
   return n === 49;
+})());
+
+// ============================================================================
+judul('68. PENJAGA OTOMATIS — tiap fungsi tulis wajib memeriksa wewenang');
+// Membaca src/grd/layanan.js dan memeriksa STRUKTURNYA, bukan perilakunya.
+// Gunanya menangkap fungsi tulis BARU yang lupa memeriksa — uji perilaku tidak
+// bisa menangkap itu, karena fungsi yang belum ada belum punya ujinya.
+// ============================================================================
+const svcSrc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+
+// Ambil setiap fungsi yang diekspor beserta badannya.
+// Badan dipotong sampai "}" di KOLOM 0 — gaya kode modul ini konsisten menutup
+// fungsi di situ. Dua cara lain sempat dicoba dan keduanya salah: memotong
+// sampai "export berikutnya" membuat sebuah fungsi menelan fungsi pembantu di
+// bawahnya, sedangkan menghitung kurung kurawal dari awal deklarasi malah
+// berhenti di parameter `{ user, allUsers }` yang juga berkurung kurawal.
+function fungsiLayanan() {
+  const out = [];
+  const re = /^export (?:async )?function (\w+)\(/gm;
+  let m;
+  while ((m = re.exec(svcSrc))) {
+    const mulai = m.index;
+    const tutup = svcSrc.indexOf('\n}', mulai);
+    out.push({ nama: m[1], badan: svcSrc.slice(mulai, tutup > -1 ? tutup + 2 : svcSrc.length) });
+  }
+  return out;
+}
+const semuaFungsi = fungsiLayanan();
+cek('68a. Fungsi layanan terbaca', semuaFungsi.length >= 20, semuaFungsi.length);
+
+// Fungsi TULIS = yang memanggil st().set / st().delete atau lewatRpc.
+const fungsiTulis = semuaFungsi.filter(f =>
+  /st\(\)\.(set|delete)\(/.test(f.badan) || /lewatRpc\(/.test(f.badan));
+cek('68b. Fungsi tulis terdeteksi', fungsiTulis.length >= 5, fungsiTulis.map(f => f.nama));
+
+// Tiap fungsi tulis WAJIB memanggil salah satu pemeriksa wewenang,
+// kecuali yang memang pembantu internal (tulisJejak) — jejak menempel pada
+// operasi yang wewenangnya SUDAH diperiksa pemanggilnya.
+const DIKECUALIKAN = new Set(['tulisJejak']);
+const PEMERIKSA = /(bolehTulisMilik|bisaUbahGoal|bisaBuatGoalUntuk|alasanUbahGoal|bisaUbahLead|bisaUsulLead|bisaNilaiLead|bisaIsiSkor|isManajemen)/;
+const lupaPeriksa = fungsiTulis
+  .filter(f => !DIKECUALIKAN.has(f.nama))
+  .filter(f => !PEMERIKSA.test(f.badan))
+  .map(f => f.nama);
+cek('68c. TIDAK ada fungsi tulis yang lupa memeriksa wewenang', lupaPeriksa.length === 0, lupaPeriksa);
+
+// Tiap fungsi tulis juga wajib bisa MENOLAK (melempar GrdDitolak).
+const takBisaMenolak = fungsiTulis
+  .filter(f => !DIKECUALIKAN.has(f.nama))
+  .filter(f => !/GrdDitolak/.test(f.badan))
+  .map(f => f.nama);
+cek('68d. Tiap fungsi tulis punya jalur penolakan yang jelas', takBisaMenolak.length === 0, takBisaMenolak);
+
+// Fungsi BACA tidak boleh diam-diam menulis.
+const fungsiBaca = semuaFungsi.filter(f => /^(ambil|susun|query|cari|muat|daftar)/.test(f.nama));
+const bacaYangMenulis = fungsiBaca.filter(f => /st\(\)\.(set|delete)\(/.test(f.badan)).map(f => f.nama);
+cek('68e. Fungsi baca TIDAK menulis apa pun', bacaYangMenulis.length === 0, bacaYangMenulis);
+
+// Pemeriksaan wewenang harus terjadi SEBELUM penulisan, bukan sesudah.
+const periksaTerlambat = fungsiTulis
+  .filter(f => !DIKECUALIKAN.has(f.nama) && PEMERIKSA.test(f.badan))
+  .filter(f => {
+    const iPeriksa = f.badan.search(PEMERIKSA);
+    const iTulis = f.badan.search(/st\(\)\.(set|delete)\(/);
+    return iTulis > -1 && iPeriksa > iTulis;
+  }).map(f => f.nama);
+cek('68f. Wewenang diperiksa SEBELUM menulis, bukan sesudah', periksaTerlambat.length === 0, periksaTerlambat);
+
+// Penolakan server lewat RPC tidak boleh di-fallback jadi tulis langsung.
+cek('68g. Penolakan dari RPC TIDAK disiasati dengan menulis langsung',
+  /if \(e instanceof GrdDitolak\) throw e;/.test(svcSrc));
+
+// Semua penulisan goal/lead/skor memakai prefix resmi, bukan kunci karangan.
+cek('68h. Kunci tulis memakai konstanta prefix, bukan teks mentah', (() => {
+  const tulisTeksMentah = /st\(\)\.set\(\s*['"`](?!grd)/.test(svcSrc)
+    || /st\(\)\.set\(\s*['"`]grd[a-z]*:rec:/.test(svcSrc);
+  return !tulisTeksMentah;
+})());
+
+judul('69. Helper izin terpadu');
+const gIz = goalDari('u-staf1', { id: 'iz1' });
+const iz = (siapa) => G.izinGoal(orang(siapa), gIz, tim);
+
+cek('69a. Pemilik: lihat & ubah & hapus', (() => {
+  const r = iz('u-staf1'); return r.lihat && r.ubah && r.hapus;
+})());
+cek('69b. Pemilik TANPA bawahan tidak bisa menurunkan', !iz('u-staf1').turunkan);
+cek('69c. Goal milik orang yang PUNYA bawahan bisa diturunkan', (() => {
+  const r = G.izinGoal(orang('u-leader'), goalDari('u-leader', { id: 'iz2' }), tim);
+  return r.turunkan === true;
+})());
+cek('69d. Atasan: lihat & ubah', (() => {
+  const r = iz('u-leader'); return r.lihat && r.ubah;
+})());
+cek('69e. Rekan sejajar: lihat TIDAK, ubah TIDAK', (() => {
+  const r = iz('u-staf2'); return !r.lihat && !r.ubah && !r.hapus && !r.turunkan;
+})());
+cek('69f. Hapus selalu mengikuti ubah', (() => {
+  return tim.every(u => {
+    const r = G.izinGoal(u, gIz, tim);
+    return r.hapus === r.ubah;
+  });
+})());
+cek('69g. Turunkan tidak pernah true kalau ubah false', (() => {
+  return tim.every(u => {
+    const r = G.izinGoal(u, gIz, tim);
+    return !r.turunkan || r.ubah;
+  });
+})());
+cek('69h. Sejalan dengan fungsi aslinya (tidak ada aturan kembar)', (() => {
+  return tim.every(u => {
+    const r = G.izinGoal(u, gIz, tim);
+    return r.ubah === G.bisaUbahGoal(u, gIz, tim) && r.lihat === G.bisaLihatGoal(u, gIz, tim);
+  });
+})());
+cek('69i. Membawa alasan untuk ditampilkan',
+  /miliknya sendiri/i.test(iz('u-staf1').alasanUbah) && !!iz('u-staf2').alasanLihat);
+cek('69j. Argumen kosong → semua false, dengan alasan', (() => {
+  const r = G.izinGoal(null, gIz, tim);
+  return !r.lihat && !r.ubah && !!r.alasanUbah;
+})());
+cek('69k. Goal tanpa pemilik → semua false', (() => {
+  const r = G.izinGoal(orang('u-owner'), goalDari(''), tim);
+  return !r.lihat && !r.ubah && !r.turunkan;
 })());
 
 // ============================================================================

@@ -19715,7 +19715,10 @@ function GrdBarisGoal({ g, pemilik, user, allUsers, leads, onBuka, onUbah, onTur
   // Baris ini MEMERIKSA SENDIRI wewenangnya, tidak mengandalkan pemanggil sudah
   // menyaring daftarnya. Pemanggil hari ini memang menyaring — tapi kalau besok
   // daftarnya diperluas (mis. menampilkan goal tim), tombolnya tidak ikut bocor.
-  const bolehUbah = !user || Grd.bisaUbahGoal(user, g, allUsers);
+  // Satu panggilan untuk semua izin objek ini — mengurangi risiko memakai
+  // pemeriksa yang keliru untuk tombol tertentu.
+  const izin = user ? Grd.izinGoal(user, g, allUsers) : null;
+  const bolehUbah = !izin || izin.ubah;
   const badgeLead = leads ? Lead.badgeLeadGoal(leads, g.id) : null;
   return (
     <div onClick={() => onBuka && onBuka(g)} role="button" tabIndex={0}
@@ -19752,7 +19755,7 @@ function GrdBarisGoal({ g, pemilik, user, allUsers, leads, onBuka, onUbah, onTur
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>{gaya.label}</span>
           <span className="font-display font-bold text-sm text-slate-700 tabular-nums w-11 text-right">{persen}%</span>
-          {bolehUbah && onTurunkan && (
+          {(izin ? izin.turunkan : bolehUbah) && onTurunkan && (
             <button onClick={e => { e.stopPropagation(); onTurunkan(g); }} title="Turunkan ke bawahan langsung"
               className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50">
               <Network className="w-3.5 h-3.5" />

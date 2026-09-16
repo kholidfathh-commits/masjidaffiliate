@@ -1206,6 +1206,36 @@ export function pratinjauAkses(user, allUsers, goals) {
   };
 }
 
+/**
+ * IZIN ATAS SATU GOAL, dalam satu panggilan.
+ *
+ * Komponen tadinya memanggil tiga-empat fungsi izin terpisah untuk objek yang
+ * sama, dan gampang memakai yang keliru (mis. memeriksa `bisaUbahGoal` untuk
+ * tombol yang sebenarnya butuh `bisaBuatGoalUntuk`). Satu objek izin membuat
+ * salahnya kelihatan: `izin.turunkan` tidak mungkin tertukar dengan `izin.ubah`.
+ *
+ * Ini BUKAN pengganti pemeriksaan di layanan — layanan tetap memeriksa ulang
+ * sebelum menulis. Ini untuk menentukan apa yang ditampilkan.
+ */
+export function izinGoal(user, goal, allUsers) {
+  const g = normalisasiGoal(goal);
+  if (!user || !g || !g.ownerId) {
+    return { lihat: false, ubah: false, hapus: false, turunkan: false, alasanUbah: 'Data tidak lengkap.' };
+  }
+  const ubah = bisaUbahGoal(user, g, allUsers);
+  return {
+    lihat: bisaLihatGoal(user, g, allUsers),
+    ubah,
+    // Hapus mengikuti ubah — memisahkannya akan membuat orang bisa mengubah
+    // goal sampai kosong tanpa boleh menghapusnya, yang tidak ada gunanya.
+    hapus: ubah,
+    // Turunkan butuh dua hal: wewenang ATAS goalnya, DAN pemiliknya punya bawahan.
+    turunkan: ubah && bawahanLangsung(g.ownerId, allUsers).length > 0,
+    alasanUbah: alasanUbahGoal(user, g, allUsers).alasan,
+    alasanLihat: alasanLihatGoal(user, g, allUsers).alasan,
+  };
+}
+
 /** Tabel hak akses seluruh anggota — urut pangkat lalu nama, supaya stabil. */
 export function matriksAkses(allUsers, goals) {
   return (allUsers || []).filter(u => u && u.id)
