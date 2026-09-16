@@ -22,6 +22,7 @@
 import { wibDayKey, geserHari } from '../absensi/logika.js';
 import { isManajemen, idBawahanTransitif } from '../peran/hierarki.js';
 import { normalisasiLead } from './lead.js';
+import { bolehTulisMilik } from './data.js';
 
 export const SKOR_BACKUP_KEY = 'grd:skor:all';
 export const SKOR_REC_PREFIX = 'grdskor:rec:';
@@ -279,11 +280,8 @@ export function beruntun(daftarSkor, leadId, { sampai = mingguIni(), jumlah = 12
 // ====== HAK AKSES ======
 /** Boleh MENGISI skor lead measure ini? Pemiliknya, atau atasannya. */
 export function bisaIsiSkor(user, lead, allUsers) {
-  if (!user) return false;
   const l = normalisasiLead(lead);
   if (!l || !l.ownerId) return false;
   if (l.status !== 'aktif') return false;   // hanya lead yang sudah disetujui
-  if (l.ownerId === user.id) return true;
-  if (isManajemen(user)) return true;
-  return idBawahanTransitif(user.id, allUsers).has(l.ownerId);
+  return bolehTulisMilik(user, l.ownerId, allUsers);   // rumus yang sama dengan goal
 }

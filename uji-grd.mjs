@@ -3289,6 +3289,203 @@ const kxBackup = await Svc.muatKonteksGrd({
 cek('64f. Backup membaca seluruhnya', kxBackup.jejak.length === 2 && kxBackup.skor.length === 2);
 lepasMockGrd();
 
+judul('65. Satu rumus wewenang tulis untuk seluruh modul GRD');
+const goalKons = goalDari('u-staf1', { id: 'kons' });
+const leadKons = lm({ id: 'lk', ownerId: 'u-staf1', goalId: 'kons', status: 'aktif' });
+
+cek('65a. Pemilik boleh atas miliknya sendiri', G.bolehTulisMilik(orang('u-staf1'), 'u-staf1', tim));
+cek('65b. Atasan langsung boleh', G.bolehTulisMilik(orang('u-wakil'), 'u-staf1', tim));
+cek('65c. Atasan BERJENJANG juga boleh (Leader di atas Co-Leader)',
+  G.bolehTulisMilik(orang('u-leader'), 'u-staf1', tim));
+cek('65d. Owner/Manajer boleh atas siapa pun',
+  G.bolehTulisMilik(orang('u-owner'), 'u-staf1', tim) && G.bolehTulisMilik(orang('u-manajer'), 'u-staf1', tim));
+cek('65e. Rekan sejajar TIDAK boleh', !G.bolehTulisMilik(orang('u-staf1'), 'u-staf2', tim));
+cek('65f. Bawahan tidak boleh atas atasannya', !G.bolehTulisMilik(orang('u-staf1'), 'u-leader', tim));
+cek('65g. Argumen kosong → false',
+  !G.bolehTulisMilik(null, 'u-staf1', tim) && !G.bolehTulisMilik(orang('u-owner'), '', tim));
+
+cek('65h. GOAL memakai rumus itu', (() => {
+  return tim.every(u => G.bisaUbahGoal(u, goalKons, tim) === G.bolehTulisMilik(u, 'u-staf1', tim));
+})());
+cek('65i. bisaBuatGoalUntuk memakai rumus itu', (() => {
+  return tim.every(u => G.bisaBuatGoalUntuk(u, 'u-staf1', tim) === G.bolehTulisMilik(u, 'u-staf1', tim));
+})());
+cek('65j. LEAD MEASURE (ubah) memakai rumus itu', (() => {
+  return tim.every(u => L.bisaUbahLead(u, leadKons, tim) === G.bolehTulisMilik(u, 'u-staf1', tim));
+})());
+cek('65k. LEAD MEASURE (usul) memakai rumus itu', (() => {
+  return tim.every(u => L.bisaUsulLead(u, goalKons, tim) === G.bolehTulisMilik(u, 'u-staf1', tim));
+})());
+cek('65l. SKOR memakai rumus itu', (() => {
+  return tim.every(u => SB.bisaIsiSkor(u, leadKons, tim) === G.bolehTulisMilik(u, 'u-staf1', tim));
+})());
+
+cek('65m. MENILAI sengaja BEDA: pemilik dikecualikan', (() => {
+  // Pemilik boleh mengubah usulannya, tapi TIDAK boleh menilainya.
+  return L.bisaUbahLead(orang('u-staf1'), leadKons, tim) === true
+    && L.bisaNilaiLead(orang('u-staf1'), leadKons, tim) === false;
+})());
+cek('65n. Selain pemilik, menilai mengikuti rumus yang sama', (() => {
+  return tim.filter(u => u.id !== 'u-staf1')
+    .every(u => L.bisaNilaiLead(u, leadKons, tim) === G.bolehTulisMilik(u, 'u-staf1', tim));
+})());
+cek('65o. Skor tetap menolak lead yang belum disetujui (aturan tambahan, bukan pengganti)', (() => {
+  const belum = lm({ id: 'lb2', ownerId: 'u-staf1', status: 'usul' });
+  return tim.every(u => SB.bisaIsiSkor(u, belum, tim) === false);
+})());
+cek('65p. Rumusnya TIDAK disalin ulang di modul lead & scoreboard', (() => {
+  const lead = fs.readFileSync(ROOT + '/src/grd/lead.js', 'utf8');
+  const sb = fs.readFileSync(ROOT + '/src/grd/scoreboard.js', 'utf8');
+  // keduanya memanggil bolehTulisMilik, dan tidak lagi memakai idBawahanTransitif sendiri
+  return /bolehTulisMilik/.test(lead) && /bolehTulisMilik/.test(sb)
+    && !/idBawahanTransitif\(user\.id/.test(sb);
+})());
+
+// ============================================================================
+judul('66. Penolakan TIDAK BOLEH meninggalkan jejak apa pun');
+// Diuji menyeluruh untuk SETIAP jalur tulis: yang ditolak tidak menulis baris,
+// tidak mengubah baris lama, dan tidak menyisakan catatan jejak/riwayat.
+// ============================================================================
+const spTl = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spTl });
+
+// siapkan data sah milik staf1
+const gTl = { id: 'tl-goal', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(gTl, { user: STAF1, allUsers: tim });
+let lTl = await Svc.usulkanLead(
+  { goalId: 'tl-goal', ownerId: 'u-staf1', description: 'Konten tayang', targetMingguan: 5, uom: 'Konten' },
+  { user: STAF1, allUsers: tim, goal: gTl });
+lTl = await Svc.nilaiLead(lTl, 'aktif', { user: LEADER, allUsers: tim });
+await Svc.simpanSkor({ lead: lTl, minggu: SB.mingguIni(), nilai: 5 }, { user: STAF1, allUsers: tim });
+
+const tlPotret = () => ({
+  baris: [...spTl.baris.entries()].map(([k, v]) => k + '=' + JSON.stringify(v)).sort().join('|'),
+  jumlah: spTl.baris.size,
+});
+const tlSebelum = tlPotret();
+const gagalkan = async (fn) => { try { await fn(); return ''; } catch (e) { return e.message; } };
+
+// STAF2 = rekan sejajar, tidak berwenang atas apa pun milik staf1
+const tlPercobaan = [
+  ['simpanGoal (ubah)', () => Svc.simpanGoal({ ...gTl, target: 999 },
+    { user: STAF2, allUsers: tim, goalLama: gTl })],
+  ['simpanGoal (buat atas nama orang lain)', () => Svc.simpanGoal(
+    { id: 'tl-curi', ownerId: 'u-staf1', periode: '2026-09', description: 'Curi', base: 0, target: 5, uom: 'x' },
+    { user: STAF2, allUsers: tim })],
+  ['hapusGoal', () => Svc.hapusGoal(gTl, { user: STAF2, allUsers: tim })],
+  ['turunkanGoal', () => Svc.turunkanGoal(gTl, { user: STAF2, allUsers: tim })],
+  ['usulkanLead', () => Svc.usulkanLead(
+    { goalId: 'tl-goal', ownerId: 'u-staf1', description: 'Nyelonong', targetMingguan: 1, uom: 'x' },
+    { user: STAF2, allUsers: tim, goal: gTl })],
+  ['usulkanLead (perbaiki punya orang)', () => Svc.usulkanLead({ ...lTl, targetMingguan: 99 },
+    { user: STAF2, allUsers: tim, goal: gTl, leadLama: lTl })],
+  ['nilaiLead', () => Svc.nilaiLead(lTl, 'ditolak', { user: STAF2, allUsers: tim, catatan: 'x' })],
+  ['nilaiLead (menilai diri sendiri)', () => Svc.nilaiLead(lTl, 'aktif', { user: STAF1, allUsers: tim })],
+  ['simpanSkor', () => Svc.simpanSkor({ lead: lTl, minggu: SB.mingguIni(), nilai: 99 },
+    { user: STAF2, allUsers: tim })],
+  ['simpanTemplate', () => Svc.simpanTemplate('leader',
+    [{ description: 'X', uom: 'y', base: 0, target: 1 }], { user: STAF2 })],
+];
+
+let semuaDitolak = true;
+let adaPesanKosong = false;
+for (const [nama, fn] of tlPercobaan) {
+  const pesan = await gagalkan(fn);
+  if (!pesan) { semuaDitolak = false; console.log('        ↳ LOLOS padahal harus ditolak:', nama); }
+  else if (pesan.length < 10) adaPesanKosong = true;
+}
+cek('66a. SEMUA sepuluh jalur tulis menolak permintaan tak berwenang', semuaDitolak);
+cek('66b. Setiap penolakan punya pesan yang bisa dibaca', !adaPesanKosong);
+
+const tlSesudah = tlPotret();
+cek('66c. Tidak ada baris BARU yang tertulis', tlSesudah.jumlah === tlSebelum.jumlah,
+  { tlSebelum: tlSebelum.jumlah, tlSesudah: tlSesudah.jumlah });
+cek('66d. Tidak ada baris LAMA yang berubah isinya', tlSesudah.baris === tlSebelum.baris);
+cek('66e. Tidak ada catatan jejak yang tertinggal', (() => {
+  const jejakSekarang = spTl.jumlah('grdjejak:rec:');
+  // jejak yang sah: dibuat + (tidak ada perubahan lain yang berhasil)
+  return jejakSekarang === tlSebelum.baris.split('|').filter(x => x.startsWith('grdjejak:rec:')).length;
+})());
+cek('66f. Riwayat lead measure tidak bertambah', (() => {
+  const l = (spTl.baris.get('grdlead:rec:tl-goal:' + lTl.id)) || {};
+  return (l.riwayat || []).length === 2; // usul + disetujui, tidak lebih
+})(), (spTl.baris.get('grdlead:rec:tl-goal:' + lTl.id) || {}).riwayat?.length);
+cek('66g. Template tidak ikut tertulis', !spTl.baris.has('grd:templates'));
+
+// yang BERWENANG tetap lolos — penolakan bukan berarti semuanya terkunci
+cek('66h. Yang berwenang tetap bisa menulis setelah semua penolakan itu',
+  (await gagalkan(() => Svc.simpanGoal({ ...gTl, target: 40 },
+    { user: LEADER, allUsers: tim, goalLama: gTl }))) === '');
+cek('66i. Perubahan yang sah benar-benar tersimpan',
+  spTl.baris.get('grdgoal:rec:tl-goal').target === 40);
+lepasMockGrd();
+
+// ============================================================================
+judul('67. MATRIKS LENGKAP hak baca & ubah — dokumentasi hidup');
+// Tabel ini sengaja ditulis sebagai HARAPAN yang dieja satu per satu, bukan
+// dihitung dari fungsinya. Kalau aturannya berubah diam-diam, yang jatuh adalah
+// baris tabel yang tepat — dan orang bisa melihat persis apa yang berubah.
+// ============================================================================
+// Struktur uji (dari §36): o=Owner, m=Manajer, l1/l2=Leader dua cabang,
+// w1=Co-Leader cabang A, s1=Staf cabang A, s2=Staf cabang B.
+//
+//  pemilik →     o     m     l1    w1    s1    l2    s2
+const HARAPAN_LIHAT = {
+  o:  { o: 1, m: 1, l1: 1, w1: 1, s1: 1, l2: 1, s2: 1 },   // Owner: semua
+  m:  { o: 1, m: 1, l1: 1, w1: 1, s1: 1, l2: 1, s2: 1 },   // Manajer: semua
+  l1: { o: 1, m: 0, l1: 1, w1: 1, s1: 1, l2: 0, s2: 0 },   // Leader A: ke atas + timnya
+  w1: { o: 1, m: 0, l1: 1, w1: 1, s1: 1, l2: 0, s2: 0 },   // Co-Leader A
+  s1: { o: 1, m: 0, l1: 1, w1: 1, s1: 1, l2: 0, s2: 0 },   // Staf A: jalur ke atas + dirinya
+  l2: { o: 1, m: 0, l1: 0, w1: 0, s1: 0, l2: 1, s2: 1 },   // Leader B
+  s2: { o: 1, m: 0, l1: 0, w1: 0, s1: 0, l2: 1, s2: 1 },   // Staf B
+};
+const HARAPAN_UBAH = {
+  o:  { o: 1, m: 1, l1: 1, w1: 1, s1: 1, l2: 1, s2: 1 },   // Owner: semua
+  m:  { o: 1, m: 1, l1: 1, w1: 1, s1: 1, l2: 1, s2: 1 },   // Manajer: semua
+  l1: { o: 0, m: 0, l1: 1, w1: 1, s1: 1, l2: 0, s2: 0 },   // Leader A: dirinya + ke BAWAH
+  w1: { o: 0, m: 0, l1: 0, w1: 1, s1: 1, l2: 0, s2: 0 },   // Co-Leader A
+  s1: { o: 0, m: 0, l1: 0, w1: 0, s1: 1, l2: 0, s2: 0 },   // Staf: hanya dirinya
+  l2: { o: 0, m: 0, l1: 0, w1: 0, s1: 0, l2: 1, s2: 1 },   // Leader B
+  s2: { o: 0, m: 0, l1: 0, w1: 0, s1: 0, l2: 0, s2: 1 },   // Staf B
+};
+const orangCabang = (id) => timCabang.find(u => u.id === id);
+let salahLihat = [], salahUbah = [];
+for (const pelaku of Object.keys(HARAPAN_LIHAT)) {
+  for (const pemilik of Object.keys(HARAPAN_LIHAT[pelaku])) {
+    const g = gc(pemilik);
+    const lihatNyata = G.bisaLihatGoal(orangCabang(pelaku), g, timCabang) ? 1 : 0;
+    const ubahNyata = G.bisaUbahGoal(orangCabang(pelaku), g, timCabang) ? 1 : 0;
+    if (lihatNyata !== HARAPAN_LIHAT[pelaku][pemilik]) salahLihat.push(`${pelaku}→${pemilik}`);
+    if (ubahNyata !== HARAPAN_UBAH[pelaku][pemilik]) salahUbah.push(`${pelaku}→${pemilik}`);
+  }
+}
+cek('67a. Matriks LIHAT cocok seluruhnya (49 kombinasi)', salahLihat.length === 0, salahLihat);
+cek('67b. Matriks UBAH cocok seluruhnya (49 kombinasi)', salahUbah.length === 0, salahUbah);
+
+cek('67c. LIHAT selalu lebih luas atau sama dengan UBAH (tidak ada yang bisa mengubah tanpa melihat)', (() => {
+  for (const pelaku of Object.keys(HARAPAN_UBAH)) {
+    for (const pemilik of Object.keys(HARAPAN_UBAH[pelaku])) {
+      if (HARAPAN_UBAH[pelaku][pemilik] === 1 && HARAPAN_LIHAT[pelaku][pemilik] !== 1) return false;
+    }
+  }
+  return true;
+})());
+cek('67d. Semua orang melihat goal PERUSAHAAN (inti roll down)', (() => {
+  return Object.keys(HARAPAN_LIHAT).every(p => HARAPAN_LIHAT[p].o === 1);
+})());
+cek('67e. TIDAK ada yang bisa mengubah goal atasannya', (() => {
+  return HARAPAN_UBAH.s1.w1 === 0 && HARAPAN_UBAH.w1.l1 === 0 && HARAPAN_UBAH.l1.o === 0;
+})());
+cek('67f. Cabang tidak saling melihat', (() => {
+  return HARAPAN_LIHAT.s1.s2 === 0 && HARAPAN_LIHAT.l1.l2 === 0
+    && HARAPAN_LIHAT.s2.s1 === 0 && HARAPAN_LIHAT.l2.l1 === 0;
+})());
+cek('67g. Harapan & kenyataan diperiksa untuk SEMUA 49 kombinasi, bukan sebagian', (() => {
+  let n = 0;
+  for (const p of Object.keys(HARAPAN_LIHAT)) n += Object.keys(HARAPAN_LIHAT[p]).length;
+  return n === 49;
+})());
+
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang

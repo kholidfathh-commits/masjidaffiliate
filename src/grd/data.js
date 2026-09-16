@@ -1002,6 +1002,32 @@ export function hitungOrangCabang(simpul) {
 // sesungguhnya menyusul di Tahap 2 lewat modul layanan tipis + Supabase RLS.
 // ============================================================================
 
+/**
+ * ATURAN TULIS GRD — satu rumus, dipakai goal, lead measure, dan skor mingguan.
+ *
+ * "Boleh mengubah" berarti: pemiliknya sendiri, ATAU seseorang di atasnya dalam
+ * rantai atasan langsung (berjenjang, bukan cuma satu lapis), ATAU Owner/Manajer.
+ *
+ * Kenapa BERJENJANG, bukan atasan langsung saja: seorang Leader bertanggung
+ * jawab atas seluruh timnya, termasuk staf yang berada di bawah Co-Leader-nya.
+ * Kalau dibatasi satu lapis, goal staf jadi tidak bisa disentuh Leader ketika
+ * Co-Leader-nya berhalangan — dan itu bertentangan dengan `lingkupTim` yang
+ * sudah dipakai seluruh app (absensi, tiket, laporan).
+ *
+ * Perbedaan langsung vs berjenjang TETAP dibedakan di penjelasannya
+ * (`alasanUbahGoal`), supaya orang tahu dari mana wewenangnya datang.
+ *
+ * Fungsi ini sengaja diekspor supaya modul lead & scoreboard memakainya
+ * kembali — kalau masing-masing menulis rumusnya sendiri, cepat atau lambat
+ * ketiganya menyimpang dan "siapa boleh apa" jadi berbeda per halaman.
+ */
+export function bolehTulisMilik(user, ownerId, allUsers) {
+  if (!user || !ownerId) return false;
+  if (isManajemen(user)) return true;
+  if (ownerId === user.id) return true;
+  return idBawahanTransitif(user.id, allUsers).has(ownerId);
+}
+
 /** Boleh mengubah/menghapus goal ini? Pemilik sendiri, atau atasannya (berjenjang). */
 export function bisaUbahGoal(user, goal, allUsers) {
   if (!user || !goal) return false;
@@ -1012,9 +1038,7 @@ export function bisaUbahGoal(user, goal, allUsers) {
   // Kontrol Akses — kalau berbeda, layar dan layanan saling membantah.
   const g = normalisasiGoal(goal);
   if (!g || !g.ownerId) return false;
-  if (isManajemen(user)) return true;
-  if (g.ownerId === user.id) return true;
-  return idBawahanTransitif(user.id, allUsers).has(g.ownerId);
+  return bolehTulisMilik(user, g.ownerId, allUsers);
 }
 
 /**
@@ -1191,8 +1215,5 @@ export function matriksAkses(allUsers, goals) {
 
 /** Boleh membuat goal ATAS NAMA orang ini? (dipakai tombol "turunkan ke bawahan"). */
 export function bisaBuatGoalUntuk(user, targetUserId, allUsers) {
-  if (!user || !targetUserId) return false;
-  if (isManajemen(user)) return true;
-  if (targetUserId === user.id) return true;
-  return idBawahanTransitif(user.id, allUsers).has(targetUserId);
+  return bolehTulisMilik(user, targetUserId, allUsers);
 }

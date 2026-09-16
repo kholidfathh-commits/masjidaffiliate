@@ -21,7 +21,7 @@
 
 import { wibDayKey } from '../absensi/logika.js';
 import { isManajemen, atasanId, idBawahanTransitif } from '../peran/hierarki.js';
-import { normalisasiGoal, pemilikGoal } from './data.js';
+import { normalisasiGoal, pemilikGoal, bolehTulisMilik } from './data.js';
 
 // ====== KUNCI PENYIMPANAN ======
 // Per-record: 1 baris = 1 lead measure. Alur usul–setujui ditulis dua pihak
@@ -249,12 +249,9 @@ export function terapkanTemplateLead(template, goal) {
  * (Atasan boleh supaya goal yang pemiliknya belum sempat mengisi tidak mandek.)
  */
 export function bisaUsulLead(user, goal, allUsers) {
-  if (!user) return false;
   const g = normalisasiGoal(goal);
   if (!g || !g.ownerId) return false;
-  if (isManajemen(user)) return true;
-  if (g.ownerId === user.id) return true;
-  return idBawahanTransitif(user.id, allUsers).has(g.ownerId);
+  return bolehTulisMilik(user, g.ownerId, allUsers);   // rumus yang sama dengan goal
 }
 
 /**
@@ -265,22 +262,20 @@ export function bisaUsulLead(user, goal, allUsers) {
  * apa-apa. Owner/Manajer boleh menilai siapa pun KECUALI usulannya sendiri.
  */
 export function bisaNilaiLead(user, lead, allUsers) {
-  if (!user) return false;
   const n = normalisasiLead(lead);
   if (!n || !n.ownerId) return false;
-  if (n.ownerId === user.id) return false;
-  if (isManajemen(user)) return true;
-  return idBawahanTransitif(user.id, allUsers).has(n.ownerId);
+  // SENGAJA TIDAK memakai bolehTulisMilik: menilai beda dari mengubah.
+  // Pemilik boleh MENGUBAH usulannya sendiri, tapi TIDAK boleh MENILAINYA —
+  // itu yang membuat persetujuan berarti.
+  if (!user || n.ownerId === user.id) return false;
+  return bolehTulisMilik(user, n.ownerId, allUsers);
 }
 
 /** Boleh MEMPERBAIKI usulan (mengubah isinya)? Pengusulnya, atau atasannya. */
 export function bisaUbahLead(user, lead, allUsers) {
-  if (!user) return false;
   const n = normalisasiLead(lead);
   if (!n || !n.ownerId) return false;
-  if (n.ownerId === user.id) return true;
-  if (isManajemen(user)) return true;
-  return idBawahanTransitif(user.id, allUsers).has(n.ownerId);
+  return bolehTulisMilik(user, n.ownerId, allUsers);   // rumus yang sama dengan goal
 }
 
 /** Siapa yang seharusnya menilai usulan ini — dipakai untuk memberi tahu di layar. */
