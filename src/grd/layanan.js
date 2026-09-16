@@ -20,6 +20,7 @@
 // ============================================================================
 
 import * as Grd from './data.js';
+import * as Lead from './lead.js';
 import { isManajemen } from '../peran/hierarki.js';
 
 const _dep = { storage: null, log: null, rpc: null };
@@ -319,6 +320,141 @@ export async function simpanTemplate(peran, daftar, { user } = {}) {
     ? `mengembalikan template goal peran ${peran} ke bawaan`
     : `mengubah template goal peran ${peran}`, user && user.name);
   return Grd.gabungTemplate(berikut);
+}
+
+// ============================================================================
+// LEAD MEASURE
+// ============================================================================
+
+/** Seluruh lead measure. */
+export async function ambilLead() {
+  const recs = await st().listByPrefix(Lead.LEAD_REC_PREFIX);
+  return recs.map(Lead.normalisasiLead).filter(Boolean);
+}
+
+/** Lead measure satu goal saja — ditarik lewat prefix, bukan membaca semuanya. */
+export async function ambilLeadGoal(goalId) {
+  const id = String(goalId || '');
+  if (!id) return [];
+  const recs = await st().listByPrefix(`${Lead.LEAD_REC_PREFIX}${id}:`);
+  return recs.map(Lead.normalisasiLead).filter(l => l && l.goalId === id);
+}
+
+/** Id record lead: `grdlead:rec:<goalId>:<id>` supaya bisa ditarik per goal. */
+const kunciLead = (l) => `${Lead.LEAD_REC_PREFIX}${l.goalId}:${l.id}`;
+
+/**
+ * Usulkan / perbaiki lead measure.
+ *
+ * Usulan baru maupun perbaikan sama-sama berakhir berstatus 'usul' — perbaikan
+ * TIDAK bisa langsung aktif tanpa dinilai ulang. Itu yang membuat persetujuan
+ * berarti: kalau isi boleh diubah setelah disetujui, yang disetujui tidak lagi
+ * sama dengan yang dijalankan.
+ */
+export async function usulkanLead(lead, { user, allUsers, goal, leadLama = null } = {}) {
+  const l = Lead.normalisasiLead(lead);
+  if (!l) throw new GrdDitolak('Data lead measure tidak terbaca.');
+
+  const salah = Lead.validasiLead(l);
+  if (salah) throw new GrdDitolak(salah);
+
+  if (leadLama) {
+    if (!Lead.bisaUbahLead(user, leadLama, allUsers)) {
+      throw new GrdDitolak('Anda tidak berwenang mengubah lead measure ini.');
+    }
+  } else if (!Lead.bisaUsulLead(user, goal, allUsers)) {
+    throw new GrdDitolak('Anda tidak berwenang mengusulkan lead measure untuk goal ini.');
+  }
+
+  // Batas 1–3 dihitung dari data TERBARU di server, bukan dari yang ada di layar.
+  // Dua orang bisa mengusulkan hampir bersamaan; kalau memakai hitungan layar,
+  // keduanya lolos dan goal berakhir dengan 4 lead aktif.
+  if (!leadLama || leadLama.status !== 'usul') {
+    const adaSekarang = await ambilLeadGoal(l.goalId);
+    const calonAktif = Lead.leadAktif(adaSekarang, l.goalId).length
+      + Lead.leadMenunggu(adaSekarang, l.goalId).length;
+    if (!leadLama && calonAktif >= Lead.MAKS_LEAD_AKTIF) {
+      throw new GrdDitolak(
+        `Goal ini sudah punya ${calonAktif} lead measure aktif/menunggu — batasnya ${Lead.MAKS_LEAD_AKTIF}. `
+        + 'Tolak atau cabut salah satunya dulu.');
+    }
+  }
+
+  const rec = {
+    ...l,
+    id: l.id || buatId(),
+    status: 'usul',
+    catatan: '',           // catatan penilai dibersihkan saat diusulkan ulang
+    penilaiId: '', penilaiNama: '',
+    diusulkanOleh: (user && user.id) || '',
+    diusulkanNama: (user && user.name) || '',
+    diusulkanPada: new Date().toISOString(),
+  };
+  const ok = await st().set(kunciLead(rec), rec);
+  if (!ok) throw new GrdDitolak('Gagal menyimpan lead measure. Coba lagi.');
+
+  catatAktivitas(`${leadLama ? 'memperbaiki' : 'mengusulkan'} lead measure "${rec.description}"`, user && user.name);
+  return rec;
+}
+
+/**
+ * NILAI usulan lead measure: setujui, minta perbaiki, atau tolak.
+ *
+ * Tiga penjagaan yang tidak boleh dilewat:
+ *   1. Penilai bukan pengusulnya sendiri (diperiksa `bisaNilaiLead`).
+ *   2. Perpindahan statusnya sah menurut ALUR_LEAD — tidak ada jalan pintas.
+ *   3. Batas 3 aktif per goal dihitung ulang DARI SERVER tepat sebelum
+ *      menyetujui. Dua atasan bisa menyetujui dua usulan hampir bersamaan;
+ *      tanpa hitung ulang, keduanya lolos dan goal berakhir dengan 4 aktif.
+ *
+ * Menolak/minta perbaiki WAJIB disertai catatan — penolakan tanpa alasan
+ * membuat pengusul menebak-nebak apa yang harus diperbaiki.
+ */
+export async function nilaiLead(lead, statusBaru, { user, allUsers, catatan = '' } = {}) {
+  const l = Lead.normalisasiLead(lead);
+  if (!l || !l.id) throw new GrdDitolak('Data lead measure tidak terbaca.');
+
+  if (!Lead.bisaNilaiLead(user, l, allUsers)) {
+    throw new GrdDitolak(l.ownerId === (user && user.id)
+      ? 'Anda tidak bisa menilai usulan Anda sendiri — itu tugas atasan Anda.'
+      : 'Anda tidak berwenang menilai usulan ini.');
+  }
+  if (!Lead.bolehPindahStatus(l.status, statusBaru)) {
+    throw new GrdDitolak(
+      `Tidak bisa mengubah dari "${Lead.gayaStatusLead(l.status).label}" ke `
+      + `"${Lead.gayaStatusLead(statusBaru).label}".`);
+  }
+
+  const alasan = String(catatan || '').trim();
+  if ((statusBaru === 'ditolak' || statusBaru === 'perbaiki') && !alasan) {
+    throw new GrdDitolak('Tulis catatan singkat supaya pengusul tahu apa yang perlu diperbaiki.');
+  }
+
+  if (statusBaru === 'aktif') {
+    const adaSekarang = await ambilLeadGoal(l.goalId);
+    const aktifLain = Lead.leadAktif(adaSekarang, l.goalId).filter(x => x.id !== l.id).length;
+    if (aktifLain >= Lead.MAKS_LEAD_AKTIF) {
+      throw new GrdDitolak(
+        `Goal ini sudah punya ${aktifLain} lead measure aktif — batasnya ${Lead.MAKS_LEAD_AKTIF}. `
+        + 'Cabut salah satunya dulu.');
+    }
+  }
+
+  const rec = {
+    ...l,
+    status: statusBaru,
+    catatan: alasan,
+    penilaiId: (user && user.id) || '',
+    penilaiNama: (user && user.name) || '',
+    dinilaiPada: new Date().toISOString(),
+  };
+  const ok = await st().set(kunciLead(rec), rec);
+  if (!ok) throw new GrdDitolak('Gagal menyimpan penilaian. Coba lagi.');
+
+  const kata = statusBaru === 'aktif' ? 'menyetujui'
+    : statusBaru === 'ditolak' ? 'menolak' : 'meminta perbaikan';
+  catatAktivitas(`${kata} lead measure "${rec.description}"`, user && user.name);
+  return rec;
 }
 
 // ============================================================================

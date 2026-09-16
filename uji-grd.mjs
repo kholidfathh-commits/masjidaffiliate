@@ -16,6 +16,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as G from './src/grd/data.js';
+import * as L from './src/grd/lead.js';
 import { goalContoh } from './src/grd/contoh.js';
 import * as Svc from './src/grd/layanan.js';
 import { storageMock, rpcMock, lepasMockGrd } from './src/grd/mock.js';
@@ -2292,6 +2293,295 @@ cek('41g. Tanpa user: seluruh rantai terbaca (dipakai backup & rekap)',
 cek('41h. Induk pun ikut digerbangi', (() => {
   return detailStafA.induk === null; // gb-induk memang tidak punya induk
 })());
+lepasMockGrd();
+
+// ============================================================================
+judul('42. Lead Measure — batas 1–3 dan alur usul–persetujuan');
+// ============================================================================
+const lm = (extra = {}) => ({
+  id: 'lm1', goalId: 'g1', ownerId: 'u-staf1',
+  description: 'Konten tayang per minggu', targetMingguan: 5, uom: 'Konten', ...extra,
+});
+cek('42a. Kunci per-record', L.LEAD_REC_PREFIX === 'grdlead:rec:' && L.LEAD_BACKUP_KEY === 'grd:lead:all');
+cek('42b. Batas maksimal 3 aktif per goal', L.MAKS_LEAD_AKTIF === 3);
+
+cek('42c. Lead lengkap lolos validasi', L.validasiLead(lm()) === '');
+cek('42d. Tanpa goal ditolak', /menempel pada sebuah goal/.test(L.validasiLead(lm({ goalId: '' }))));
+cek('42e. Tanpa pemilik ditolak', /punya pemilik/.test(L.validasiLead(lm({ ownerId: '' }))));
+cek('42f. Tanpa deskripsi ditolak', /tindakan mingguannya/.test(L.validasiLead(lm({ description: '' }))));
+cek('42g. Tanpa satuan ditolak', /Satuan wajib/.test(L.validasiLead(lm({ uom: '' }))));
+cek('42h. Target nol ditolak (tanpa angka, ia cuma niat)',
+  /lebih dari nol/.test(L.validasiLead(lm({ targetMingguan: 0 }))));
+cek('42i. Target minus ditolak', /lebih dari nol/.test(L.validasiLead(lm({ targetMingguan: -3 }))));
+cek('42j. Bukan objek ditolak', L.validasiLead(null) !== '');
+
+cek('42k. Status bawaan "usul"', L.normalisasiLead(lm()).status === 'usul');
+cek('42l. Status tak dikenal jatuh ke "usul"', L.normalisasiLead(lm({ status: 'ngawur' })).status === 'usul');
+cek('42m. Angka rusak jadi 0 (bukan NaN)',
+  Number.isFinite(L.normalisasiLead(lm({ targetMingguan: 'xx' })).targetMingguan));
+cek('42n. Tiap status punya label & warna',
+  ['usul', 'aktif', 'perbaiki', 'ditolak'].every(x => !!L.STATUS_LEAD[x].label && !!L.STATUS_LEAD[x].color));
+cek('42o. gayaStatusLead aman untuk status tak dikenal',
+  L.gayaStatusLead('ngawur') === L.STATUS_LEAD.usul);
+
+judul('43. Alur status lead measure');
+cek('43a. usul → aktif SAH', L.bolehPindahStatus('usul', 'aktif'));
+cek('43b. usul → perbaiki SAH', L.bolehPindahStatus('usul', 'perbaiki'));
+cek('43c. usul → ditolak SAH', L.bolehPindahStatus('usul', 'ditolak'));
+cek('43d. perbaiki → usul SAH (diusulkan ulang setelah diperbaiki)',
+  L.bolehPindahStatus('perbaiki', 'usul'));
+cek('43e. ditolak → usul SAH (boleh diusulkan lagi)', L.bolehPindahStatus('ditolak', 'usul'));
+cek('43f. ditolak → aktif TIDAK SAH (tidak ada jalan pintas tanpa diusulkan ulang)',
+  !L.bolehPindahStatus('ditolak', 'aktif'));
+cek('43g. perbaiki → aktif TIDAK SAH', !L.bolehPindahStatus('perbaiki', 'aktif'));
+cek('43h. aktif → usul TIDAK SAH', !L.bolehPindahStatus('aktif', 'usul'));
+cek('43i. aktif boleh dicabut jadi perbaiki/ditolak',
+  L.bolehPindahStatus('aktif', 'perbaiki') && L.bolehPindahStatus('aktif', 'ditolak'));
+cek('43j. Status ngawur tidak membuka jalan apa pun', !L.bolehPindahStatus('ngawur', 'aktif'));
+
+judul('44. Hitungan per goal & batas slot');
+const daftarLead = [
+  lm({ id: 'a', status: 'aktif' }),
+  lm({ id: 'b', status: 'aktif' }),
+  lm({ id: 'c', status: 'usul' }),
+  lm({ id: 'd', status: 'ditolak' }),
+  lm({ id: 'e', goalId: 'g2', status: 'aktif' }),
+];
+cek('44a. leadPerGoal menyaring per goal', L.leadPerGoal(daftarLead, 'g1').length === 4);
+cek('44b. leadAktif hanya yang aktif', L.leadAktif(daftarLead, 'g1').length === 2);
+cek('44c. leadMenunggu hanya yang usul', L.leadMenunggu(daftarLead, 'g1').length === 1);
+cek('44d. Goal lain tidak tercampur', L.leadAktif(daftarLead, 'g2').length === 1);
+cek('44e. Sisa slot = 3 - aktif', L.sisaSlotAktif(daftarLead, 'g1') === 1);
+cek('44f. Slot penuh saat 3 aktif', (() => {
+  const penuh = [...daftarLead, lm({ id: 'f', status: 'aktif' })];
+  return L.sisaSlotAktif(penuh, 'g1') === 0;
+})());
+cek('44g. Sisa slot tidak pernah minus', (() => {
+  const lebih = Array.from({ length: 6 }, (_, i) => lm({ id: 'x' + i, status: 'aktif' }));
+  return L.sisaSlotAktif(lebih, 'g1') === 0;
+})());
+cek('44h. Goal tanpa lead: sisa penuh 3', L.sisaSlotAktif(daftarLead, 'g-kosong') === 3);
+cek('44i. statusLeadGoal menandai "kosong"', L.statusLeadGoal(daftarLead, 'g-kosong').keadaan === 'kosong');
+cek('44j. statusLeadGoal menandai "sehat"', L.statusLeadGoal(daftarLead, 'g1').keadaan === 'sehat');
+cek('44k. statusLeadGoal menandai "penuh"', (() => {
+  const penuh = [...daftarLead, lm({ id: 'f', status: 'aktif' })];
+  return L.statusLeadGoal(penuh, 'g1').keadaan === 'penuh';
+})());
+cek('44l. Daftar kosong aman',
+  L.leadPerGoal(null, 'g1').length === 0 && L.statusLeadGoal([], 'g1').aktif === 0);
+cek('44m. goalId kosong tidak menyeret semua', L.leadPerGoal(daftarLead, '').length === 0);
+
+judul('45. Hak akses lead measure');
+const goalStaf = goalDari('u-staf1', { id: 'g1' });
+cek('45a. Pemilik goal boleh mengusulkan', L.bisaUsulLead(orang('u-staf1'), goalStaf, tim));
+cek('45b. Atasannya boleh mengusulkan', L.bisaUsulLead(orang('u-leader'), goalStaf, tim));
+cek('45c. Owner boleh', L.bisaUsulLead(orang('u-owner'), goalStaf, tim));
+cek('45d. Rekan sejajar TIDAK boleh', !L.bisaUsulLead(orang('u-staf2'), goalStaf, tim));
+
+const usulStaf = lm({ ownerId: 'u-staf1', status: 'usul' });
+cek('45e. PENGUSUL TIDAK boleh menilai usulannya sendiri — inti alur persetujuan',
+  !L.bisaNilaiLead(orang('u-staf1'), usulStaf, tim));
+cek('45f. Atasan langsung boleh menilai', L.bisaNilaiLead(orang('u-wakil'), usulStaf, tim));
+cek('45g. Atasan berjenjang boleh menilai', L.bisaNilaiLead(orang('u-leader'), usulStaf, tim));
+cek('45h. Owner boleh menilai usulan orang lain', L.bisaNilaiLead(orang('u-owner'), usulStaf, tim));
+cek('45i. Owner TIDAK boleh menilai usulannya SENDIRI', (() => {
+  return !L.bisaNilaiLead(orang('u-owner'), lm({ ownerId: 'u-owner' }), tim);
+})());
+cek('45j. Rekan sejajar tidak boleh menilai', !L.bisaNilaiLead(orang('u-staf2'), usulStaf, tim));
+cek('45k. Pengusul boleh memperbaiki usulannya', L.bisaUbahLead(orang('u-staf1'), usulStaf, tim));
+cek('45l. Atasan juga boleh memperbaiki', L.bisaUbahLead(orang('u-leader'), usulStaf, tim));
+cek('45m. Rekan sejajar tidak boleh memperbaiki', !L.bisaUbahLead(orang('u-staf2'), usulStaf, tim));
+cek('45n. calonPenilai = atasan langsung pengusul',
+  L.calonPenilai(usulStaf, tim)?.id === 'u-wakil', L.calonPenilai(usulStaf, tim)?.id);
+cek('45o. Pengusul tanpa atasan → tidak ada calon penilai',
+  L.calonPenilai(lm({ ownerId: 'u-owner' }), tim) === null);
+cek('45p. menungguPenilaianSaya hanya yang berstatus usul & jadi wewenangnya', (() => {
+  const semua = [usulStaf, lm({ id: 'z', ownerId: 'u-staf1', status: 'aktif' })];
+  return L.menungguPenilaianSaya(orang('u-leader'), semua, tim).length === 1;
+})());
+cek('45q. Usulan sendiri tidak masuk daftar tugas menilai',
+  L.menungguPenilaianSaya(orang('u-staf1'), [usulStaf], tim).length === 0);
+
+judul('46. Urutan & ringkasan lead measure');
+const urutanLead = L.urutkanLead(daftarLead).map(l => l.status);
+cek('46a. Yang menunggu penilaian di paling atas', urutanLead[0] === 'usul', urutanLead);
+cek('46b. Ditolak di paling bawah', urutanLead[urutanLead.length - 1] === 'ditolak');
+cek('46c. Urutan stabil antar-panggilan',
+  L.urutkanLead(daftarLead).map(l => l.id).join() === L.urutkanLead(daftarLead).map(l => l.id).join());
+const rl = L.ringkasLead(daftarLead);
+cek('46d. Ringkasan menghitung tiap status',
+  rl.total === 5 && rl.aktif === 3 && rl.menunggu === 1 && rl.ditolak === 1);
+cek('46e. Daftar kosong aman', L.ringkasLead([]).total === 0 && L.ringkasLead(null).total === 0);
+
+judul('47. Penjaga App.jsx — halaman Lead Measure');
+cek('47a-5. Panel penilaian ada & dipakai halaman',
+  /function GrdNilaiLeadModal\(/.test(src) && /<GrdNilaiLeadModal\b/.test(src));
+cek('47a-6. Tiga jawaban: setujui, minta perbaiki, tolak',
+  /Setujui/.test(src) && /Minta Perbaiki/.test(src) && /Tolak/.test(src));
+cek('47a-7. Tombol setujui terkunci saat slot aktif sudah penuh',
+  /disabled=\{!!proses \|\| slotPenuh\}/.test(src));
+cek('47a-2. Form usul lead measure ada & dipakai halaman',
+  /function GrdFormLead\(/.test(src) && /<GrdFormLead\b/.test(src));
+cek('47a-3. Form menjelaskan beda lead measure dengan hasil',
+  /Lead measure itu tindakan, bukan hasil/.test(src));
+cek('47a-4. Form memberi tahu siapa yang akan menilai',
+  /Lead\.calonPenilai/.test(src) && /menunggu penilaian/.test(src));
+cek('47a. Halaman + rute + menu terpasang',
+  /function GrdLeadView\(/.test(src) && /view === 'grd-lead'/.test(src) && /id: 'grd-lead'/.test(src));
+cek('47b. Lead measure ikut BACKUP_KEYS (aturan wajib no.3)', (() => {
+  const i = src.indexOf('const BACKUP_KEYS = [');
+  return /Lead\.LEAD_BACKUP_KEY/.test(src.slice(i, src.indexOf('];', i)));
+})());
+cek('47c. Terdaftar di PER_RECORD_LOADERS & PREFIX (aturan wajib no.4)',
+  /\[Lead\.LEAD_BACKUP_KEY\]: loadLeadGrd/.test(src)
+  && /\[Lead\.LEAD_BACKUP_KEY\]: Lead\.LEAD_REC_PREFIX/.test(src));
+cek('47d. Disusun PER GOAL, bukan satu daftar panjang',
+  /function GrdBlokLeadGoal\(/.test(src));
+cek('47e. Modul lead TIDAK meng-import App.jsx', (() => {
+  const isi = fs.readFileSync(ROOT + '/src/grd/lead.js', 'utf8');
+  return !/from\s+'.*App\.jsx'/.test(isi);
+})());
+cek('47f. Istilah OKR/key result tidak dipakai di modul lead', (() => {
+  const isi = fs.readFileSync(ROOT + '/src/grd/lead.js', 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  return !/\bOKR\b|\bkey result\b|\bobjective\b/i.test(isi);
+})());
+
+judul('48. Layanan usul lead measure');
+const spLd = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spLd });
+const goalLd = { id: 'gl1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten tayang', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(goalLd, { user: OWNER, allUsers: tim });
+const usul = (extra = {}, opsi = {}) => Svc.usulkanLead(
+  { goalId: 'gl1', ownerId: 'u-staf1', description: 'Konten tayang', targetMingguan: 5, uom: 'Konten', ...extra },
+  { user: STAF1, allUsers: tim, goal: goalLd, ...opsi });
+
+const l1 = await usul();
+cek('48a. Usulan tersimpan', spLd.jumlah('grdlead:rec:') === 1);
+cek('48b. Kuncinya memuat goalId (bisa ditarik per goal)',
+  spLd.kunci('grdlead:rec:gl1:').length === 1, spLd.kunci('grdlead:rec:'));
+cek('48c. Statusnya "usul", bukan langsung aktif', l1.status === 'usul');
+cek('48d. Pengusul tercatat', l1.diusulkanOleh === 'u-staf1' && !!l1.diusulkanPada);
+cek('48e. ambilLeadGoal menarik lewat prefix goal', (await Svc.ambilLeadGoal('gl1')).length === 1);
+cek('48f. Goal lain tidak ikut terbawa', (await Svc.ambilLeadGoal('gl-lain')).length === 0);
+cek('48g. goalId kosong → kosong, tanpa menyentuh server', (await Svc.ambilLeadGoal('')).length === 0);
+
+let pesanLd = '';
+try { await usul({ description: '' }); } catch (e) { pesanLd = e.message; }
+cek('48h. Validasi ditegakkan di layanan', /tindakan mingguannya/.test(pesanLd), pesanLd);
+
+pesanLd = '';
+try {
+  await Svc.usulkanLead({ goalId: 'gl1', ownerId: 'u-staf1', description: 'x', targetMingguan: 1, uom: 'y' },
+    { user: STAF2, allUsers: tim, goal: goalLd });
+} catch (e) { pesanLd = e.message; }
+cek('48i. Rekan sejajar TIDAK boleh mengusulkan', /tidak berwenang mengusulkan/.test(pesanLd), pesanLd);
+
+// batas 1–3 dihitung dari server
+await usul({ description: 'Sesi live' });
+await usul({ description: 'Sampel dipakai' });
+pesanLd = '';
+try { await usul({ description: 'Yang keempat' }); } catch (e) { pesanLd = e.message; }
+cek('48j. Usulan keempat DITOLAK (batas 3 per goal)', /batasnya 3/.test(pesanLd), pesanLd);
+cek('48k. Yang keempat tidak tersimpan', spLd.jumlah('grdlead:rec:gl1:') === 3);
+cek('48l. Pesannya memberi tahu jalan keluarnya',
+  /Tolak atau cabut salah satunya/.test(pesanLd));
+
+cek('48m. Batas dihitung dari SERVER, bukan dari layar', (() => {
+  // Semua usulan di atas dikirim tanpa pernah mengoper daftar dari layar —
+  // layanan membacanya sendiri tiap kali.
+  return spLd.prefixDiminta.filter(x => x === 'grdlead:rec:gl1:').length >= 4;
+})(), spLd.prefixDiminta.filter(x => x === 'grdlead:rec:gl1:').length);
+
+// perbaikan usulan
+const diperbaiki = await Svc.usulkanLead(
+  { ...l1, description: 'Konten tayang (diperbaiki)' },
+  { user: STAF1, allUsers: tim, goal: goalLd, leadLama: l1 });
+cek('48n. Perbaikan tidak menambah baris baru', spLd.jumlah('grdlead:rec:gl1:') === 3);
+cek('48o. Isinya berubah', diperbaiki.description === 'Konten tayang (diperbaiki)');
+cek('48p. Perbaikan kembali berstatus "usul" (harus dinilai ulang)', diperbaiki.status === 'usul');
+cek('48q. Catatan penilai lama dibersihkan saat diusulkan ulang', diperbaiki.catatan === '');
+
+pesanLd = '';
+try {
+  await Svc.usulkanLead({ ...l1, description: 'x' },
+    { user: STAF2, allUsers: tim, goal: goalLd, leadLama: l1 });
+} catch (e) { pesanLd = e.message; }
+cek('48r. Rekan sejajar tidak boleh memperbaiki', /tidak berwenang mengubah/.test(pesanLd));
+lepasMockGrd();
+
+judul('49. Penilaian usulan lead measure');
+const Lead2Aktif = (daftar) => daftar.filter(l => l.status === 'aktif').length;
+const spNl = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spNl });
+const goalNl = { id: 'gn1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(goalNl, { user: OWNER, allUsers: tim });
+const buatUsul = (d) => Svc.usulkanLead(
+  { goalId: 'gn1', ownerId: 'u-staf1', description: d, targetMingguan: 5, uom: 'Konten' },
+  { user: STAF1, allUsers: tim, goal: goalNl });
+
+const u1 = await buatUsul('Konten tayang');
+const pesanNl = async (fn) => { try { await fn(); return ''; } catch (e) { return e.message; } };
+
+const pSendiri = await pesanNl(() => Svc.nilaiLead(u1, 'aktif', { user: STAF1, allUsers: tim }));
+cek('49b. Pesannya menjelaskan itu tugas atasan',
+  /tidak bisa menilai usulan Anda sendiri/.test(pSendiri), pSendiri);
+cek('49c. Rekan sejajar tidak berwenang menilai',
+  /tidak berwenang menilai/.test(await pesanNl(() => Svc.nilaiLead(u1, 'aktif', { user: STAF2, allUsers: tim }))));
+
+cek('49d. Menolak WAJIB disertai catatan',
+  /Tulis catatan singkat/.test(await pesanNl(() => Svc.nilaiLead(u1, 'ditolak', { user: LEADER, allUsers: tim }))));
+cek('49e. Minta perbaiki juga wajib catatan',
+  /Tulis catatan singkat/.test(await pesanNl(() => Svc.nilaiLead(u1, 'perbaiki', { user: LEADER, allUsers: tim }))));
+cek('49f. Menyetujui TIDAK wajib catatan',
+  (await pesanNl(() => Svc.nilaiLead(u1, 'aktif', { user: LEADER, allUsers: tim }))) === '');
+
+const setelahSetuju = (await Svc.ambilLeadGoal('gn1')).find(l => l.id === u1.id);
+cek('49g. Statusnya jadi aktif', setelahSetuju.status === 'aktif');
+cek('49h. Penilai tercatat', setelahSetuju.penilaiId === 'u-leader' && !!setelahSetuju.dinilaiPada);
+
+cek('49i. Tidak ada jalan pintas: aktif → usul ditolak',
+  /Tidak bisa mengubah dari/.test(await pesanNl(() => Svc.nilaiLead(setelahSetuju, 'usul', { user: LEADER, allUsers: tim }))));
+
+const u2 = await buatUsul('Sesi live');
+await Svc.nilaiLead(u2, 'perbaiki', { user: LEADER, allUsers: tim, catatan: 'Targetnya terlalu rendah.' });
+const setelahPerbaiki = (await Svc.ambilLeadGoal('gn1')).find(l => l.id === u2.id);
+cek('49j. Status jadi perbaiki dengan catatannya',
+  setelahPerbaiki.status === 'perbaiki' && /terlalu rendah/.test(setelahPerbaiki.catatan));
+cek('49k. perbaiki → aktif langsung DITOLAK (harus diusulkan ulang)',
+  /Tidak bisa mengubah dari/.test(await pesanNl(() => Svc.nilaiLead(setelahPerbaiki, 'aktif', { user: LEADER, allUsers: tim }))));
+
+const diusulkanUlang = await Svc.usulkanLead({ ...setelahPerbaiki, targetMingguan: 10 },
+  { user: STAF1, allUsers: tim, goal: goalNl, leadLama: setelahPerbaiki });
+cek('49l. Setelah diperbaiki kembali ke "usul"', diusulkanUlang.status === 'usul');
+cek('49m. Catatan penilai dibersihkan', diusulkanUlang.catatan === '');
+cek('49n. Kini boleh disetujui',
+  (await pesanNl(() => Svc.nilaiLead(diusulkanUlang, 'aktif', { user: LEADER, allUsers: tim }))) === '');
+
+// batas 3 aktif saat MENYETUJUI.
+// Skenario yang benar-benar bisa terjadi: satu usulan DITOLAK, lalu diusulkan
+// ulang setelah slot keburu terisi penuh oleh usulan lain. Saat diusulkan ulang
+// batas belum menggigit (ia menggantikan baris lama), jadi penjagaan terakhirnya
+// ada di nilaiLead — dan itu yang diuji di sini.
+const uTolak = await buatUsul('Yang sempat ditolak');
+await Svc.nilaiLead(uTolak, 'ditolak', { user: LEADER, allUsers: tim, catatan: 'Belum tajam.' });
+const uT = (await Svc.ambilLeadGoal('gn1')).find(l => l.id === uTolak.id);
+cek('49o. Usulan yang ditolak tercatat statusnya', uT.status === 'ditolak');
+
+const uIsi = await buatUsul('Pengisi slot ketiga');
+await Svc.nilaiLead(uIsi, 'aktif', { user: LEADER, allUsers: tim });
+cek('49p. Slot aktif kini penuh (3)', Lead2Aktif(await Svc.ambilLeadGoal('gn1')) === 3,
+  Lead2Aktif(await Svc.ambilLeadGoal('gn1')));
+
+const uUlang = await Svc.usulkanLead({ ...uT, description: 'Diusulkan ulang' },
+  { user: STAF1, allUsers: tim, goal: goalNl, leadLama: uT });
+cek('49q. Boleh diusulkan ulang walau slot penuh (belum tentu disetujui)',
+  uUlang.status === 'usul');
+cek('49r. Tapi MENYETUJUINYA ditolak — batas dihitung ulang dari server',
+  /batasnya 3/.test(await pesanNl(() => Svc.nilaiLead(uUlang, 'aktif', { user: LEADER, allUsers: tim }))));
+cek('49s. Slot aktif tidak bertambah', Lead2Aktif(await Svc.ambilLeadGoal('gn1')) === 3);
+cek('49t. Masih boleh ditolak', (await pesanNl(() => Svc.nilaiLead(uUlang, 'ditolak',
+  { user: LEADER, allUsers: tim, catatan: 'Sudah cukup tiga.' }))) === '');
 lepasMockGrd();
 
 // ============================================================================
