@@ -1163,6 +1163,7 @@ judul('19. Modul layanan tipis (satu pintu baca/tulis GRD)');
 // tanpa pernah menyentuh database production.
 // ============================================================================
 const OWNER = orang('u-owner'), LEADER = orang('u-leader'), STAF1 = orang('u-staf1'), STAF2 = orang('u-staf2');
+const WAKIL = orang('u-wakil');
 const goalSah = (extra = {}) => ({
   id: 'sv1', ownerId: 'u-staf1', periode: '2026-09',
   description: 'Konten tayang', base: 0, target: 30, uom: 'Konten', ...extra,
@@ -3983,6 +3984,107 @@ cek('77f. Peringatan menjaga sinkron dengan ALUR_LEAD ditulis',
   /harus sama dengan ALUR_LEAD/.test(blokLead));
 cek('77g. Batas tiga aktif juga ditegakkan di server',
   /sudah punya 3 lead measure aktif/.test(blokLead));
+
+judul('78. Siklus perbaikan bolak-balik sampai disetujui');
+const spSk2 = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spSk2 });
+const goalSl = { id: 'sl1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(goalSl, { user: OWNER, allUsers: tim });
+
+// putaran 1: usul → diminta perbaiki
+let sl = await Svc.usulkanLead(
+  { goalId: 'sl1', ownerId: 'u-staf1', description: 'Konten tayang', targetMingguan: 2, uom: 'Konten' },
+  { user: STAF1, allUsers: tim, goal: goalSl });
+sl = await Svc.nilaiLead(sl, 'perbaiki', { user: WAKIL, allUsers: tim, catatan: 'Targetnya terlalu rendah.' });
+cek('78a. Putaran 1: diminta perbaiki', sl.status === 'perbaiki');
+
+// putaran 2: diperbaiki → ditolak
+sl = await Svc.usulkanLead({ ...sl, targetMingguan: 4 },
+  { user: STAF1, allUsers: tim, goal: goalSl, leadLama: sl });
+cek('78b. Diusulkan ulang kembali menunggu', sl.status === 'usul');
+sl = await Svc.nilaiLead(sl, 'ditolak', { user: WAKIL, allUsers: tim, catatan: 'Masih kurang, dan mirip punya Budi.' });
+cek('78c. Putaran 2: ditolak', sl.status === 'ditolak');
+
+// putaran 3: diperbaiki lagi → disetujui
+sl = await Svc.usulkanLead({ ...sl, description: 'Konten affiliate tayang', targetMingguan: 8 },
+  { user: STAF1, allUsers: tim, goal: goalSl, leadLama: sl });
+sl = await Svc.nilaiLead(sl, 'aktif', { user: WAKIL, allUsers: tim });
+cek('78d. Putaran 3: akhirnya disetujui', sl.status === 'aktif');
+
+cek('78e. SATU baris saja sepanjang siklus (bukan menumpuk tiap putaran)',
+  spSk2.jumlah('grdlead:rec:sl1:') === 1, spSk2.jumlah('grdlead:rec:sl1:'));
+cek('78f. Riwayat merekam SELURUH enam langkah', sl.riwayat.length === 6, sl.riwayat.map(r => r.aksi));
+cek('78g. Urutannya benar dari awal sampai akhir',
+  sl.riwayat.map(r => r.aksi).join() === 'usul,perbaiki,usulUlang,ditolak,usulUlang,aktif',
+  sl.riwayat.map(r => r.aksi));
+cek('78h. Catatan tiap penolakan tersimpan di riwayatnya', (() => {
+  const c = sl.riwayat.filter(r => r.catatan).map(r => r.catatan);
+  return c.some(x => /terlalu rendah/.test(x)) && c.some(x => /mirip punya Budi/.test(x));
+})());
+cek('78i. Catatan TERAKHIR bersih setelah disetujui (itu status, bukan riwayat)', sl.catatan === '');
+cek('78j. Isi akhirnya yang tersimpan, bukan versi awal',
+  sl.description === 'Konten affiliate tayang' && sl.targetMingguan === 8);
+cek('78k. Penilai terakhir tercatat', sl.penilaiId === 'u-wakil');
+cek('78l. Siap diisi skor setelah aktif',
+  SB.bisaIsiSkor(STAF1, sl, tim) === true);
+lepasMockGrd();
+
+judul('79. Kueri lead measure — satu pintu halaman Lead Measure');
+const spQl = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spQl });
+// dua cabang lagi, supaya gerbangnya ikut teruji
+await spQl.set('grdgoal:rec:ql-a', { id: 'ql-a', ownerId: 's1', periode: '2026-09',
+  description: 'Cabang A', base: 0, target: 10, uom: 'x' });
+await spQl.set('grdgoal:rec:ql-b', { id: 'ql-b', ownerId: 's2', periode: '2026-09',
+  description: 'Cabang B', base: 0, target: 10, uom: 'x' });
+await spQl.set('grdgoal:rec:ql-lama', { id: 'ql-lama', ownerId: 's1', periode: '2026-01',
+  description: 'Periode lama', base: 0, target: 10, uom: 'x' });
+const mkLead = (id, goalId, ownerId, status, desc) => ({
+  id, goalId, ownerId, status, description: desc, targetMingguan: 3, uom: 'Konten',
+});
+await spQl.set('grdlead:rec:ql-a:l1', mkLead('l1', 'ql-a', 's1', 'aktif', 'Konten tayang'));
+await spQl.set('grdlead:rec:ql-a:l2', mkLead('l2', 'ql-a', 's1', 'usul', 'Sesi live'));
+await spQl.set('grdlead:rec:ql-a:l3', mkLead('l3', 'ql-a', 's1', 'ditolak', 'Riset'));
+await spQl.set('grdlead:rec:ql-b:l4', mkLead('l4', 'ql-b', 's2', 'aktif', 'Punya cabang lain'));
+await spQl.set('grdlead:rec:ql-lama:l5', mkLead('l5', 'ql-lama', 's1', 'aktif', 'Periode lama'));
+
+const qStaf = await Svc.queryLead({ user: timCabang.find(u => u.id === 's1'), allUsers: timCabang, periode: '2026-09' });
+cek('79a. Lead cabang lain TIDAK ikut', !qStaf.hasil.some(l => l.id === 'l4'), qStaf.hasil.map(l => l.id));
+cek('79b. Periode lain TIDAK ikut', !qStaf.hasil.some(l => l.id === 'l5'));
+cek('79c. Lead cabang sendiri ikut semua status',
+  qStaf.hasil.map(l => l.id).sort().join() === 'l1,l2,l3');
+cek('79d. Urutannya: menunggu dulu', qStaf.hasil[0].status === 'usul');
+cek('79e. Ringkasan ikut dihitung',
+  qStaf.ringkas.aktif === 1 && qStaf.ringkas.menunggu === 1 && qStaf.ringkas.ditolak === 1);
+cek('79f. Goal periode itu ikut dikembalikan', qStaf.goals.length === 1 && qStaf.goals[0].id === 'ql-a');
+
+cek('79g. Saring status', (await Svc.queryLead({
+  user: timCabang.find(u => u.id === 's1'), allUsers: timCabang, periode: '2026-09', status: 'aktif',
+})).hasil.map(l => l.id).join() === 'l1');
+cek('79h. Cari kata di isi lead', (await Svc.queryLead({
+  user: timCabang.find(u => u.id === 's1'), allUsers: timCabang, periode: '2026-09', kata: 'live',
+})).hasil.map(l => l.id).join() === 'l2');
+cek('79i. Cari lewat nama goal', (await Svc.queryLead({
+  user: timCabang.find(u => u.id === 's1'), allUsers: timCabang, periode: '2026-09', kata: 'Cabang A',
+})).hasil.length === 3);
+cek('79j. Kata tidak ketemu → kosong, bukan error', (await Svc.queryLead({
+  user: timCabang.find(u => u.id === 's1'), allUsers: timCabang, periode: '2026-09', kata: 'zzz',
+})).hasil.length === 0);
+
+const qAtasan = await Svc.queryLead({ user: timCabang.find(u => u.id === 'w1'), allUsers: timCabang, periode: '2026-09' });
+cek('79k. Atasan melihat daftar tugas menilai', qAtasan.perluSayaNilai.map(l => l.id).join() === 'l2');
+cek('79l. Pengusul melihat yang dikembalikan', qStaf.perluSayaPerbaiki.map(l => l.id).join() === 'l3');
+cek('79m. Dua daftar tugas tidak tumpang tindih', (() => {
+  const a = qAtasan.perluSayaNilai.map(l => l.id);
+  const b = qAtasan.perluSayaPerbaiki.map(l => l.id);
+  return a.every(x => !b.includes(x));
+})());
+cek('79n. Komitmen mingguan pemilik ikut dihitung',
+  qStaf.komitmenSaya.map(l => l.id).join() === 'l1');
+cek('79o. Goal tanpa lead aktif ditandai', Array.isArray(qStaf.goalTanpaLead));
+const qOwner = await Svc.queryLead({ user: timCabang[0], allUsers: timCabang, periode: '2026-09' });
+cek('79q. Owner: lead kedua cabang terbaca', qOwner.hasil.length === 4);
+cek('79r. Tanpa argumen sama sekali tidak error', (await Svc.queryLead()).hasil.length >= 0);
+lepasMockGrd();
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

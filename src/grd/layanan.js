@@ -544,6 +544,49 @@ export async function nilaiLead(lead, statusBaru, { user, allUsers, catatan = ''
   return rec;
 }
 
+/**
+ * KUERI LEAD MEASURE — satu pintu untuk halaman Lead Measure.
+ *
+ * Menyaring sekaligus menggerbangi: hanya lead measure milik goal yang boleh
+ * DILIHAT pengguna. Mengembalikan pula dua daftar tugas yang saling melengkapi —
+ * apa yang menunggu penilaian SAYA, dan usulan SAYA yang dikembalikan — supaya
+ * halaman tidak menghitungnya sendiri dan tidak ada sisi yang terlupa.
+ */
+export async function queryLead({
+  user = null, allUsers = [], periode = '', status = 'semua',
+  kata = '', goals = null, leads = null,
+} = {}) {
+  const semuaGoal = goals || await ambilGoal();
+  const terlihat = user ? Grd.goalYangBisaDilihat(user, semuaGoal, allUsers) : semuaGoal;
+  const dalamPeriode = periode ? Grd.goalPeriode(terlihat, periode) : terlihat;
+  const bolehGoal = new Set(dalamPeriode.map(g => g.id));
+
+  const semuaLead = leads || await ambilLead();
+  let hasil = semuaLead.map(Lead.normalisasiLead).filter(l => l && bolehGoal.has(l.goalId));
+
+  if (status && status !== 'semua') hasil = hasil.filter(l => l.status === status);
+
+  const k = String(kata || '').trim().toLowerCase();
+  if (k) {
+    hasil = hasil.filter(l => {
+      const goal = dalamPeriode.find(g => g.id === l.goalId);
+      const pemilik = (allUsers || []).find(u => u && u.id === l.ownerId);
+      return [l.description, l.uom, goal && goal.description, pemilik && pemilik.name]
+        .filter(Boolean).join(' ').toLowerCase().includes(k);
+    });
+  }
+
+  return {
+    hasil: Lead.urutkanLead(hasil),
+    goals: dalamPeriode,
+    ringkas: Lead.ringkasLead(hasil),
+    perluSayaNilai: Lead.menungguPenilaianSaya(user, hasil, allUsers),
+    perluSayaPerbaiki: Lead.perluSayaPerbaiki(user, hasil),
+    komitmenSaya: Lead.komitmenMingguan(user, hasil),
+    goalTanpaLead: dalamPeriode.filter(g => Lead.leadAktif(hasil, g.id).length === 0),
+  };
+}
+
 // ============================================================================
 // SCOREBOARD MINGGUAN
 // ============================================================================
