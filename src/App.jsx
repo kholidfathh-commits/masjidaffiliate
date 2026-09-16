@@ -88,6 +88,7 @@ import * as Qr from './sampel/qr.js';
 // contoh.js = data TIRUAN sementara supaya halaman bisa dinilai sebelum
 // penyimpanannya dikerjakan; hapus import itu begitu kv_store sudah dipakai.
 import * as Grd from './grd/data.js';
+import * as Lead from './grd/lead.js';
 import * as GrdSvc from './grd/layanan.js';
 import { initGrd } from './grd/layanan.js';
 
@@ -740,6 +741,9 @@ async function loadGoals() {
 async function loadJejakGrd() {
   return await GrdSvc.ambilJejak();
 }
+async function loadLeadGrd() {
+  return await GrdSvc.ambilLead();
+}
 
 
 // ====== LMS: suntik dependensi app ke modul pembelajaran ======
@@ -767,6 +771,7 @@ const PER_RECORD_LOADERS = {
   [Sampel.SAMPEL_BACKUP_KEY]: loadSamples, [Sampel.PAKAI_BACKUP_KEY]: loadSampleUsages, [Sampel.STAT_BACKUP_KEY]: loadSampleStats,
   // GRD (Goal Roll Down)
   [Grd.GOAL_BACKUP_KEY]: loadGoals, [Grd.JEJAK_BACKUP_KEY]: loadJejakGrd,
+  [Lead.LEAD_BACKUP_KEY]: loadLeadGrd,
   // LMS (Pembelajaran)
   'lms:paths:all': loadLmsPaths, 'lms:courses:all': loadLmsCourses, 'lms:lesson-bodies:all': loadLmsBodies,
   'lms:enrollments:all': loadLmsEnrollments, 'lms:progress:all': loadLmsProgress, 'lms:attempts:all': loadLmsAttempts,
@@ -782,6 +787,7 @@ const PER_RECORD_PREFIX = {
   [Sampel.SAMPEL_BACKUP_KEY]: Sampel.SAMPEL_REC_PREFIX, [Sampel.PAKAI_BACKUP_KEY]: Sampel.PAKAI_REC_PREFIX, [Sampel.STAT_BACKUP_KEY]: Sampel.STAT_REC_PREFIX,
   // GRD (Goal Roll Down)
   [Grd.GOAL_BACKUP_KEY]: Grd.GOAL_REC_PREFIX, [Grd.JEJAK_BACKUP_KEY]: Grd.JEJAK_REC_PREFIX,
+  [Lead.LEAD_BACKUP_KEY]: Lead.LEAD_REC_PREFIX,
   // LMS (Pembelajaran)
   'lms:paths:all': LMS_PATH_PREFIX, 'lms:courses:all': LMS_COURSE_PREFIX, 'lms:lesson-bodies:all': LMS_BODY_PREFIX,
   'lms:enrollments:all': LMS_ENROLL_PREFIX, 'lms:progress:all': LMS_PROGRESS_PREFIX, 'lms:attempts:all': LMS_ATTEMPT_PREFIX,
@@ -1071,7 +1077,7 @@ const BACKUP_KEYS = [
   Sampel.SAMPEL_BACKUP_KEY, Sampel.PAKAI_BACKUP_KEY, Sampel.STAT_BACKUP_KEY,
   // GRD: goal + jejak perubahan angka (jejak = bukti audit, tak tergantikan)
   // + template per peran yang diubah tim (satu baris, seperti app:settings)
-  Grd.GOAL_BACKUP_KEY, Grd.JEJAK_BACKUP_KEY, Grd.TEMPLATE_KEY,
+  Grd.GOAL_BACKUP_KEY, Grd.JEJAK_BACKUP_KEY, Grd.TEMPLATE_KEY, Lead.LEAD_BACKUP_KEY,
   'img:store', // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
   ...LMS_BACKUP_KEYS // LMS: jalur, kursus, isi materi, enrollment, progres, kuis, tugas, validasi, modul bacaan
 ];
@@ -1683,6 +1689,7 @@ export default function App() {
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
             {view === 'grd-tree' && <GrdTreeView user={currentUser} allUsers={allUsers} />}
             {view === 'grd-kelola' && <GrdKelolaView user={currentUser} allUsers={allUsers} />}
+            {view === 'grd-lead' && <GrdLeadView user={currentUser} allUsers={allUsers} />}
             {view === 'grd-akses' && <GrdAksesView user={currentUser} allUsers={allUsers} />}
             {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'aset' && <AsetView user={currentUser} />}
@@ -2351,6 +2358,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       items: [
         { id: 'grd-tree', label: 'Pohon Goal', icon: Network, show: true },
         { id: 'grd-kelola', label: 'Kelola Goal', icon: Target, show: true },
+        { id: 'grd-lead', label: 'Lead Measure', icon: ClipboardCheck, show: true },
         { id: 'grd-akses', label: 'Kontrol Akses', icon: Eye, show: isPengelola(user) }
       ]
     },
@@ -20167,6 +20175,457 @@ function GrdAksesView({ user, allUsers }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/**
+ * FORM USUL / PERBAIKI LEAD MEASURE.
+ *
+ * Isiannya sengaja cuma tiga: tindakan, angka mingguan, satuan. Lead measure
+ * yang butuh banyak kolom untuk dijelaskan biasanya bukan lead measure —
+ * melainkan proyek yang belum dipecah.
+ */
+function GrdFormLead({ lead, goal, user, allUsers, adaSekarang, onSimpan, onClose }) {
+  const lama = lead ? Lead.normalisasiLead(lead) : null;
+  const [form, setForm] = useState(() => ({
+    description: lama?.description || '',
+    targetMingguan: lama ? String(lama.targetMingguan) : '',
+    uom: lama?.uom || '',
+  }));
+  const [pesan, setPesan] = useState('');
+  const [menyimpan, setMenyimpan] = useState(false);
+
+  const ubah = (k, v) => { setForm(f => ({ ...f, [k]: v })); setPesan(''); };
+  const st = Lead.statusLeadGoal(adaSekarang || [], goal.id);
+  const penilai = Lead.calonPenilai({ ownerId: goal.ownerId }, allUsers);
+
+  const simpan = async () => {
+    const calon = {
+      ...(lama || {}),
+      ...form,
+      goalId: goal.id,
+      ownerId: lama?.ownerId || goal.ownerId,
+    };
+    const salah = Lead.validasiLead(calon);
+    if (salah) { setPesan(salah); return; }
+    setMenyimpan(true);
+    const salahServer = await onSimpan(Lead.normalisasiLead(calon));
+    setMenyimpan(false);
+    if (salahServer) setPesan(salahServer);
+  };
+
+  return (
+    <Modal title={lama ? 'Perbaiki Lead Measure' : 'Usulkan Lead Measure'} onClose={onClose} wide>
+      <div className="rounded-xl bg-slate-50 border border-slate-200/70 px-3.5 py-3">
+        <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Untuk goal</div>
+        <div className="text-sm font-semibold text-slate-800 mt-1">{goal.description}</div>
+        <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+          {grdAngka(goal.base)} → {grdAngka(goal.target)} {goal.uom} · {Grd.labelPeriodeSingkat(goal.periode)}
+        </div>
+      </div>
+
+      <div className="mt-3 text-[12px] text-slate-600 leading-relaxed bg-blue-50 border border-blue-200 rounded-xl px-3.5 py-3">
+        <span className="font-bold text-blue-900">Lead measure itu tindakan, bukan hasil.</span> Tulis sesuatu yang
+        bisa Anda kerjakan minggu ini dan ada di bawah kendali Anda — misalnya &ldquo;konten tayang&rdquo;, bukan
+        &ldquo;GMV naik&rdquo;. Maksimal {Lead.MAKS_LEAD_AKTIF} per goal
+        {st.aktif > 0 && <> (sekarang {st.aktif} aktif{st.menunggu > 0 && `, ${st.menunggu} menunggu`})</>}.
+      </div>
+
+      <div className="mt-4">
+        <GrdField label="Tindakan mingguan" wajib hint="Apa yang dikerjakan tiap minggu.">
+          <input value={form.description} onChange={e => ubah('description', e.target.value)}
+            placeholder="Contoh: Konten affiliate tayang" className={GRD_INPUT} autoFocus />
+        </GrdField>
+
+        <div className="grid sm:grid-cols-2 gap-x-4">
+          <GrdField label="Target per minggu" wajib hint="Angka yang dikejar tiap minggu.">
+            <input type="number" inputMode="decimal" value={form.targetMingguan}
+              onChange={e => ubah('targetMingguan', e.target.value)}
+              placeholder="5" className={GRD_INPUT} />
+          </GrdField>
+          <GrdField label="Satuan" wajib hint="Misal: Konten, Sesi, Orang.">
+            <input value={form.uom} onChange={e => ubah('uom', e.target.value)} list="grd-uom-lead"
+              placeholder="Konten" className={GRD_INPUT} />
+            <datalist id="grd-uom-lead">
+              {Grd.UOM_UMUM.map(u => <option key={u} value={u} />)}
+            </datalist>
+          </GrdField>
+        </div>
+      </div>
+
+      <div className="text-[11px] text-slate-500">
+        {penilai
+          ? <>Setelah dikirim, usulan ini menunggu penilaian <span className="font-semibold">{penilai.name}</span>.</>
+          : <>Pemilik goal ini tidak punya atasan langsung — usulan akan dinilai Owner/Manajer.</>}
+      </div>
+
+      {pesan && (
+        <div className="mt-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-[12px] text-red-700 font-semibold">
+          ⚠️ {pesan}
+        </div>
+      )}
+
+      <div className="flex items-center justify-end gap-2 mt-5">
+        <button onClick={onClose}
+          className="px-4 py-2 rounded-lg font-semibold text-sm text-slate-600 hover:bg-slate-100">
+          Batal
+        </button>
+        <button onClick={simpan} disabled={menyimpan}
+          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-semibold text-sm">
+          {menyimpan ? 'Mengirim…' : (lama ? 'Kirim Ulang' : 'Kirim Usulan')}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * PANEL PENILAIAN USULAN LEAD MEASURE (untuk atasan).
+ *
+ * Tiga jawaban, bukan dua: setujui, minta perbaiki, tolak. "Minta perbaiki"
+ * sengaja dipisahkan dari "tolak" — kebanyakan usulan tidak salah, hanya belum
+ * cukup tajam, dan menolaknya membuat orang berhenti mengusulkan.
+ *
+ * Catatan WAJIB untuk perbaiki & tolak; tanpa itu pengusul cuma menebak-nebak.
+ */
+function GrdNilaiLeadModal({ lead, goal, user, allUsers, adaSekarang, onNilai, onClose }) {
+  const l = Lead.normalisasiLead(lead);
+  const [catatan, setCatatan] = useState('');
+  const [pesan, setPesan] = useState('');
+  const [proses, setProses] = useState('');
+
+  const pengusul = (allUsers || []).find(u => u && u.id === l.ownerId);
+  const st = Lead.statusLeadGoal(adaSekarang || [], l.goalId);
+  const slotPenuh = st.aktif >= Lead.MAKS_LEAD_AKTIF && l.status !== 'aktif';
+
+  const kirim = async (status) => {
+    setProses(status);
+    const salah = await onNilai(l, status, catatan);
+    setProses('');
+    if (salah) setPesan(salah); else setCatatan('');
+  };
+
+  return (
+    <Modal title="Nilai Usulan Lead Measure" onClose={onClose} wide>
+      <div className="rounded-xl bg-slate-50 border border-slate-200/70 px-3.5 py-3">
+        <div className="text-sm font-semibold text-slate-800">{l.description}</div>
+        <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
+          <span className="font-semibold text-slate-700">{l.targetMingguan}</span> {l.uom} / minggu
+        </div>
+        <div className="text-[11px] text-slate-500 mt-1.5 inline-flex items-center gap-1.5">
+          {pengusul && <Avatar person={pengusul} size="xs" />}
+          Diusulkan {l.diusulkanNama || (pengusul ? pengusul.name : 'seseorang')}
+        </div>
+        {goal && (
+          <div className="text-[11px] text-slate-400 mt-1.5 pt-1.5 border-t border-slate-200">
+            Untuk goal: {goal.description}
+          </div>
+        )}
+      </div>
+
+      {slotPenuh && (
+        <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-[12px] text-amber-800">
+          Goal ini sudah punya {st.aktif} lead measure aktif (batas {Lead.MAKS_LEAD_AKTIF}).
+          Untuk menyetujui yang ini, cabut salah satu yang aktif dulu.
+        </div>
+      )}
+
+      <div className="mt-4">
+        <GrdField label="Catatan"
+          hint="Wajib kalau meminta perbaikan atau menolak — supaya pengusul tahu apa yang kurang.">
+          <textarea value={catatan} onChange={e => { setCatatan(e.target.value); setPesan(''); }}
+            rows={3} placeholder="Contoh: Targetnya terlalu rendah untuk mengejar goal, coba 10/minggu."
+            className={GRD_INPUT} />
+        </GrdField>
+      </div>
+
+      {pesan && (
+        <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-[12px] text-red-700 font-semibold">
+          ⚠️ {pesan}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 mt-5 flex-wrap">
+        {Lead.ALUR_LEAD[l.status]?.includes('aktif') && (
+          <button onClick={() => kirim('aktif')} disabled={!!proses || slotPenuh}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-semibold text-sm inline-flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4" /> {proses === 'aktif' ? 'Menyimpan…' : 'Setujui'}
+          </button>
+        )}
+        {Lead.ALUR_LEAD[l.status]?.includes('perbaiki') && (
+          <button onClick={() => kirim('perbaiki')} disabled={!!proses}
+            className="bg-white border border-orange-300 hover:bg-orange-50 disabled:opacity-50 text-orange-800 px-4 py-2 rounded-lg font-semibold text-sm">
+            {proses === 'perbaiki' ? 'Menyimpan…' : 'Minta Perbaiki'}
+          </button>
+        )}
+        {Lead.ALUR_LEAD[l.status]?.includes('ditolak') && (
+          <button onClick={() => kirim('ditolak')} disabled={!!proses}
+            className="ml-auto text-slate-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50 px-3 py-2 rounded-lg font-semibold text-sm">
+            {proses === 'ditolak' ? 'Menyimpan…' : 'Tolak'}
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/** Satu kartu lead measure. */
+function GrdKartuLead({ l, user, allUsers, onNilai, onUbah }) {
+  const gaya = Lead.gayaStatusLead(l.status);
+  const bisaNilai = Lead.bisaNilaiLead(user, l, allUsers);
+  const bisaUbah = Lead.bisaUbahLead(user, l, allUsers);
+  const penilai = Lead.calonPenilai(l, allUsers);
+  return (
+    <div className="bg-white rounded-xl border border-slate-200/80 px-3.5 py-3 shadow-sm shadow-slate-200/40">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-slate-800 leading-snug">{l.description}</div>
+          <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
+            <span className="font-semibold text-slate-700">{l.targetMingguan}</span> {l.uom} / minggu
+          </div>
+          {l.catatan && (
+            <div className="text-[11px] text-slate-600 mt-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+              <span className="font-semibold">Catatan {l.penilaiNama || 'penilai'}:</span> {l.catatan}
+            </div>
+          )}
+          {l.status === 'usul' && !bisaNilai && penilai && (
+            <div className="text-[11px] text-slate-400 mt-1.5">Menunggu penilaian {penilai.name}.</div>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>{gaya.label}</span>
+          <div className="flex items-center gap-1">
+            {bisaUbah && onUbah && (l.status === 'usul' || l.status === 'perbaiki') && (
+              <button onClick={() => onUbah(l)} title="Perbaiki usulan"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50">
+                <Edit2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {bisaNilai && onNilai && Lead.ALUR_LEAD[l.status]?.length > 0 && (
+              <button onClick={() => onNilai(l)}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                Nilai
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Satu goal beserta lead measure-nya. */
+function GrdBlokLeadGoal({ goal, leads, user, allUsers, onUsul, onNilai, onUbah }) {
+  const pemilik = Grd.pemilikGoal(goal, allUsers);
+  const st = Lead.statusLeadGoal(leads, goal.id);
+  const daftar = Lead.urutkanLead(Lead.leadPerGoal(leads, goal.id));
+  const bisaUsul = Lead.bisaUsulLead(user, goal, allUsers);
+
+  const warnaKeadaan = st.keadaan === 'kosong' ? 'bg-amber-100 text-amber-800'
+    : st.keadaan === 'penuh' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-700';
+  const labelKeadaan = st.keadaan === 'kosong' ? 'Belum ada yang aktif'
+    : st.keadaan === 'penuh' ? `${st.aktif} aktif (penuh)` : `${st.aktif} aktif`;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/70 p-4 shadow-sm shadow-slate-200/40">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="font-semibold text-sm text-slate-800">{goal.description}</div>
+          <div className="text-[11px] text-slate-500 mt-0.5 inline-flex items-center gap-1.5">
+            {pemilik && <Avatar person={pemilik} size="xs" />}
+            {pemilik ? pemilik.name : 'pemilik hilang'}
+            <span className="text-slate-300">·</span>
+            {Grd.labelPeriodeSingkat(goal.periode)}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${warnaKeadaan}`}>{labelKeadaan}</span>
+          {st.menunggu > 0 && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+              {st.menunggu} menunggu
+            </span>
+          )}
+          {bisaUsul && onUsul && st.sisa > 0 && (
+            <button onClick={() => onUsul(goal)}
+              className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 hover:border-blue-400 hover:text-blue-700 inline-flex items-center gap-1">
+              <Plus className="w-3 h-3" /> Usulkan
+            </button>
+          )}
+        </div>
+      </div>
+
+      {daftar.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          {daftar.map(l => (
+            <GrdKartuLead key={l.id} l={l} user={user} allUsers={allUsers}
+              onNilai={onNilai} onUbah={onUbah} />
+          ))}
+        </div>
+      ) : (
+        <div className="mt-2.5 text-[11px] text-slate-400 italic">
+          Belum ada lead measure. Goal ini belum bisa dijalankan mingguan
+          {bisaUsul ? ' — usulkan 1–3 tindakan yang paling menggerakkannya.' : '.'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * HALAMAN LEAD MEASURE — tindakan mingguan yang mendorong tiap goal.
+ *
+ * Disusun PER GOAL, bukan sebagai satu daftar panjang: lead measure tidak punya
+ * arti lepas dari goal yang didorongnya, dan batas 1–3 itu berlaku per goal —
+ * keduanya cuma terbaca kalau ditampilkan berkelompok.
+ */
+function GrdLeadView({ user, allUsers }) {
+  const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
+  const [goals, setGoals] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
+  const [hanyaPerluSaya, setHanyaPerluSaya] = useState(false);
+  const [formLead, setFormLead] = useState(null); // { goal, lead? }
+  const [nilaiLead, setNilaiLead] = useState(null); // { goal, lead }
+
+  const kirimNilai = async (l, status, catatan) => {
+    try {
+      await GrdSvc.nilaiLead(l, status, { user, allUsers, catatan });
+      setNilaiLead(null);
+      await muat();
+      return '';
+    } catch (e) { return (e && e.message) || 'Gagal menyimpan penilaian.'; }
+  };
+
+  const simpanLead = async (l) => {
+    try {
+      await GrdSvc.usulkanLead(l, {
+        user, allUsers,
+        goal: formLead.goal,
+        leadLama: formLead.lead || null,
+      });
+      setFormLead(null);
+      await muat();
+      return '';
+    } catch (e) { return (e && e.message) || 'Gagal menyimpan lead measure.'; }
+  };
+
+  const muat = async () => {
+    try {
+      const [g, l] = await Promise.all([GrdSvc.ambilGoal(), GrdSvc.ambilLead()]);
+      setGoals(g); setLeads(l);
+    } catch (e) {
+      console.warn('Muat lead measure gagal (pertahankan data lama):', e?.message || e);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { muat(); const iv = setInterval(pollWhenVisible(muat), 60000); return () => clearInterval(iv); }, []);
+
+  // Goal yang boleh dilihat, pada periode terpilih.
+  const goalPeriode = useMemo(
+    () => Grd.goalYangBisaDilihat(user, Grd.goalPeriode(goals, periode), allUsers),
+    [user, goals, periode, allUsers]);
+
+  const perluSaya = useMemo(() => Lead.menungguPenilaianSaya(user, leads, allUsers),
+    [user, leads, allUsers]);
+
+  const tampil = useMemo(() => {
+    const kata = q.trim().toLowerCase();
+    return goalPeriode
+      .filter(g => {
+        if (!hanyaPerluSaya) return true;
+        return perluSaya.some(l => l.goalId === g.id);
+      })
+      .filter(g => {
+        if (!kata) return true;
+        const pemilik = Grd.pemilikGoal(g, allUsers);
+        const isiLead = Lead.leadPerGoal(leads, g.id).map(l => l.description).join(' ');
+        return [g.description, pemilik?.name, isiLead].filter(Boolean)
+          .join(' ').toLowerCase().includes(kata);
+      })
+      // Goal yang belum punya lead aktif diangkat ke atas — itu yang paling
+      // butuh perhatian, bukan yang sudah rapi.
+      .sort((a, b) => {
+        const ka = Lead.statusLeadGoal(leads, a.id);
+        const kb = Lead.statusLeadGoal(leads, b.id);
+        if (kb.menunggu !== ka.menunggu) return kb.menunggu - ka.menunggu;
+        if (ka.aktif !== kb.aktif) return ka.aktif - kb.aktif;
+        return a.description.localeCompare(b.description);
+      });
+  }, [goalPeriode, leads, q, hanyaPerluSaya, perluSaya, allUsers]);
+
+  const ringkas = useMemo(() => Lead.ringkasLead(
+    leads.filter(l => goalPeriode.some(g => g.id === l.goalId))), [leads, goalPeriode]);
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat lead measure…</div>;
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="Lead Measure"
+        subtitle={`Tindakan mingguan yang mendorong goal — ${Grd.labelPeriode(periode)}`} />
+
+      {perluSaya.length > 0 && (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2.5">
+          <ClipboardCheck className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="text-[12px] text-amber-800 leading-relaxed flex-1">
+            <span className="font-bold">{perluSaya.length} usulan</span> menunggu penilaian Anda.
+          </div>
+          <button onClick={() => setHanyaPerluSaya(v => !v)}
+            className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 flex-shrink-0">
+            {hanyaPerluSaya ? 'Tampilkan semua' : 'Lihat yang perlu saya nilai'}
+          </button>
+        </div>
+      )}
+
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <GrdPemilihPeriode jenis={jenis} periode={periode} onJenis={gantiJenis} onPeriode={setPeriode} />
+        <div className="relative flex-1 min-w-[12rem]">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Cari goal, pemilik, atau isi lead measure…"
+            className="w-full h-9 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <MiniStat label="Aktif" value={ringkas.aktif} />
+        <MiniStat label="Menunggu" value={ringkas.menunggu} color="amber" />
+        <MiniStat label="Perlu Diperbaiki" value={ringkas.perbaiki} color="amber" />
+        <MiniStat label="Goal Tanpa Lead" value={goalPeriode.filter(g => Lead.leadAktif(leads, g.id).length === 0).length} />
+      </div>
+
+      {tampil.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200/70 p-10 text-center">
+          <ClipboardCheck className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+          <div className="font-semibold text-slate-700">
+            {goalPeriode.length === 0 ? 'Belum ada goal periode ini' : 'Tidak ada yang cocok'}
+          </div>
+          <div className="text-sm text-slate-500 mt-1">
+            {goalPeriode.length === 0
+              ? 'Lead measure menempel pada goal — buat goalnya dulu di Kelola Goal.'
+              : 'Coba kata lain, atau tampilkan semua.'}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {tampil.map(g => (
+            <GrdBlokLeadGoal key={g.id} goal={g} leads={leads} user={user} allUsers={allUsers}
+              onUsul={(goal) => setFormLead({ goal })}
+              onUbah={(lead) => setFormLead({ goal: g, lead })}
+              onNilai={(lead) => setNilaiLead({ goal: g, lead })} />
+          ))}
+        </div>
+      )}
+
+      {formLead && (
+        <GrdFormLead lead={formLead.lead} goal={formLead.goal} user={user} allUsers={allUsers}
+          adaSekarang={leads} onSimpan={simpanLead} onClose={() => setFormLead(null)} />
+      )}
+
+      {nilaiLead && (
+        <GrdNilaiLeadModal lead={nilaiLead.lead} goal={nilaiLead.goal} user={user} allUsers={allUsers}
+          adaSekarang={leads} onNilai={kirimNilai} onClose={() => setNilaiLead(null)} />
+      )}
     </div>
   );
 }
