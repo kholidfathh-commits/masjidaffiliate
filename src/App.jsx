@@ -82,6 +82,14 @@ import * as Catatan from './catatan/data.js';
 import * as Sampel from './sampel/data.js';
 import * as Qr from './sampel/qr.js';
 
+// ============ MODUL GRD (Goal Roll Down) ============
+// Logika murni: periode bulan/kuartal, capaian (aman saat pembagi nol), dan
+// penyusunan pohon roll down dari data atasan langsung. Diuji `node uji-grd.mjs`.
+// contoh.js = data TIRUAN sementara supaya halaman bisa dinilai sebelum
+// penyimpanannya dikerjakan; hapus import itu begitu kv_store sudah dipakai.
+import * as Grd from './grd/data.js';
+import { goalContoh } from './grd/contoh.js';
+
 // Halaman LMS dimuat LAZY: anggota yang tidak pernah membuka menu Pembelajaran
 // tidak ikut mengunduh kodenya (bundle utama app sudah ~973 kB).
 const MyLearningView = React.lazy(() => import('./lms/MyLearning.jsx'));
@@ -1634,6 +1642,8 @@ export default function App() {
             {view === 'tap-commission' && <TapCommissionView user={currentUser} />}
             {view === 'partner-feedback' && <PartnerFeedbackView user={currentUser} />}
             {view === 'gmv' && <GmvView user={currentUser} allUsers={allUsers} />}
+            {view === 'grd-tree' && <GrdTreeView user={currentUser} allUsers={allUsers} />}
+            {view === 'grd-kelola' && <GrdKelolaView user={currentUser} allUsers={allUsers} />}
             {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'aset' && <AsetView user={currentUser} />}
             {view === 'sampel' && <SampelView user={currentUser} allUsers={allUsers}
@@ -2291,6 +2301,16 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
         { id: 'division-review', label: 'Divisi', icon: Building2, show: isPengelola(user) }
+      ]
+    },
+    {
+      // GRD (Goal Roll Down). Menunya terbuka untuk semua orang: inti roll down
+      // adalah staf bisa melihat goal perusahaan supaya tahu goalnya turunan dari
+      // mana. Pembatasan UBAH ada di dalam halaman (Grd.bisaUbahGoal), bukan di menu.
+      label: 'Goal (GRD)',
+      items: [
+        { id: 'grd-tree', label: 'Pohon Goal', icon: Network, show: true },
+        { id: 'grd-kelola', label: 'Kelola Goal', icon: Target, show: true }
       ]
     },
     {
@@ -18553,6 +18573,1160 @@ function CatatanDetailModal({ n, user, favorit, onEdit, onPin, onFavorit, onVisi
       </div>
       {lightbox && <ImageLightbox src={lightbox.src} title={lightbox.name} onClose={() => setLightbox(null)} />}
     </Modal>
+  );
+}
+
+// ============ GRD — POHON GOAL ROLL DOWN ============
+// Halaman utama modul GRD: goal berjenjang dari perusahaan sampai staf.
+// Pohonnya DITURUNKAN dari data atasan langsung yang sudah ada (lewat
+// src/grd/data.js → src/peran/hierarki.js), bukan 5 level hardcode — jadi
+// promosi jabatan cukup mengubah data anggota, susunan pohon ikut sendiri.
+//
+// SEMENTARA: sumber datanya masih goalContoh() (data tiruan yang deterministik).
+// Penyimpanan sungguhan (`grdgoal:rec:<id>` di kv_store) menyusul; saat itu
+// cukup ganti `goals` di bawah dan copot import contoh.js.
+
+/**
+ * State periode yang dipakai bersama halaman-halaman GRD.
+ * Ditaruh di satu tempat supaya aturan "pindah jenis tidak melompat ke hari ini"
+ * berlaku sama di semua halaman, bukan diulang per halaman.
+ */
+function useGrdPeriode() {
+  const [jenis, setJenis] = useState(Grd.JENIS_PERIODE_DEFAULT);
+  const [periode, setPeriode] = useState(() => Grd.periodeSaatIni(Grd.JENIS_PERIODE_DEFAULT));
+  const gantiJenis = (j) => { setJenis(j); setPeriode(p => Grd.konversiPeriode(p, j)); };
+  return { jenis, periode, setPeriode, gantiJenis };
+}
+
+/** Pemilih periode: jenis (bulan/kuartal) + geser mundur-maju + daftar pilihan. */
+function GrdPemilihPeriode({ jenis, periode, onJenis, onPeriode }) {
+  const pilihan = useMemo(() => Grd.daftarPeriode(jenis, periode), [jenis, periode]);
+  const berjalan = Grd.periodeSaatIni(jenis);
+  return (
+    <>
+      <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden bg-white">
+        {Object.keys(Grd.JENIS_PERIODE).map(j => (
+          <button key={j} onClick={() => onJenis(j)} title={Grd.JENIS_PERIODE[j].sub}
+            aria-pressed={jenis === j}
+            className={`px-3 py-2 text-sm font-semibold transition ${jenis === j ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+            {Grd.JENIS_PERIODE[j].label}
+          </button>
+        ))}
+      </div>
+
+      <div className="inline-flex items-center gap-1">
+        <button onClick={() => onPeriode(Grd.geserPeriode(periode, -1))} title="Periode sebelumnya"
+          className="w-9 h-9 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 flex items-center justify-center">
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <select value={periode} onChange={e => onPeriode(e.target.value)}
+          aria-label="Pilih periode"
+          className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 min-w-[11rem]">
+          {pilihan.map(p => <option key={p} value={p}>{Grd.labelPeriode(p)}</option>)}
+        </select>
+        <button onClick={() => onPeriode(Grd.geserPeriode(periode, 1))} title="Periode berikutnya"
+          className="w-9 h-9 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 flex items-center justify-center">
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {periode !== berjalan && (
+        <button onClick={() => onPeriode(berjalan)}
+          className="px-3 py-2 rounded-lg text-sm font-semibold text-blue-700 hover:bg-blue-50 border border-blue-200 bg-white">
+          Kembali ke periode berjalan
+        </button>
+      )}
+    </>
+  );
+}
+
+/** Banner tetap: halaman GRD masih berjalan di atas data tiruan. */
+function GrdBannerContoh() {
+  return (
+    <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2.5">
+      <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+      <div className="text-[12px] text-amber-800 leading-relaxed">
+        <span className="font-bold">Masih data contoh.</span> Angka goal di halaman ini belum tersimpan —
+        dipakai sementara untuk menguji tampilan. Susunan orang & atasannya sudah memakai data tim yang sungguhan.
+      </div>
+    </div>
+  );
+}
+
+/** Angka panjang jadi enak dibaca. Aman untuk nilai rusak (tidak pernah NaN). */
+function grdAngka(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '0';
+  return Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('id-ID') : String(Math.round(v * 100) / 100);
+}
+
+function GrdKartuGoal({ g, bolehUbah, onBuka }) {
+  const persen = Grd.persenCapaian(g);
+  const gaya = Grd.gayaStatus(Grd.statusCapaian(g));
+  return (
+    <div onClick={() => onBuka && onBuka(g)} role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBuka && onBuka(g); } }}
+      title="Lihat detail goal"
+      className="bg-white rounded-xl border border-slate-200/80 px-3.5 py-3 shadow-sm shadow-slate-200/40 cursor-pointer hover:border-blue-300 hover:shadow-md transition">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-800 leading-snug">{g.description || 'Tanpa deskripsi'}</div>
+          <div className="text-[11px] text-slate-500 mt-1">
+            {grdAngka(g.base)} → <span className="font-semibold text-slate-700">{grdAngka(g.target)}</span> {g.uom}
+            <span className="text-slate-300 mx-1.5">·</span>
+            terkini {grdAngka(g.actual)}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>{gaya.label}</span>
+          <span className="font-display font-bold text-sm text-slate-700 tabular-nums w-11 text-right">{persen}%</span>
+        </div>
+      </div>
+      <div className="mt-2.5 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${gaya.bar}`} style={{ width: `${Grd.persenBar(g)}%` }} />
+      </div>
+      {!bolehUbah && <span className="sr-only">hanya bisa dilihat</span>}
+    </div>
+  );
+}
+
+/** Satu baris "label — nilai" di panel detail. */
+function GrdBaris({ label, children }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2.5 border-b border-slate-100 last:border-0">
+      <span className="text-xs font-semibold text-slate-500 flex-shrink-0 pt-0.5">{label}</span>
+      <span className="text-sm text-slate-800 text-right min-w-0">{children}</span>
+    </div>
+  );
+}
+
+/**
+ * PANEL DETAIL GOAL — deskripsi, base, target, satuan, pemilik, periode.
+ * Juga menampilkan posisi goal ini di dalam rantai roll down (turunan dari goal
+ * siapa, dan diturunkan lagi ke berapa goal) — itu yang membedakan panel ini
+ * dari sekadar kartu, karena "roll down" baru terasa kalau rantainya kelihatan.
+ */
+function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], onClose }) {
+  const g = Grd.normalisasiGoal(goal);
+  if (!g) return null;
+  const pemilik = Grd.pemilikGoal(g, allUsers);
+  const gaya = Grd.gayaStatus(Grd.statusCapaian(g));
+  const persen = Grd.persenCapaian(g);
+  const sisa = Grd.sisaMenujuTarget(g);
+  const induk = Grd.goalInduk(g, semuaGoal);
+  const turunan = Grd.goalTurunan(g, semuaGoal);
+  const pemilikInduk = induk ? Grd.pemilikGoal(induk, allUsers) : null;
+  const bolehUbah = Grd.bisaUbahGoal(user, g, allUsers);
+  const riwayat = Grd.riwayatGoal(jejak, g.id);
+
+  return (
+    <Modal title="Detail Goal" onClose={onClose} wide>
+      <div className="font-display font-bold text-lg text-slate-900 leading-snug">
+        {g.description || 'Tanpa deskripsi'}
+      </div>
+
+      <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${gaya.color}`}>{gaya.label}</span>
+        <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
+          {Grd.labelPeriode(g.periode)}
+        </span>
+        {g._contoh && (
+          <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">
+            data contoh
+          </span>
+        )}
+      </div>
+
+      {/* Capaian */}
+      <div className="mt-4 bg-slate-50 rounded-2xl p-4 border border-slate-200/70">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold text-slate-500">Capaian</div>
+            <div className="font-display font-bold text-3xl text-slate-900 mt-0.5 tabular-nums">{persen}%</div>
+          </div>
+          <div className="text-right text-xs text-slate-500 leading-relaxed">
+            {sisa > 0
+              ? <>kurang <span className="font-bold text-slate-700">{grdAngka(sisa)} {g.uom}</span> lagi</>
+              : <span className="font-bold text-emerald-700">Target sudah tercapai</span>}
+          </div>
+        </div>
+        <div className="mt-3 h-2 rounded-full bg-slate-200 overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${gaya.bar}`} style={{ width: `${Grd.persenBar(g)}%` }} />
+        </div>
+        <div className="flex justify-between text-[11px] text-slate-500 mt-2 tabular-nums">
+          <span>base {grdAngka(g.base)}</span>
+          <span className="font-semibold text-slate-700">kini {grdAngka(g.actual)}</span>
+          <span>target {grdAngka(g.target)}</span>
+        </div>
+      </div>
+
+      {/* Rincian */}
+      <div className="mt-4">
+        <GrdBaris label="Pemilik">
+          {pemilik ? (
+            <span className="inline-flex items-center gap-2">
+              <Avatar person={pemilik} size="xs" />
+              <span className="font-semibold">{pemilik.name}</span>
+              <span className="text-slate-400 text-xs">
+                {displayJobTitle(pemilik) || divLabel(pemilik.division)}
+              </span>
+            </span>
+          ) : <span className="text-slate-400 italic">Akun pemilik sudah tidak ada</span>}
+        </GrdBaris>
+        <GrdBaris label="Periode">{Grd.labelPeriode(g.periode)}</GrdBaris>
+        <GrdBaris label="Base">{grdAngka(g.base)} {g.uom}</GrdBaris>
+        <GrdBaris label="Target">{grdAngka(g.target)} {g.uom}</GrdBaris>
+        <GrdBaris label="Terkini">{grdAngka(g.actual)} {g.uom}</GrdBaris>
+        <GrdBaris label="Satuan">{g.uom || <span className="text-slate-400 italic">belum diisi</span>}</GrdBaris>
+      </div>
+
+      {/* Rantai roll down */}
+      <div className="mt-4 rounded-2xl border border-slate-200/70 p-4">
+        <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2.5">Rantai Roll Down</div>
+        <div className="text-sm text-slate-700 leading-relaxed">
+          {induk ? (
+            <div className="flex items-start gap-2">
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400 mt-1 flex-shrink-0 rotate-[-90deg]" />
+              <span>
+                Turunan dari <span className="font-semibold">{induk.description}</span>
+                {pemilikInduk && <span className="text-slate-500"> — {pemilikInduk.name}</span>}
+              </span>
+            </div>
+          ) : (
+            <div className="text-slate-500">Goal puncak — tidak diturunkan dari goal lain.</div>
+          )}
+          <div className="flex items-start gap-2 mt-2">
+            <ChevronRight className="w-3.5 h-3.5 text-slate-400 mt-1 flex-shrink-0" />
+            <span>
+              {turunan.length > 0
+                ? <>Diturunkan ke <span className="font-semibold">{turunan.length} goal</span> bawahan.</>
+                : <span className="text-slate-500">Belum diturunkan ke bawahan.</span>}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Jejak perubahan angka: siapa, kapan, dari berapa ke berapa. */}
+      <div className="mt-4 rounded-2xl border border-slate-200/70 p-4">
+        <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2.5">Riwayat Perubahan</div>
+        {riwayat.length === 0 ? (
+          <div className="text-sm text-slate-500">Belum ada perubahan tercatat pada goal ini.</div>
+        ) : (
+          <div className="space-y-2">
+            {riwayat.map(j => (
+              <div key={j.id} className="flex items-start justify-between gap-3 text-[12px] border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+                <div className="min-w-0">
+                  <span className="font-semibold text-slate-700">{Grd.labelFieldJejak(j.field)}</span>
+                  {j.field !== '_dibuat' && (
+                    <span className="text-slate-600">
+                      {' '}<span className="line-through text-slate-400">{grdNilaiJejak(j.dari, j.field, allUsers)}</span>
+                      {' → '}
+                      <span className="font-semibold text-slate-800">{grdNilaiJejak(j.ke, j.field, allUsers)}</span>
+                    </span>
+                  )}
+                  <div className="text-slate-400 mt-0.5">oleh {j.olehNama}</div>
+                </div>
+                <span className="text-slate-400 flex-shrink-0 tabular-nums">{grdWaktuJejak(j.waktu)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 text-[11px] text-slate-500">
+        {bolehUbah
+          ? 'Anda berwenang mengubah goal ini.'
+          : 'Anda hanya bisa melihat goal ini — yang berwenang mengubah adalah pemiliknya dan atasannya.'}
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * SATU SIMPUL POHON: seorang anggota + goalnya + seluruh bawahannya.
+ *
+ * REKURSIF dan tidak mengasumsikan kedalaman apa pun — Owner → Manajer →
+ * Leader → Co-Leader → staf hari ini, dan lapis baru besok, dirender oleh
+ * komponen yang sama persis. Itu sebabnya tidak ada satu pun nomor level yang
+ * ditulis di sini; `simpul.level` hanya dipakai untuk label & lipatan bawaan.
+ *
+ * Cabang yang dilipat TIDAK menghilang begitu saja: ringkasannya (berapa orang,
+ * berapa goal, rata capaian) tetap tampil supaya melipat tidak berarti
+ * kehilangan informasi.
+ */
+function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal }) {
+  const u = simpul.user;
+  const peran = ROLES[u.role] || ROLES.operasional;
+  const PeranIcon = peran.icon;
+  const punyaAnak = (simpul.anak || []).length > 0;
+  const lipat = terlipat.has(u.id);
+  const cabang = Grd.ringkasCabang(simpul);
+  const akuSendiri = u.id === user.id;
+  const bisaKelola = Grd.bisaBuatGoalUntuk(user, u.id, allUsers);
+
+  return (
+    <div className="relative">
+      {/* Garis penghubung ke garis induk — dibuat dengan elemen, bukan gambar,
+          supaya ikut menyesuaikan saat baris berubah tinggi. */}
+      {simpul.level > 0 && (
+        <span aria-hidden="true"
+          className="absolute -left-4 sm:-left-6 top-7 w-4 sm:w-6 h-px bg-slate-200" />
+      )}
+
+      <div className={`rounded-2xl border p-3.5 shadow-sm shadow-slate-200/40 ${
+        simpul.cocok === false ? 'border-slate-200/70 bg-white opacity-60'
+          : akuSendiri ? 'border-blue-300 bg-blue-50/40' : 'border-slate-200/70 bg-white'}`}>
+        <div className="flex items-center gap-3">
+          {punyaAnak ? (
+            <button onClick={() => onToggle(u.id)}
+              aria-expanded={!lipat}
+              title={lipat ? `Buka cabang ${u.name}` : `Lipat cabang ${u.name}`}
+              className="w-6 h-6 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-700 flex-shrink-0">
+              {lipat ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          ) : <span className="w-6 flex-shrink-0" aria-hidden="true" />}
+
+          <Avatar person={u} size="sm" />
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-sm text-slate-800 truncate">{u.name}</span>
+              {akuSendiri && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-600 text-white">Saya</span>}
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${peran.color} inline-flex items-center gap-1`}>
+                <PeranIcon className="w-2.5 h-2.5" /> {peran.label}
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+              <span className="text-slate-400">Jenjang {simpul.level + 1}</span>
+              <span className="text-slate-300 mx-1.5">·</span>
+              {displayJobTitle(u) || divLabel(u.division)}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-slate-100 text-slate-600">
+              {simpul.goals.length} goal
+            </span>
+            {punyaAnak && (
+              <span className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-slate-100 text-slate-600 hidden sm:inline"
+                title={`${cabang.goal} goal dari ${cabang.orang} orang di cabang ini`}>
+                {cabang.bawahan} bawahan
+              </span>
+            )}
+            {simpul.menggantung && (
+              <span className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-50 text-red-600 border border-red-200"
+                title="Atasan langsungnya sudah tidak berperan mengawasi (atau akunnya sudah dihapus). Perbaiki di halaman Anggota Tim.">
+                atasan belum sah
+              </span>
+            )}
+            {!bisaKelola && (
+              <span className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-slate-50 text-slate-400 hidden md:inline"
+                title="Anda hanya bisa melihat goal ini">
+                lihat saja
+              </span>
+            )}
+          </div>
+        </div>
+
+        {simpul.goals.length > 0 ? (
+          <div className="mt-3 space-y-2 pl-9">
+            {simpul.goals.map(g => (
+              <GrdKartuGoal key={g.id} g={g} bolehUbah={Grd.bisaUbahGoal(user, g, allUsers)} onBuka={onBukaGoal} />
+            ))}
+          </div>
+        ) : (
+          <div className="mt-2.5 pl-9 text-[11px] text-slate-400 italic">Belum punya goal periode ini.</div>
+        )}
+
+        {/* Cabang dilipat → tetap beri tahu apa yang disembunyikan. */}
+        {punyaAnak && lipat && (
+          <button onClick={() => onToggle(u.id)}
+            className="mt-2.5 ml-9 text-[11px] font-semibold text-blue-700 hover:text-blue-800 hover:underline text-left">
+            Tampilkan {cabang.bawahan} bawahan · {cabang.goal} goal · rata {cabang.rataCapaian}%
+          </button>
+        )}
+      </div>
+
+      {punyaAnak && !lipat && (
+        <div className="mt-2.5 ml-4 sm:ml-7 pl-4 sm:pl-6 border-l-2 border-slate-200 space-y-2.5">
+          {simpul.anak.map(a => (
+            <GrdSimpul key={a.user.id} simpul={a} user={user} allUsers={allUsers}
+              terlipat={terlipat} onToggle={onToggle} onBukaGoal={onBukaGoal} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GrdTreeView({ user, allUsers }) {
+  const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
+
+  // SEMENTARA — data tiruan supaya halaman bisa dinilai sebelum penyimpanan siap.
+  const goals = useMemo(() => goalContoh(allUsers, periode), [allUsers, periode]);
+  const pohonPenuh = useMemo(() => Grd.bangunPohonGoal({ users: allUsers, goals, periode }), [allUsers, goals, periode]);
+
+  const [q, setQ] = useState('');
+  const [filterDiv, setFilterDiv] = useState('all');
+  const sedangMencari = q.trim() !== '' || filterDiv !== 'all';
+  const pohon = useMemo(() => Grd.saringPohon(pohonPenuh, { kata: q, divisi: filterDiv }),
+    [pohonPenuh, q, filterDiv]);
+  const jumlahCocok = useMemo(() => (sedangMencari ? Grd.hitungCocok(pohon) : 0), [pohon, sedangMencari]);
+
+  const ringkas = useMemo(() => Grd.ringkasPohon(pohon), [pohon]);
+  // Jalur atasan yang putus membuat roll down tidak bisa dipercaya — tampilkan,
+  // jangan disembunyikan. Perbaikannya ada di halaman Anggota Tim, bukan di sini.
+  const menggantung = useMemo(() => Grd.simpulMenggantung(pohon), [pohon]);
+
+  // Lipatan BAWAAN: cabang mulai jenjang ke-3 dilipat supaya pohon besar tidak
+  // membanjiri layar. `ubahan` tetap null sampai pengguna menyentuh sesuatu —
+  // begitu disentuh, pilihannyalah yang dipakai (bukan lagi bawaan).
+  const bawaan = useMemo(() => new Set(Grd.idCabang(pohon, 2)), [pohon]);
+  const [ubahan, setUbahan] = useState(null);
+  const [detail, setDetail] = useState(null);
+  // Saat mencari, semua cabang dibuka: hasil yang cocok tidak boleh tersembunyi
+  // di balik cabang yang kebetulan sedang terlipat.
+  const KOSONG = useMemo(() => new Set(), []);
+  const terlipat = sedangMencari ? KOSONG : (ubahan || bawaan);
+
+  const toggle = (id) => setUbahan(prev => {
+    const s = new Set(prev || bawaan);
+    if (s.has(id)) s.delete(id); else s.add(id);
+    return s;
+  });
+  const lipatSemua = () => setUbahan(new Set(Grd.idCabang(pohon)));
+  const bukaSemua = () => setUbahan(new Set());
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="Pohon Goal Roll Down"
+        subtitle={`Goal berjenjang dari perusahaan sampai staf — ${Grd.labelPeriode(periode)}`}
+        action={
+          <div className="flex items-center gap-2">
+            <button onClick={bukaSemua}
+              className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg font-semibold text-sm">
+              Buka semua
+            </button>
+            <button onClick={lipatSemua}
+              className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg font-semibold text-sm">
+              Lipat semua
+            </button>
+          </div>
+        } />
+
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <GrdPemilihPeriode jenis={jenis} periode={periode} onJenis={gantiJenis} onPeriode={setPeriode} />
+
+        <div className="relative flex-1 min-w-[12rem]">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Cari nama, divisi, atau isi goal…"
+            className="w-full h-9 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400" />
+        </div>
+
+        <select value={filterDiv} onChange={e => setFilterDiv(e.target.value)}
+          aria-label="Saring divisi"
+          className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700">
+          <option value="all">Semua divisi</option>
+          {Object.keys(DIVISIONS).map(d => (
+            <option key={d} value={d}>{divLabel(d)}</option>
+          ))}
+        </select>
+
+        {sedangMencari && (
+          <button onClick={() => { setQ(''); setFilterDiv('all'); }}
+            className="px-3 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-100 border border-slate-300 bg-white">
+            Bersihkan
+          </button>
+        )}
+      </div>
+
+      <GrdBannerContoh />
+
+      {menggantung.length > 0 && (
+        <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-2.5">
+          <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="text-[12px] text-red-800 leading-relaxed">
+            <span className="font-bold">{menggantung.length} anggota</span> atasan langsungnya sudah tidak berperan
+            mengawasi ({menggantung.map(s => s.user.name).join(', ')}). Goal mereka tetap tampil, tapi jalur roll
+            down-nya terputus — perbaiki atasannya di halaman <span className="font-semibold">Anggota Tim</span>.
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <MiniStat label="Orang" value={ringkas.orang} />
+        <MiniStat label="Total Goal" value={ringkas.totalGoal} />
+        <MiniStat label="Tercapai" value={ringkas.tercapai} />
+        <MiniStat label="Rata Capaian" value={`${ringkas.rataCapaian}%`} color="amber" />
+      </div>
+
+      {sedangMencari && pohon.length > 0 && (
+        <div className="mb-3 text-xs text-slate-500">
+          <span className="font-semibold text-slate-700">{jumlahCocok} orang</span> cocok — atasannya ikut
+          ditampilkan supaya jalur roll down tetap terbaca.
+        </div>
+      )}
+
+      {pohon.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200/70 p-10 text-center">
+          <Network className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+          <div className="font-semibold text-slate-700">
+            {sedangMencari ? 'Tidak ada yang cocok' : 'Pohon masih kosong'}
+          </div>
+          <div className="text-sm text-slate-500 mt-1">
+            {sedangMencari ? 'Coba kata lain, atau ganti saringan divisi.' : 'Data anggota tim belum termuat.'}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {pohon.map(s => (
+            <GrdSimpul key={s.user.id} simpul={s} user={user} allUsers={allUsers}
+              terlipat={terlipat} onToggle={toggle} onBukaGoal={setDetail} />
+          ))}
+        </div>
+      )}
+
+      {detail && (
+        <GrdDetailGoal goal={detail} user={user} allUsers={allUsers}
+          semuaGoal={goals} onClose={() => setDetail(null)} />
+      )}
+    </div>
+  );
+}
+
+/** Nilai jejak sebagai teks. Pemilik ditampilkan sebagai nama, bukan id mentah. */
+function grdNilaiJejak(v, field, allUsers) {
+  if (v === null || v === undefined || v === '') return '—';
+  if (field === 'ownerId') return (allUsers || []).find(u => u && u.id === v)?.name || String(v);
+  if (field === 'periode') return Grd.labelPeriodeSingkat(v);
+  if (Grd.fieldJejakAngka(field)) return grdAngka(v);
+  return String(v);
+}
+
+/** Waktu jejak dalam WIB, ringkas. */
+function grdWaktuJejak(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('id-ID', {
+    timeZone: Abs.TZ_WIB, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+/** Satu field form GRD dengan label + tanda wajib. */
+function GrdField({ label, wajib, hint, children }) {
+  return (
+    <div className="mb-3.5">
+      <label className="block text-xs font-bold text-slate-600 mb-1.5">
+        {label} {wajib && <span className="text-red-500">*</span>}
+      </label>
+      {children}
+      {hint && <div className="text-[11px] text-slate-400 mt-1">{hint}</div>}
+    </div>
+  );
+}
+
+const GRD_INPUT = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400';
+
+/**
+ * FORM GOAL RINGKAS.
+ *
+ * Yang WAJIB hanya empat — description, base, target, uom — sesuai kesepakatan
+ * pengisian ringan. Sisanya (pemilik, periode, angka terkini) sudah terisi
+ * sendiri dengan tebakan paling masuk akal supaya membuat goal terasa cepat.
+ *
+ * Validasinya TIDAK ditulis ulang di sini: memakai `Grd.validasiGoal`, fungsi
+ * yang sama yang nanti dipanggil lagi sebelum menulis ke penyimpanan. Satu
+ * aturan, satu tempat — form tidak bisa meloloskan data yang nanti ditolak.
+ */
+function GrdFormGoal({ goal, user, allUsers, periodeAktif, jenisAktif, onSimpan, onClose }) {
+  const lama = goal ? Grd.normalisasiGoal(goal) : null;
+  const calon = useMemo(() => Grd.calonPemilikGoal(user, allUsers), [user, allUsers]);
+  const pilihanPeriode = useMemo(
+    () => Grd.daftarPeriode(jenisAktif, lama?.periode || periodeAktif),
+    [jenisAktif, lama, periodeAktif]);
+
+  const [form, setForm] = useState(() => ({
+    description: lama?.description || '',
+    ownerId: lama?.ownerId || user.id,
+    periode: lama?.periode || periodeAktif,
+    base: lama ? String(lama.base) : '',
+    target: lama ? String(lama.target) : '',
+    uom: lama?.uom || '',
+    actual: lama && lama.actual !== lama.base ? String(lama.actual) : '',
+  }));
+  const [pesan, setPesan] = useState('');
+
+  const ubah = (k, v) => { setForm(f => ({ ...f, [k]: v })); setPesan(''); };
+
+  // Template mengikuti peran PEMILIK yang dipilih, bukan peran orang yang sedang
+  // mengisi — atasan yang membuatkan goal untuk stafnya butuh contoh goal STAF.
+  const peranPemilik = (allUsers || []).find(u => u && u.id === form.ownerId)?.role || 'operasional';
+  const template = Grd.templateUntuk(peranPemilik);
+  const pakaiTemplate = (t) => {
+    const g = Grd.terapkanTemplate(t, { ownerId: form.ownerId, periode: form.periode });
+    setForm(f => ({
+      ...f,
+      description: g.description,
+      base: String(g.base),
+      target: String(g.target),
+      uom: g.uom,
+      actual: '',
+    }));
+    setPesan('');
+  };
+
+  // Pratinjau capaian ikut bergerak saat angka diketik — memberi tahu lebih awal
+  // kalau base/target tertukar, sebelum goalnya sempat tersimpan.
+  const pratinjau = Grd.normalisasiGoal({ ...form, actual: form.actual === '' ? form.base : form.actual });
+
+  const simpan = () => {
+    const calonGoal = {
+      ...(lama || {}),
+      ...form,
+      actual: form.actual === '' ? form.base : form.actual,
+    };
+    const salah = Grd.validasiGoal(calonGoal);
+    if (salah) { setPesan(salah); return; }
+    onSimpan(Grd.normalisasiGoal(calonGoal));
+  };
+
+  return (
+    <Modal title={lama ? 'Ubah Goal' : 'Goal Baru'} onClose={onClose} wide>
+      {!lama && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+          <div className="text-[11px] font-bold text-slate-600 mb-2">
+            Template untuk {ROLES[peranPemilik]?.label || 'Karyawan'} — klik untuk mengisi, angkanya boleh diubah
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {template.map((t, i) => (
+              <button key={i} onClick={() => pakaiTemplate(t)}
+                title={`${t.base} → ${t.target} ${t.uom}`}
+                className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 hover:border-blue-400 hover:text-blue-700 transition text-left">
+                {t.description}
+                <span className="text-slate-400 font-normal"> · {t.uom}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <GrdField label="Deskripsi goal" wajib hint="Tulis hasil yang ingin dicapai, bukan kegiatannya.">
+        <input value={form.description} onChange={e => ubah('description', e.target.value)}
+          placeholder="Contoh: GMV tim naik dari 400jt ke 900jt" className={GRD_INPUT} autoFocus />
+      </GrdField>
+
+      <div className="grid sm:grid-cols-2 gap-x-4">
+        <GrdField label="Pemilik goal" hint="Diri sendiri atau anggota di bawah Anda.">
+          <select value={form.ownerId} onChange={e => ubah('ownerId', e.target.value)} className={GRD_INPUT}>
+            {calon.map(u => (
+              <option key={u.id} value={u.id}>
+                {u.name}{u.id === user.id ? ' (saya)' : ''} — {displayJobTitle(u) || divLabel(u.division)}
+              </option>
+            ))}
+          </select>
+        </GrdField>
+
+        <GrdField label="Periode">
+          <select value={form.periode} onChange={e => ubah('periode', e.target.value)} className={GRD_INPUT}>
+            {pilihanPeriode.map(p => <option key={p} value={p}>{Grd.labelPeriode(p)}</option>)}
+          </select>
+        </GrdField>
+      </div>
+
+      <div className="grid sm:grid-cols-3 gap-x-4">
+        <GrdField label="Base" wajib hint="Angka awal.">
+          <input type="number" inputMode="decimal" value={form.base} onChange={e => ubah('base', e.target.value)}
+            placeholder="0" className={GRD_INPUT} />
+        </GrdField>
+        <GrdField label="Target" wajib hint="Angka tujuan.">
+          <input type="number" inputMode="decimal" value={form.target} onChange={e => ubah('target', e.target.value)}
+            placeholder="100" className={GRD_INPUT} />
+        </GrdField>
+        <GrdField label="Satuan" wajib hint="Misal: Konten, Orang, Rupiah.">
+          <input value={form.uom} onChange={e => ubah('uom', e.target.value)} list="grd-uom"
+            placeholder="Konten" className={GRD_INPUT} />
+          <datalist id="grd-uom">
+            {Grd.UOM_UMUM.map(u => <option key={u} value={u} />)}
+          </datalist>
+        </GrdField>
+      </div>
+
+      <GrdField label="Angka terkini" hint="Boleh dikosongkan — dianggap masih sama dengan base.">
+        <input type="number" inputMode="decimal" value={form.actual} onChange={e => ubah('actual', e.target.value)}
+          placeholder={form.base || '0'} className={GRD_INPUT} />
+      </GrdField>
+
+      {/* Pratinjau: memperlihatkan akibat angka yang baru diketik. */}
+      <div className="rounded-xl bg-slate-50 border border-slate-200/70 px-3.5 py-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-semibold text-slate-600">Pratinjau capaian</span>
+          <span className="font-display font-bold text-slate-800 tabular-nums">
+            {Grd.persenCapaian(pratinjau)}%
+          </span>
+        </div>
+        <div className="mt-2 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+          <div className={`h-full rounded-full ${Grd.gayaStatus(Grd.statusCapaian(pratinjau)).bar}`}
+            style={{ width: `${Grd.persenBar(pratinjau)}%` }} />
+        </div>
+      </div>
+
+      {pesan && (
+        <div className="mt-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-[12px] text-red-700 font-semibold">
+          ⚠️ {pesan}
+        </div>
+      )}
+
+      <div className="flex items-center justify-end gap-2 mt-5">
+        <button onClick={onClose}
+          className="px-4 py-2 rounded-lg font-semibold text-sm text-slate-600 hover:bg-slate-100">
+          Batal
+        </button>
+        <button onClick={simpan}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">
+          {lama ? 'Simpan Perubahan' : 'Buat Goal'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * MODAL TURUNKAN GOAL — sekali klik membuat goal turunan untuk SELURUH bawahan
+ * langsung pemilik goal, mengikuti data atasan langsung yang sudah ada.
+ *
+ * Rencananya ditampilkan dulu sebelum dibuat: berapa orang, target masing-masing,
+ * dan siapa yang dilewati karena sudah punya turunan. "Sekali klik" tidak berarti
+ * membuat data diam-diam.
+ */
+function GrdTurunkanModal({ goal, allUsers, goalAda, onTurunkan, onClose }) {
+  const g = Grd.normalisasiGoal(goal);
+  const bisaDibagi = Grd.satuanBisaDibagi(g.uom);
+  const [bagiRata, setBagiRata] = useState(bisaDibagi);
+
+  const semuaBawahan = useMemo(() => Grd.bawahanUntukTurunan(g, allUsers), [g, allUsers]);
+  const rencana = useMemo(() => Grd.rencanaTurunan(g, allUsers, { bagiRata, goalAda }),
+    [g, allUsers, bagiRata, goalAda]);
+  const dilewati = semuaBawahan.length - rencana.length;
+
+  return (
+    <Modal title="Turunkan ke Bawahan" onClose={onClose} wide>
+      <div className="rounded-xl bg-slate-50 border border-slate-200/70 px-3.5 py-3">
+        <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Goal induk</div>
+        <div className="text-sm font-semibold text-slate-800 mt-1">{g.description}</div>
+        <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+          {grdAngka(g.base)} → {grdAngka(g.target)} {g.uom} · {Grd.labelPeriode(g.periode)}
+        </div>
+      </div>
+
+      {semuaBawahan.length === 0 ? (
+        <div className="mt-4 text-sm text-slate-500">
+          Pemilik goal ini belum punya bawahan langsung, jadi belum ada yang bisa diturunkan.
+          Atur atasan anggota tim di halaman <span className="font-semibold">Anggota Tim</span> lebih dulu.
+        </div>
+      ) : (
+        <>
+          <label className="mt-4 flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" checked={bagiRata} onChange={e => setBagiRata(e.target.checked)}
+              className="mt-0.5" />
+            <span className="text-[12px] text-slate-700 leading-relaxed">
+              <span className="font-semibold">Bagi rata targetnya</span> ke tiap bawahan.
+              {!bisaDibagi && (
+                <span className="block text-amber-700 mt-0.5">
+                  Satuan &ldquo;{g.uom}&rdquo; biasanya tidak dibagi — tiap orang tetap mengejar angka yang sama.
+                </span>
+              )}
+            </span>
+          </label>
+
+          {rencana.length === 0 ? (
+            <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-[12px] text-amber-800">
+              Semua bawahan sudah punya goal turunan dari goal ini — tidak ada yang perlu dibuat lagi.
+            </div>
+          ) : (
+            <>
+              <div className="mt-4 text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
+                Akan dibuat {rencana.length} goal
+                {dilewati > 0 && <span className="font-normal text-slate-400"> · {dilewati} dilewati (sudah punya)</span>}
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto scroll-thin">
+                {rencana.map(r => {
+                  const u = Grd.pemilikGoal(r, allUsers);
+                  return (
+                    <div key={r.ownerId} className="flex items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2">
+                      <Avatar person={u} size="xs" />
+                      <span className="text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">
+                        {u?.name || 'Anggota'}
+                      </span>
+                      <span className="text-[11px] text-slate-600 tabular-nums flex-shrink-0">
+                        {grdAngka(r.base)} → <span className="font-bold text-slate-800">{grdAngka(r.target)}</span> {r.uom}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      <div className="flex items-center justify-end gap-2 mt-5">
+        <button onClick={onClose}
+          className="px-4 py-2 rounded-lg font-semibold text-sm text-slate-600 hover:bg-slate-100">
+          Batal
+        </button>
+        {rencana.length > 0 && (
+          <button onClick={() => onTurunkan(rencana)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">
+            Turunkan ke {rencana.length} orang
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * KONFIRMASI HAPUS GOAL.
+ *
+ * Sengaja memakai modal, bukan confirm() bawaan peramban: kalau goal ini punya
+ * turunan, penghapusannya memutus rantai roll down dan itu harus terbaca jelas
+ * SEBELUM tombolnya ditekan — kalimat satu baris di dialog bawaan tidak cukup.
+ */
+function GrdHapusGoalModal({ goal, allUsers, goalAda, onHapus, onClose }) {
+  const g = Grd.normalisasiGoal(goal);
+  const pemilik = Grd.pemilikGoal(g, allUsers);
+  const dampak = useMemo(() => Grd.dampakHapusGoal(g, goalAda), [g, goalAda]);
+
+  return (
+    <Modal title="Hapus Goal?" onClose={onClose}>
+      <div className="rounded-xl bg-slate-50 border border-slate-200/70 px-3.5 py-3">
+        <div className="text-sm font-semibold text-slate-800">{g.description}</div>
+        <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
+          {pemilik?.name || 'Pemilik tidak ada'} · {grdAngka(g.base)} → {grdAngka(g.target)} {g.uom}
+          · {Grd.labelPeriodeSingkat(g.periode)}
+        </div>
+      </div>
+
+      {dampak.total > 0 && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 flex items-start gap-2.5">
+          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="text-[12px] text-amber-800 leading-relaxed">
+            Goal ini menurunkan <span className="font-bold">{dampak.langsung} goal</span> langsung
+            {dampak.total > dampak.langsung && <> (total <span className="font-bold">{dampak.total}</span> sampai ke bawah)</>}.
+            Goal turunannya <span className="font-semibold">tidak ikut terhapus</span>, tapi rantai roll down-nya
+            akan terputus — turunannya jadi goal yang berdiri sendiri.
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 text-[12px] text-slate-600">Tindakan ini tidak bisa dibatalkan.</div>
+
+      <div className="flex items-center justify-end gap-2 mt-5">
+        <button onClick={onClose}
+          className="px-4 py-2 rounded-lg font-semibold text-sm text-slate-600 hover:bg-slate-100">
+          Batal
+        </button>
+        <button onClick={() => onHapus(g)}
+          className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-semibold text-sm inline-flex items-center gap-2">
+          <Trash2 className="w-4 h-4" /> Hapus Goal
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Satu baris goal di halaman Kelola Goal. */
+function GrdBarisGoal({ g, pemilik, onBuka, onUbah, onTurunkan, onHapus }) {
+  const gaya = Grd.gayaStatus(Grd.statusCapaian(g));
+  const persen = Grd.persenCapaian(g);
+  return (
+    <div onClick={() => onBuka && onBuka(g)} role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBuka && onBuka(g); } }}
+      title="Lihat detail goal"
+      className="bg-white rounded-xl border border-slate-200/80 p-3.5 shadow-sm shadow-slate-200/40 cursor-pointer hover:border-blue-300 hover:shadow-md transition">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-slate-800 leading-snug">{g.description || 'Tanpa deskripsi'}</div>
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            {pemilik ? (
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-600">
+                <Avatar person={pemilik} size="xs" />
+                <span className="font-semibold">{pemilik.name}</span>
+              </span>
+            ) : <span className="text-[11px] text-slate-400 italic">pemilik tidak ada</span>}
+            <span className="text-slate-300">·</span>
+            <span className="text-[11px] text-slate-500">{Grd.labelPeriodeSingkat(g.periode)}</span>
+            <span className="text-slate-300">·</span>
+            <span className="text-[11px] text-slate-500 tabular-nums">
+              {grdAngka(g.base)} → {grdAngka(g.target)} {g.uom}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>{gaya.label}</span>
+          <span className="font-display font-bold text-sm text-slate-700 tabular-nums w-11 text-right">{persen}%</span>
+          {onTurunkan && (
+            <button onClick={e => { e.stopPropagation(); onTurunkan(g); }} title="Turunkan ke bawahan langsung"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50">
+              <Network className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {onUbah && (
+            <button onClick={e => { e.stopPropagation(); onUbah(g); }} title="Ubah goal"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50">
+              <Edit2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {onHapus && (
+            <button onClick={e => { e.stopPropagation(); onHapus(g); }} title="Hapus goal"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="mt-2.5 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+        <div className={`h-full rounded-full ${gaya.bar}`} style={{ width: `${Grd.persenBar(g)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/** Satu simpul RANTAI GOAL: goal induk di atas, turunannya menjorok ke dalam. */
+function GrdSimpulRantai({ simpul, allUsers, onBuka, onUbah, onTurunkan, onHapus }) {
+  const g = simpul.goal;
+  const pemilik = Grd.pemilikGoal(g, allUsers);
+  const punyaAnak = (simpul.anak || []).length > 0;
+  return (
+    <div className="relative">
+      {simpul.level > 0 && (
+        <span aria-hidden="true" className="absolute -left-4 sm:-left-6 top-7 w-4 sm:w-6 h-px bg-slate-200" />
+      )}
+      <GrdBarisGoal g={g} pemilik={pemilik} onBuka={onBuka} onUbah={onUbah} onTurunkan={onTurunkan} onHapus={onHapus} />
+      {punyaAnak && (
+        <div className="mt-2.5 ml-4 sm:ml-7 pl-4 sm:pl-6 border-l-2 border-slate-200 space-y-2.5">
+          {simpul.anak.map(a => (
+            <GrdSimpulRantai key={a.goal.id} simpul={a} allUsers={allUsers}
+              onBuka={onBuka} onUbah={onUbah} onTurunkan={onTurunkan} onHapus={onHapus} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * HALAMAN KELOLA GOAL — daftar goal yang boleh diurus pengguna ini.
+ *
+ * Isinya dibatasi `Grd.goalYangBisaDikelola`: goalnya sendiri + goal seluruh
+ * bawahannya. Sengaja tidak menampilkan goal yang tidak berwenang ia ubah,
+ * supaya halaman ini tidak pernah memunculkan tombol yang nanti ditolak.
+ *
+ * SEMENTARA: sumbernya masih goalContoh(). Form tambah/ubah/hapus dan tombol
+ * "turunkan ke bawahan" menyusul di task berikutnya.
+ */
+function GrdKelolaView({ user, allUsers }) {
+  const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
+  const [q, setQ] = useState('');
+  const [lingkup, setLingkup] = useState('semua'); // semua | saya | tim
+  const [detail, setDetail] = useState(null);
+  const [formBuka, setFormBuka] = useState(false);
+  const [draf, setDraf] = useState(null);
+
+  // SEMENTARA — perubahan form disimpan di memori halaman saja (hilang saat
+  // refresh), supaya form benar-benar bisa dicoba sebelum penyimpanan ke
+  // kv_store dikerjakan. Begitu penyimpanan siap, ketiga state ini diganti
+  // pemanggilan storage dan sisa halaman tidak perlu berubah.
+  const [goalBaru, setGoalBaru] = useState([]);
+  const [goalDiubah, setGoalDiubah] = useState({});
+  const [goalDihapus, setGoalDihapus] = useState(() => new Set());
+
+  const goals = useMemo(() => {
+    const dasar = goalContoh(allUsers, periode).map(g => goalDiubah[g.id] || g);
+    const tambahan = goalBaru.map(g => goalDiubah[g.id] || g);
+    return [...dasar, ...tambahan].filter(g => !goalDihapus.has(g.id));
+  }, [allUsers, periode, goalBaru, goalDiubah, goalDihapus]);
+
+  // Jejak perubahan angka — untuk sekarang ikut tinggal di memori halaman.
+  const [jejak, setJejak] = useState([]);
+  const catat = (lama, baru) => setJejak(j => [...j, ...Grd.catatPerubahan(lama, baru, user)]);
+
+  const simpanGoal = (g) => {
+    if (draf) {
+      setGoalDiubah(m => ({ ...m, [g.id]: g }));
+      catat(draf, g);
+    } else {
+      const baru = { ...g, id: g.id || uid(), _contoh: true };
+      setGoalBaru(list => [...list, baru]);
+      catat(null, baru);
+    }
+    setFormBuka(false); setDraf(null);
+  };
+  const bukaBaru = () => { setDraf(null); setFormBuka(true); };
+  const bukaUbah = (g) => { setDraf(g); setFormBuka(true); };
+
+  const [hapus, setHapus] = useState(null);
+  const jalankanHapus = (g) => {
+    setGoalDihapus(set => new Set([...set, g.id]));
+    setHapus(null); setDetail(null);
+  };
+
+  const [turunkan, setTurunkan] = useState(null);
+  const jalankanTurunkan = (rencana) => {
+    const dibuat = rencana.map(r => ({ ...r, id: uid(), _contoh: true }));
+    setGoalBaru(list => [...list, ...dibuat]);
+    dibuat.forEach(g => catat(null, g));
+    setTurunkan(null);
+  };
+  // Tombol turunkan hanya muncul kalau pemilik goal memang punya bawahan langsung.
+  const bolehTurunkan = (g) => Grd.bawahanUntukTurunan(g, allUsers).length > 0;
+  const periodeIni = useMemo(() => Grd.goalPeriode(goals, periode), [goals, periode]);
+  const bisaDikelola = useMemo(() => Grd.goalYangBisaDikelola(user, periodeIni, allUsers),
+    [user, periodeIni, allUsers]);
+
+  const tampil = useMemo(() => {
+    const kata = q.trim().toLowerCase();
+    return bisaDikelola
+      .filter(g => lingkup === 'semua'
+        || (lingkup === 'saya' ? g.ownerId === user.id : g.ownerId !== user.id))
+      .filter(g => {
+        if (!kata) return true;
+        const pemilik = Grd.pemilikGoal(g, allUsers);
+        return [g.description, g.uom, pemilik?.name, pemilik?.division]
+          .filter(Boolean).join(' ').toLowerCase().includes(kata);
+      })
+      .sort((a, b) => Grd.persenCapaian(a) - Grd.persenCapaian(b)); // paling tertinggal di atas
+  }, [bisaDikelola, lingkup, q, user, allUsers]);
+
+  // Dua sudut pandang untuk data yang sama: daftar datar (paling tertinggal di
+  // atas) atau rantai roll down (goal induk → turunannya).
+  const [tampilan, setTampilan] = useState('daftar');
+  const rantai = useMemo(() => Grd.rantaiGoal(tampil), [tampil]);
+  const adaTurunan = useMemo(() => rantai.some(s => (s.anak || []).length > 0), [rantai]);
+
+  const milikSaya = bisaDikelola.filter(g => g.ownerId === user.id).length;
+  const belumJalan = bisaDikelola.filter(g => Grd.statusCapaian(g) === 'belum').length;
+
+  const LINGKUP = { semua: 'Semua', saya: 'Goal saya', tim: 'Goal tim' };
+  const TAMPILAN = {
+    daftar: { label: 'Daftar', sub: 'Urut dari yang paling tertinggal' },
+    rantai: { label: 'Rantai', sub: 'Goal induk di atas, turunannya di bawah' },
+  };
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="Kelola Goal"
+        subtitle={`Goal yang boleh Anda urus — ${Grd.labelPeriode(periode)}`}
+        action={
+          <button onClick={bukaBaru}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Goal Baru
+          </button>
+        } />
+
+      <GrdBannerContoh />
+
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <GrdPemilihPeriode jenis={jenis} periode={periode} onJenis={gantiJenis} onPeriode={setPeriode} />
+
+        <div className="relative flex-1 min-w-[12rem]">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Cari goal atau nama pemilik…"
+            className="w-full h-9 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400" />
+        </div>
+
+        <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden bg-white">
+          {Object.keys(LINGKUP).map(k => (
+            <button key={k} onClick={() => setLingkup(k)} aria-pressed={lingkup === k}
+              className={`px-3 py-2 text-sm font-semibold transition ${lingkup === k ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+              {LINGKUP[k]}
+            </button>
+          ))}
+        </div>
+
+        <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden bg-white">
+          {Object.keys(TAMPILAN).map(k => (
+            <button key={k} onClick={() => setTampilan(k)} aria-pressed={tampilan === k}
+              title={TAMPILAN[k].sub}
+              className={`px-3 py-2 text-sm font-semibold transition inline-flex items-center gap-1.5 ${tampilan === k ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+              {k === 'rantai' ? <Network className="w-3.5 h-3.5" /> : <ListChecks className="w-3.5 h-3.5" />}
+              {TAMPILAN[k].label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+        <MiniStat label="Bisa Anda urus" value={bisaDikelola.length} />
+        <MiniStat label="Goal Saya" value={milikSaya} />
+        <MiniStat label="Belum Jalan" value={belumJalan} color="amber" />
+      </div>
+
+      {tampil.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200/70 p-10 text-center">
+          <Target className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+          <div className="font-semibold text-slate-700">
+            {bisaDikelola.length === 0 ? 'Belum ada goal periode ini' : 'Tidak ada yang cocok'}
+          </div>
+          <div className="text-sm text-slate-500 mt-1">
+            {bisaDikelola.length === 0
+              ? 'Goal untuk periode ini belum dibuat. Form pembuatan goal menyusul.'
+              : 'Coba kata lain, atau ubah saringan.'}
+          </div>
+        </div>
+      ) : tampilan === 'rantai' ? (
+        <>
+          {!adaTurunan && (
+            <div className="mb-3 text-xs text-slate-500">
+              Belum ada goal yang diturunkan dari goal lain — semuanya masih berdiri sendiri.
+            </div>
+          )}
+          <div className="space-y-2.5">
+            {rantai.map(s => (
+              <GrdSimpulRantai key={s.goal.id} simpul={s} allUsers={allUsers}
+                onBuka={setDetail} onUbah={bukaUbah} onTurunkan={setTurunkan} onHapus={setHapus} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="space-y-2.5">
+          {tampil.map(g => (
+            <GrdBarisGoal key={g.id} g={g} pemilik={Grd.pemilikGoal(g, allUsers)}
+              onBuka={setDetail} onUbah={bukaUbah} onHapus={setHapus}
+              onTurunkan={bolehTurunkan(g) ? setTurunkan : null} />
+          ))}
+        </div>
+      )}
+
+      <div className="mt-5 text-[11px] text-slate-500">
+        Perubahan dari form masih tersimpan di halaman ini saja dan hilang saat halaman dimuat ulang.
+        Template per peran dan tombol &ldquo;turunkan ke bawahan&rdquo; menyusul di langkah berikutnya.
+      </div>
+
+      {formBuka && (
+        <GrdFormGoal goal={draf} user={user} allUsers={allUsers}
+          periodeAktif={periode} jenisAktif={jenis}
+          onSimpan={simpanGoal} onClose={() => { setFormBuka(false); setDraf(null); }} />
+      )}
+
+      {hapus && (
+        <GrdHapusGoalModal goal={hapus} allUsers={allUsers} goalAda={goals}
+          onHapus={jalankanHapus} onClose={() => setHapus(null)} />
+      )}
+
+      {turunkan && (
+        <GrdTurunkanModal goal={turunkan} allUsers={allUsers} goalAda={goals}
+          onTurunkan={jalankanTurunkan} onClose={() => setTurunkan(null)} />
+      )}
+
+      {detail && (
+        <GrdDetailGoal goal={detail} user={user} allUsers={allUsers}
+          semuaGoal={goals} jejak={jejak} onClose={() => setDetail(null)} />
+      )}
+    </div>
   );
 }
 
