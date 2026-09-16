@@ -795,6 +795,9 @@ export async function hapusGoal(goal, { user, allUsers } = {}) {
     const ok = await st().delete(Grd.GOAL_REC_PREFIX + g.id);
     if (!ok) throw new GrdDitolak('Gagal menghapus goal. Coba lagi.');
   }
+  // Jejak penghapusan ditulis SETELAH goalnya benar-benar hilang — kalau ditulis
+  // duluan lalu penghapusannya gagal, jejaknya berbohong.
+  await tulisJejak(Grd.catatPenghapusan(g, user));
   catatAktivitas(`menghapus goal "${g.description}"`, user && user.name);
   return true;
 }

@@ -4902,12 +4902,29 @@ const gJy = { id: 'jy1', ownerId: 'u-staf1', periode: '2026-09',
 await Svc.simpanGoal(gJy, { user: OWNER, allUsers: tim });
 await Svc.simpanGoal({ ...gJy, target: 20 }, { user: OWNER, allUsers: tim });
 const sblmHapus = spJy.jumlah('grdjejak:rec:jy1:');
-await Svc.hapusGoal(gJy, { user: OWNER, allUsers: tim });
+// Seperti App.jsx: yang dioper adalah goal versi TERBARU yang ada di layar,
+// bukan salinan lama — catatan penghapusan merekam angka yang dilihat penghapus.
+await Svc.hapusGoal({ ...gJy, target: 20 }, { user: OWNER, allUsers: tim });
 cek('88q. Menghapus goal TIDAK ikut menghapus jejaknya (itu satu-satunya bukti yang tersisa)',
-  spJy.jumlah('grdjejak:rec:jy1:') === sblmHapus && sblmHapus > 0,
+  spJy.jumlah('grdjejak:rec:jy1:') >= sblmHapus && sblmHapus > 0,
   { sebelum: sblmHapus, sesudah: spJy.jumlah('grdjejak:rec:jy1:') });
 const jjSisa = await Svc.ambilJejakGoal('jy1');
-cek('88r. Dan jejaknya masih bisa dibaca setelah goalnya hilang', jjSisa.length === sblmHapus);
+cek('88r. Dan jejaknya masih bisa dibaca setelah goalnya hilang', jjSisa.length >= sblmHapus);
+cek('88r1. PENGHAPUSANNYA sendiri ikut tercatat — jejak tidak berhenti diam-diam',
+  jjSisa.some(j => j.field === '_dihapus'), jjSisa.map(j => j.field));
+cek('88r2. Catatan penghapusan menyebut siapa & kapan', (() => {
+  const d = jjSisa.find(j => j.field === '_dihapus');
+  return !!d && d.olehId === 'u-owner' && !!d.waktu;
+})());
+cek('88r3. Dan merekam target terakhirnya, supaya nilai yang hilang tidak ikut hilang', (() => {
+  const d = jjSisa.find(j => j.field === '_dihapus');
+  return !!d && d.dari === 20;   // target terakhir sebelum dihapus
+})(), jjSisa.find(j => j.field === '_dihapus'));
+cek('88r4. Urutan riwayat pasti walau dua catatan sewaktu (tidak goyah antar-render)',
+  G.riwayatGoal(jjSisa, 'jy1').map(j => j.id).join()
+  === G.riwayatGoal([...jjSisa].reverse(), 'jy1').map(j => j.id).join());
+cek('88r5. "Goal dihapus" bukan perubahan angka, jadi tidak mengotori rekap naik/turun',
+  G.fieldJejakAngka('_dihapus') === false && G.labelFieldJejak('_dihapus') === 'Goal dihapus');
 cek('88s. Jejak itu kini yatim — ada, tapi tak akan muncul di daftar mana pun',
   G.jejakYatim(jjSisa, []).length === jjSisa.length);
 lepasMockGrd();
@@ -5062,6 +5079,62 @@ lepasMockGrd();
 
 cek('89p. Layar menampilkan perubahannya, bukan cuma "diusulkan ulang"',
   /\(r\.ubah \|\| \[\]\)\.length > 0/.test(src) && /Lead\.labelUbahLead\(u\.field\)/.test(src));
+
+// ============================================================================
+judul('90. Penjaga: tiap perubahan goal & lead WAJIB meninggalkan catatan');
+// ----------------------------------------------------------------------------
+// Sama peran dengan §68 (wewenang diperiksa sebelum menulis): bukan menguji
+// perilaku yang sudah ada, tapi menangkap fungsi tulis BARU yang lupa mencatat.
+// Uji perilaku tidak bisa melakukan itu — ia hanya tahu fungsi yang sudah
+// dipanggilnya.
+// ============================================================================
+const svcJ = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+const badanSvc = (nama) => {
+  const i = svcJ.indexOf(`export async function ${nama}(`);
+  if (i < 0) return '';
+  const j = svcJ.indexOf('\nexport ', i + 10);
+  return svcJ.slice(i, j < 0 ? svcJ.length : j);
+};
+
+const MENULIS_GOAL = ['simpanGoal', 'hapusGoal', 'turunkanGoal'];
+for (const f of MENULIS_GOAL) {
+  const b = badanSvc(f);
+  cek(`90a-${f}. Fungsi tulis goal "${f}" ada dan meninggalkan catatan jejak`,
+    !!b && /tulisJejak\(/.test(b), b ? b.slice(0, 120) : 'TIDAK KETEMU');
+}
+const MENULIS_LEAD = ['usulkanLead', 'nilaiLead'];
+for (const f of MENULIS_LEAD) {
+  const b = badanSvc(f);
+  cek(`90b-${f}. Fungsi tulis lead "${f}" ada dan menambah riwayat`,
+    !!b && /tambahRiwayatLead\(/.test(b), b ? b.slice(0, 120) : 'TIDAK KETEMU');
+}
+
+cek('90c. Penghapusan goal dicatat SETELAH goalnya benar-benar hilang (kalau gagal, jejaknya berbohong)', (() => {
+  const b = badanSvc('hapusGoal');
+  return b.indexOf('st().delete(') < b.indexOf('tulisJejak(')
+    || b.indexOf("lewatRpc('grd_hapus_goal'") < b.indexOf('tulisJejak(');
+})());
+cek('90d. Setiap field jejak yang dipakai layanan memang terdaftar di FIELD_JEJAK',
+  ['_dibuat', '_dihapus'].every(f => G.fieldJejakDikenal(f)));
+cek('90e. Tidak ada fungsi tulis goal yang menyentuh penyimpanan tanpa lewat tulisJejak', (() => {
+  // Cari SEMUA fungsi yang menulis/menghapus baris goal, lalu pastikan tidak ada
+  // yang luput dari daftar MENULIS_GOAL di atas.
+  const nama = [...svcJ.matchAll(/export async function (\w+)\(/g)].map(m => m[1]);
+  const menulisGoal = nama.filter(n => {
+    const b = badanSvc(n);
+    return /GOAL_REC_PREFIX/.test(b) && /(st\(\)\.set|st\(\)\.delete)/.test(b);
+  });
+  return menulisGoal.every(n => MENULIS_GOAL.includes(n)) && menulisGoal.length > 0;
+})(), [...svcJ.matchAll(/export async function (\w+)\(/g)].map(m => m[1])
+  .filter(n => /GOAL_REC_PREFIX/.test(badanSvc(n))));
+cek('90f. Begitu juga fungsi tulis lead', (() => {
+  const nama = [...svcJ.matchAll(/export async function (\w+)\(/g)].map(m => m[1]);
+  const menulisLead = nama.filter(n => {
+    const b = badanSvc(n);
+    return /kunciLead\(/.test(b) && /st\(\)\.set/.test(b);
+  });
+  return menulisLead.every(n => MENULIS_LEAD.includes(n)) && menulisLead.length > 0;
+})());
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

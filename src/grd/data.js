@@ -601,6 +601,7 @@ export const JEJAK_REC_PREFIX = 'grdjejak:rec:';
  */
 export const FIELD_JEJAK = {
   _dibuat:     { label: 'Goal dibuat',    angka: false },
+  _dihapus:    { label: 'Goal dihapus',   angka: false },
   base:        { label: 'Base',           angka: true },
   target:      { label: 'Target',         angka: true },
   actual:      { label: 'Angka terkini',  angka: true },
@@ -712,6 +713,32 @@ export function catatPerubahan(goalLama, goalBaru, oleh, waktu = new Date().toIS
 }
 
 /**
+ * Catatan untuk PENGHAPUSAN goal.
+ *
+ * Tanpa ini, jejak sebuah goal berhenti begitu saja tanpa penjelasan: barisnya
+ * ada sampai perubahan terakhir, lalu goalnya lenyap dan tidak ada satu pun
+ * catatan tentang siapa yang menghapusnya atau kapan. Justru di situ pertanyaan
+ * paling sering muncul — "targetnya ke mana?" — dan jejak yang berhenti diam-diam
+ * tidak bisa menjawabnya.
+ *
+ * `dari` diisi target terakhirnya supaya nilai yang hilang ikut terekam.
+ */
+export function catatPenghapusan(goal, oleh, waktu = new Date().toISOString()) {
+  const g = normalisasiGoal(goal);
+  if (!g || !g.id) return [];
+  return [{
+    id: `${g.id}:_dihapus:${waktu}`,
+    goalId: g.id,
+    field: '_dihapus',
+    dari: g.target,
+    ke: null,
+    olehId: (oleh && oleh.id) || '',
+    olehNama: (oleh && oleh.name) || 'Tidak diketahui',
+    waktu,
+  }];
+}
+
+/**
  * Prefix baris jejak MILIK SATU GOAL.
  *
  * Bentuk kunci jejak adalah `grdjejak:rec:<goalId>:<field>:<waktu>`, jadi
@@ -734,7 +761,14 @@ export function riwayatGoal(jejak, goalId) {
   if (!goalId) return [];
   return (jejak || []).filter(j => j && j.goalId === goalId)
     .slice()
-    .sort((x, y) => String(y.waktu || '').localeCompare(String(x.waktu || '')));
+    // Urutan kedua memakai id supaya dua perubahan pada MILIDETIK yang sama
+    // tidak bertukar tempat antar-render. Tanpa ini, daftar yang sama bisa
+    // tampil berbeda dua kali berturut-turut — dan pada catatan audit, urutan
+    // yang goyah membuat orang ragu pada seluruh isinya.
+    .sort((x, y) => {
+      const w = String(y.waktu || '').localeCompare(String(x.waktu || ''));
+      return w !== 0 ? w : String(y.id || '').localeCompare(String(x.id || ''));
+    });
 }
 
 /** Hanya perubahan ANGKA (base/target/actual) — inti "jejak perubahan angka". */
