@@ -21,3 +21,11 @@ alat-sinkron-penuh.html
 alat-update-aplikasi.html
 alat-pemulihan-darurat.html
 alat-pindah-balik.html
+
+# Izin lokal Claude Code — jangan di-commit
+.claude/settings.local.json
+
+# Berkas kerja NgodingPakeAI — ditimpa ulang tiap sync, aslinya ada di server.
+# config.json & .ngodingpakeaiignore TETAP di-commit (isinya cuma id + aturan).
+.ngodingpakeai/pending.json
+.ngodingpakeai/summaries.json
