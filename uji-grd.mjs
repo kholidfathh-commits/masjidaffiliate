@@ -4397,8 +4397,18 @@ cek('84b. Hanya menawarkan lead measure yang SUDAH AKTIF (usulan belum jadi komi
   /l\.status === 'aktif'/.test(badanPnl));
 cek('84c. Dan hanya milik PIC tiket itu (lead orang lain tak bisa disumbang tiket ini)',
   /l\.ownerId === pemilikId/.test(badanPnl));
-cek('84d. Selalu ada jalan keluar "tidak dikaitkan"',
-  /<option value="">— Tidak dikaitkan —<\/option>/.test(badanPnl));
+cek('84d. Selalu ada jalan keluar "tidak dikaitkan" (kaitan bisa dilepas lagi)',
+  /\{ value: '', label: '— Tidak dikaitkan —' \}/.test(badanPnl));
+cek('84d1. Bisa DICARI dengan mengetik, sama seperti kolom PIC',
+  /<SearchableSelect/.test(badanPnl));
+cek('84d2. Periode ikut ditulis — batas 1–3 itu PER GOAL, jadi daftarnya bisa panjang',
+  /labelPeriodeSingkat\(g\.periode\)/.test(badanPnl));
+cek('84d3. Lead periode berjalan ditaruh di ATAS',
+  /_berjalan \? -1 : 1/.test(badanPnl) && /periodeSaatIni\('bulan'\)/.test(badanPnl));
+cek('84d4. Bulan DAN kuartal sama-sama dihitung berjalan (periode GRD memang dua jenis)',
+  /periodeSaatIni\('kuartal'\)/.test(badanPnl));
+cek('84d5. Lead yang goalnya sudah dihapus tetap terbaca, tidak jadi baris kosong',
+  /goal sudah dihapus/.test(badanPnl));
 cek('84e. Gagal muat GRD → panel menghilang, tiket tetap bisa dibuat',
   /catch[\s\S]{0,200}panel disembunyikan/.test(badanPnl));
 cek('84f. PIC tanpa lead aktif → panel tidak muncul sama sekali (bukan dropdown kosong)',

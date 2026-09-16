@@ -6611,15 +6611,31 @@ function GrdPilihLeadTiket({ user, allUsers, pemilikId, value, onChange }) {
     return () => { batal = true; };
   }, []);
 
+  // Daftar ini bisa panjang: batas 1–3 berlaku PER GOAL, bukan per orang, dan
+  // lead dari periode lama tetap berstatus aktif. Jadi periodenya ikut ditulis
+  // (tanpa itu dua lead berjudul sama dari kuartal berbeda tak bisa dibedakan)
+  // dan yang periodenya berjalan ditaruh di ATAS — tiket baru hampir selalu
+  // menyumbang komitmen yang sedang berjalan.
   const pilihan = useMemo(() => {
-    const judulGoal = new Map(goals.map(g => [g.id, g.description]));
+    const perGoal = new Map(goals.map(g => [g.id, g]));
+    const pBulan = Grd.periodeSaatIni('bulan');
+    const pKuartal = Grd.periodeSaatIni('kuartal');
+    const berjalan = (g) => !!g && (g.periode === pBulan || g.periode === pKuartal);
     return leads
       .filter(l => l.status === 'aktif' && l.ownerId === pemilikId)
-      .map(l => ({
-        value: l.id,
-        label: `${l.description} (${l.targetMingguan} ${l.uom}/minggu)`
-          + (judulGoal.has(l.goalId) ? ` — ${judulGoal.get(l.goalId)}` : ''),
-      }));
+      .map(l => {
+        const g = perGoal.get(l.goalId);
+        return {
+          value: l.id,
+          _berjalan: berjalan(g),
+          _urut: `${g ? g.description : 'zzz'}|${l.description}`,
+          label: `${l.description} · ${l.targetMingguan} ${l.uom}/minggu`
+            + (g ? ` — ${g.description} (${Grd.labelPeriodeSingkat(g.periode)})` : ' — goal sudah dihapus'),
+        };
+      })
+      .sort((a, b) => (a._berjalan === b._berjalan)
+        ? a._urut.localeCompare(b._urut)
+        : (a._berjalan ? -1 : 1));
   }, [leads, goals, pemilikId]);
 
   // Tiket lama boleh menunjuk lead yang kini tidak aktif / bukan milik PIC baru.
@@ -6632,16 +6648,22 @@ function GrdPilihLeadTiket({ user, allUsers, pemilikId, value, onChange }) {
 
   return (
     <Field label="Lead Measure Terkait (opsional)">
-      <select value={value || ''} onChange={e => onChange(e.target.value)}
-        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
-        <option value="">— Tidak dikaitkan —</option>
-        {diLuarPilihan && (
-          <option value={value}>
-            {leadTerpilih.description} (kaitan lama — sudah tidak aktif / bukan milik PIC ini)
-          </option>
-        )}
-        {pilihan.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
+      {/* SearchableSelect, sama seperti kolom PIC: daftarnya bisa memuat lead dari
+          beberapa goal dan beberapa periode sekaligus, jadi mengetik jauh lebih
+          cepat daripada menggulir. Opsi "tidak dikaitkan" ikut di dalam daftar
+          supaya kaitan yang terlanjur dipilih selalu bisa dilepas lagi. */}
+      <SearchableSelect
+        value={value || ''}
+        onChange={(v) => onChange(v)}
+        options={[
+          { value: '', label: '— Tidak dikaitkan —' },
+          ...(diLuarPilihan ? [{
+            value,
+            label: `${leadTerpilih.description} (kaitan lama — sudah tidak aktif / bukan milik PIC ini)`,
+          }] : []),
+          ...pilihan,
+        ]}
+        placeholder="Ketik tindakan / goal untuk cari…" />
       <p className="text-xs text-slate-500 mt-1">
         {pilihan.length === 0
           ? 'PIC ini belum punya lead measure aktif — kaitannya boleh dikosongkan.'
