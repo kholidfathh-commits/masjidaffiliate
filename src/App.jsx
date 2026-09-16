@@ -20049,6 +20049,14 @@ function GrdAksesView({ user, allUsers }) {
   const statusSaya = useMemo(() => Grd.ringkasAksesUser(user, allUsers, goals), [user, allUsers, goals]);
   const praSaya = useMemo(() => Grd.pratinjauAkses(user, allUsers, goals), [user, allUsers, goals]);
   const jalur = GrdSvc.jalurGrd();
+  // Perbandingan aturan aplikasi vs server. Kosong bila fungsi SQL-nya belum
+  // dipasang — itu keadaan normal, bukan kesalahan.
+  const [bandingIzin, setBandingIzin] = useState({ tersedia: false, selisih: [] });
+  useEffect(() => {
+    GrdSvc.bandingkanIzin(user, allUsers)
+      .then(setBandingIzin)
+      .catch(() => setBandingIzin({ tersedia: false, selisih: [] }));
+  }, [user, allUsers]);
 
   if (loading) return <div className="text-slate-400 text-sm">Memuat data akses…</div>;
 
@@ -20087,6 +20095,21 @@ function GrdAksesView({ user, allUsers }) {
           </div>
         </div>
       </div>
+
+      {/* Kalau aturan di SQL sudah menyimpang dari aturan di aplikasi, lebih baik
+          ketahuan DI SINI daripada nanti saat seseorang ditolak tanpa sebab. */}
+      {bandingIzin.tersedia && bandingIzin.selisih.length > 0 && (
+        <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-2.5">
+          <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="text-[12px] text-red-800 leading-relaxed">
+            <span className="font-bold">Aturan server berbeda dengan aplikasi</span> untuk
+            {' '}{bandingIzin.selisih.length} anggota
+            ({bandingIzin.selisih.map(x => (allUsers.find(u => u.id === x.ownerId)?.name || x.ownerId)).join(', ')}).
+            Salinan aturan di <span className="font-semibold">supabase-grd-rpc.sql</span> perlu diselaraskan
+            dengan <span className="font-semibold">src/grd/data.js</span>.
+          </div>
+        </div>
+      )}
 
       <div className="grid md:grid-cols-3 gap-3 mb-5">
         <GrdKartuPrinsip icon={Eye} judul="Lihat Sesuai Peran"

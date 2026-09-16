@@ -996,6 +996,9 @@ cek('17d-63. Status menyebut berapa goal terlihat & bisa diubah',
   /Anda melihat/.test(src) && /boleh mengubah/.test(src));
 cek('17d-64. Status menampilkan jalur data yang sedang dipakai',
   /GrdSvc\.jalurGrd\(\)/.test(src) && /lewat fungsi server \(RPC\)/.test(src));
+cek('17d-67. Halaman Kontrol Akses memperingatkan kalau aturan server menyimpang',
+  /GrdSvc\.bandingkanIzin\(user, allUsers\)/.test(src)
+  && /Aturan server berbeda dengan aplikasi/.test(src));
 cek('17d-65. Baris goal memakai helper izin terpadu',
   /Grd\.izinGoal\(user, g, allUsers\)/.test(src));
 cek('17d-66. Tombol turunkan memakai izin.turunkan, bukan izin.ubah',
@@ -3757,6 +3760,56 @@ cek('72l. Aturan server sepadan dengan aturan aplikasi (owner/manajer + berjenja
   return /isManajemen/.test(blokJs) && /idBawahanTransitif/.test(blokJs)
     && /'owner', 'manajer'/.test(sqlAkhir) && /with recursive/.test(sqlAkhir);
 })());
+
+judul('73. Bandingkan izin aplikasi vs server');
+const spBd = storageMock();
+Svc.setJalurGrd('auto');
+// RPC yang menjawab SAMA dengan aplikasi
+const rpcSama = async (nama, args) => {
+  if (nama !== 'grd_izin_saya') return { data: true, error: null };
+  return { data: args.p_owner_ids.map(id => ({
+    owner_id: id, boleh: G.bolehTulisMilik(LEADER, id, tim),
+  })), error: null };
+};
+Svc.initGrd({ storage: spBd, rpc: rpcSama });
+const bdSama = await Svc.bandingkanIzin(LEADER, tim);
+cek('73a. Tersedia saat RPC terpasang', bdSama.tersedia === true);
+cek('73b. Jawaban sama → tidak ada selisih', bdSama.selisih.length === 0, bdSama.selisih);
+cek('73c. Semua anggota diperiksa', bdSama.diperiksa === tim.length);
+
+// RPC yang menjawab BEDA untuk satu orang
+const rpcBeda = async (nama, args) => {
+  if (nama !== 'grd_izin_saya') return { data: true, error: null };
+  return { data: args.p_owner_ids.map(id => ({
+    owner_id: id, boleh: id === 'u-staf1' ? false : G.bolehTulisMilik(LEADER, id, tim),
+  })), error: null };
+};
+Svc.setJalurGrd('auto');
+Svc.initGrd({ storage: spBd, rpc: rpcBeda });
+const bdBeda = await Svc.bandingkanIzin(LEADER, tim);
+cek('73d. Selisih terdeteksi', bdBeda.selisih.length === 1 && bdBeda.selisih[0].ownerId === 'u-staf1');
+cek('73e. Selisih menyebut kedua jawabannya',
+  bdBeda.selisih[0].menurutAplikasi === true && bdBeda.selisih[0].menurutServer === false);
+
+// RPC belum dipasang → tidak tersedia, bukan error
+Svc.setJalurGrd('auto');
+Svc.initGrd({ storage: spBd, rpc: rpcMock({ belumDipasang: true }) });
+const bdBelum = await Svc.bandingkanIzin(LEADER, tim);
+cek('73f. RPC belum dipasang → tersedia:false, bukan melempar', bdBelum.tersedia === false);
+cek('73g. Tidak melaporkan selisih palsu saat tidak tersedia', bdBelum.selisih.length === 0);
+
+Svc.setJalurGrd('auto');
+Svc.initGrd({ storage: spBd, rpc: null });
+cek('73h. Tanpa rpc sama sekali aman', (await Svc.bandingkanIzin(LEADER, tim)).tersedia === false);
+cek('73i. Daftar anggota kosong aman', (await Svc.bandingkanIzin(LEADER, [])).tersedia === false);
+
+const sqlIzin = fs.readFileSync(ROOT + '/supabase-grd-rpc.sql', 'utf8');
+cek('73j. Fungsi SQL-nya ada & memakai helper yang sama',
+  /create or replace function public\.grd_izin_saya/.test(sqlIzin)
+  && /select o, public\.grd_boleh_tulis\(o\)/.test(sqlIzin));
+cek('73k. Gunanya dijelaskan: membandingkan, bukan menambah pagar',
+  /Gunanya bukan menambah pagar/.test(sqlIzin));
+lepasMockGrd();
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

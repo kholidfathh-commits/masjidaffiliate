@@ -348,3 +348,32 @@ end;
 $$;
 
 grant execute on function public.grd_baca_goal(text) to anon, authenticated;
+
+-- ============================================================
+-- DAFTAR IZIN (untuk halaman Kontrol Akses)
+-- ============================================================
+-- Mengembalikan jawaban SERVER atas pertanyaan "boleh menulis milik siapa saja?".
+--
+-- Gunanya bukan menambah pagar — pagarnya sudah ada di tiap fungsi tulis.
+-- Gunanya MEMBANDINGKAN: halaman Kontrol Akses menampilkan jawaban aplikasi,
+-- dan dengan fungsi ini bisa mengecek apakah server menjawab sama. Kalau
+-- berbeda, berarti salinan aturan di SQL sudah menyimpang dari
+-- src/grd/data.js — dan itu lebih baik ketahuan di layar daripada nanti saat
+-- seseorang ditolak tanpa alasan yang jelas.
+--
+-- Sebelum Auth aktif fungsi ini menjawab "boleh" untuk semuanya, karena
+-- grd_boleh_tulis memang belum bisa membedakan siapa pemanggilnya.
+create or replace function public.grd_izin_saya(p_owner_ids text[])
+returns table(owner_id text, boleh boolean)
+language plpgsql
+stable
+security invoker
+as $$
+begin
+  return query
+  select o, public.grd_boleh_tulis(o)
+  from unnest(p_owner_ids) as o;
+end;
+$$;
+
+grant execute on function public.grd_izin_saya(text[]) to anon, authenticated;

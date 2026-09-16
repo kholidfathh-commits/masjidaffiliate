@@ -617,6 +617,36 @@ export async function muatKonteksGrd({
   return hasil;
 }
 
+/**
+ * Bandingkan izin menurut APLIKASI dengan izin menurut SERVER.
+ *
+ * Aturan tulis ada di dua tempat: src/grd/data.js (aplikasi) dan
+ * grd_boleh_tulis (SQL). Dua salinan bisa menyimpang, dan yang menyimpang
+ * biasanya tidak ketahuan sampai seseorang ditolak tanpa alasan yang jelas.
+ * Fungsi ini menanyakan keduanya lalu melaporkan selisihnya.
+ *
+ * Mengembalikan { tersedia:false } bila fungsi SQL-nya belum dipasang — itu
+ * keadaan normal, bukan kesalahan.
+ */
+export async function bandingkanIzin(user, allUsers) {
+  const ids = (allUsers || []).filter(u => u && u.id).map(u => u.id);
+  if (ids.length === 0) return { tersedia: false, selisih: [] };
+
+  const viaRpc = await lewatRpc('grd_izin_saya', { p_owner_ids: ids });
+  if (!viaRpc.pakai || !Array.isArray(viaRpc.data)) return { tersedia: false, selisih: [] };
+
+  const menurutServer = new Map(viaRpc.data.map(r => [r.owner_id, !!r.boleh]));
+  const selisih = [];
+  for (const id of ids) {
+    const app = Grd.bolehTulisMilik(user, id, allUsers);
+    const srv = menurutServer.has(id) ? menurutServer.get(id) : null;
+    if (srv !== null && srv !== app) {
+      selisih.push({ ownerId: id, menurutAplikasi: app, menurutServer: srv });
+    }
+  }
+  return { tersedia: true, selisih, diperiksa: ids.length };
+}
+
 // ============================================================================
 // TULIS
 // ----------------------------------------------------------------------------
