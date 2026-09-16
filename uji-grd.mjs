@@ -4420,6 +4420,22 @@ cek('84h. Datanya lewat pintu layanan GRD, bukan baca storage langsung',
 cek('84i. Hanya meminta goal & lead — tidak ikut menarik skor/jejak (hemat egress)',
   /butuh: \['goal', 'lead'\]/.test(badanPnl));
 
+// --- kaitan terpilih terlihat di DETAIL tiket, bukan cuma di form edit ---
+const iKt = src.indexOf('function GrdKaitanLeadTiket(');
+cek('84n. Kartu kaitan ada di detail tiket', iKt > 0);
+const badanKt = src.slice(iKt, src.indexOf('function TaskDetailModal('));
+cek('84o. Tiket TANPA kaitan tidak menarik data GRD sama sekali (halaman Tiket sering dibuka)',
+  /if \(!leadId\) \{ setSiap\(true\); return; \}/.test(badanKt));
+cek('84p. Lead yang sudah tidak ada dikatakan terus terang, bukan kotak kosong',
+  /sudah tidak ada, atau bukan bagian dari data yang boleh Anda lihat/.test(badanKt));
+cek('84q. Lead yang statusnya bukan aktif lagi tetap ditampilkan & ditandai',
+  /lead\.status !== 'aktif'/.test(badanKt));
+cek('84r. Ganti/Lepas dilempar ke form Edit — SATU jalur tulis, bukan dua',
+  /onUbah/.test(badanKt) && !/GrdSvc\.(simpan|hapus)/.test(badanKt) && !/storage\.set/.test(badanKt));
+cek('84s. Tombol Ganti hanya untuk yang boleh mengedit tiket',
+  /bisaUbah && \(/.test(badanKt) && /bisaUbah=\{canEdit\}/.test(src));
+cek('84t. Kartunya benar-benar dipasang di detail tiket', /<GrdKaitanLeadTiket/.test(src));
+
 const iFrm = src.indexOf('function TaskForm(');
 const badanFrm = src.slice(iFrm, src.indexOf('function GrdPilihLeadTiket(') > iFrm
   ? src.indexOf('function GrdPilihLeadTiket(') : src.indexOf('// ============ REPORTS ============'));

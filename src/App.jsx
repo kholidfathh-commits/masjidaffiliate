@@ -6344,6 +6344,75 @@ function TasksView({ user, allUsers }) {
 }
 
 // ============ TASK DETAIL MODAL (with Comments) ============
+/**
+ * KARTU "LEAD MEASURE TERKAIT" di detail tiket.
+ *
+ * Hanya dimuat kalau tiketnya MEMANG punya kaitan — tiket tanpa kaitan (mayoritas)
+ * tidak menarik data GRD sama sekali. Ini bukan sekadar hemat: halaman Tiket dibuka
+ * jauh lebih sering daripada halaman GRD, dan egress Supabase di project ini pernah
+ * over-kuota sampai layanannya dibatasi.
+ *
+ * Mengganti / melepas kaitan SENGAJA dilempar ke form Edit Tiket, bukan diberi
+ * tombol simpan sendiri di sini. Dua jalur tulis untuk satu field berarti dua
+ * tempat yang bisa salah, dan yang satu pasti terlupakan saat aturannya berubah.
+ */
+function GrdKaitanLeadTiket({ user, allUsers, leadId, bisaUbah, onUbah }) {
+  const [lead, setLead] = useState(null);
+  const [goal, setGoal] = useState(null);
+  const [siap, setSiap] = useState(false);
+
+  useEffect(() => {
+    if (!leadId) { setSiap(true); return; }
+    let batal = false;
+    (async () => {
+      try {
+        const k = await GrdSvc.muatKonteksGrd({ user, allUsers, butuh: ['goal', 'lead'] });
+        if (batal) return;
+        const l = k.leads.find(x => x.id === leadId) || null;
+        setLead(l);
+        setGoal(l ? (k.goalTerlihat.find(g => g.id === l.goalId) || null) : null);
+      } catch (e) {
+        console.warn('Muat kaitan lead measure gagal:', e?.message || e);
+      } finally { if (!batal) setSiap(true); }
+    })();
+    return () => { batal = true; };
+  }, [leadId]);
+
+  if (!leadId || !siap) return null;
+
+  return (
+    <div className="bg-blue-50 p-3 rounded-lg border border-blue-200 col-span-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase font-bold text-blue-700">Lead Measure Terkait</div>
+          {lead ? (
+            <>
+              <div className="font-semibold text-slate-800 mt-0.5 break-words">{lead.description}</div>
+              <div className="text-xs text-slate-600 mt-0.5">
+                Target {lead.targetMingguan} {lead.uom}/minggu
+                {goal ? ` · Goal: ${goal.description} (${Grd.labelPeriodeSingkat(goal.periode)})` : ''}
+                {lead.status !== 'aktif' ? ` · lead ini sudah tidak aktif` : ''}
+              </div>
+            </>
+          ) : (
+            // Jujur soal apa yang terjadi: kaitannya ada, isinya tidak bisa
+            // ditampilkan. Kotak kosong akan terbaca sebagai "tidak ada kaitan".
+            <div className="text-sm text-slate-600 mt-0.5">
+              Lead measure yang dikaitkan sudah tidak ada, atau bukan bagian dari data yang boleh Anda lihat.
+            </div>
+          )}
+        </div>
+        {bisaUbah && (
+          <button type="button" onClick={onUbah}
+            className="shrink-0 text-xs font-semibold text-blue-700 hover:text-blue-900 hover:underline">
+            Ganti / Lepas
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment, onDeleteComment, canQC, onQcApprove, onQcRevise, onClose }) {
   const [commentText, setCommentText] = useState('');
   const days = daysUntil(task.deadline);
@@ -6416,6 +6485,8 @@ function TaskDetailModal({ task, user, allUsers, onEdit, onDelete, onAddComment,
             <div className="font-semibold text-slate-800 mt-0.5">{task.assigneeName}</div>
             {assigneeUser?.jobTitle && <div className="text-xs text-slate-500">{assigneeUser.jobTitle}</div>}
           </div>
+          <GrdKaitanLeadTiket user={user} allUsers={allUsers} leadId={task.leadId}
+            bisaUbah={canEdit} onUbah={onEdit} />
           <div className="bg-slate-50 p-3 rounded-lg">
             <div className="text-[10px] uppercase font-bold text-slate-500">Pemberi Tugas</div>
             <div className="font-semibold text-slate-800 mt-0.5">{task.createdByName || '-'}</div>
