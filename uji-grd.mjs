@@ -4618,6 +4618,20 @@ cek('87u. Memuat lewat satu pintu & hanya yang dibutuhkan',
 cek('87v. Memakai goalTerlihat (yang sudah digerbangi), bukan seluruh goal',
   /setGoals\(k\.goalTerlihat\)/.test(badanJv));
 cek('87w. Gagal muat tidak mengosongkan layar', /pertahankan data lama/.test(badanJv));
+cek('87w1. Perubahan bukan-angka disembunyikan SECARA BAWAAN di halaman ini',
+  /useState\(true\);?\s*$/m.test(badanJv.split('\n').find(b => b.includes('hanyaAngka')) || '')
+  || /const \[hanyaAngka, setHanyaAngka\] = useState\(true\)/.test(badanJv));
+cek('87w2. Tapi bisa dibuka lagi — disembunyikan bukan berarti dibuang',
+  /setHanyaAngka\(v => !v\)/.test(badanJv));
+cek('87w3. Tombolnya mengatakan keadaan sekarang, bukan teka-teki',
+  /\{hanyaAngka \? 'Hanya angka' : 'Semua perubahan'\}/.test(badanJv));
+cek('87w4. Panel Riwayat di detail goal SENGAJA tetap menampilkan semuanya', (() => {
+  // Di sana riwayatnya pendek dan "siapa mengganti pemiliknya?" justru
+  // pertanyaan yang sah. Menyembunyikannya di situ membuang keterangan
+  // tanpa menyelesaikan masalah apa pun.
+  const b = src.slice(src.indexOf('function GrdDetailGoal('), src.indexOf('function GrdSimpul('));
+  return /Grd\.riwayatGoal\(jejak, g\.id\)/.test(b) && !/riwayatAngka\(/.test(b);
+})());
 cek('87x. Naik & turun ditaruh di atas, bukan disembunyikan di dalam daftar',
   /label="Angka Turun"/.test(badanJv) && /label="Angka Naik"/.test(badanJv));
 cek('87y. Perubahan yang MENURUNKAN angka ditandai jelas', /TURUN</.test(badanJv));
