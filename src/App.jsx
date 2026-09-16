@@ -20944,13 +20944,43 @@ function GrdLeadView({ user, allUsers }) {
 }
 
 /**
+ * Label MENANG / KALAH / belum diisi.
+ *
+ * Satu komponen dipakai di semua tempat (baris papan skor, pratinjau form,
+ * rekap) supaya jawabannya terbaca sama persis di mana pun — kalau tiap tempat
+ * merangkai badge-nya sendiri, cepat atau lambat warnanya berbeda dan orang
+ * jadi ragu mana yang benar.
+ */
+function GrdLabelHasil({ hasil, kecil }) {
+  const gaya = Skor.gayaHasil(hasil);
+  return (
+    <span className={`font-bold rounded-full ${gaya.color} ${kecil ? 'text-[10px] px-2 py-0.5' : 'text-[11px] px-2.5 py-1'}`}>
+      {gaya.label}
+    </span>
+  );
+}
+
+/** Label rentang minggu, mis. "14–20 Sep 2026". */
+function GrdLabelMinggu({ minggu, tandaiIni }) {
+  const ini = minggu === Skor.mingguIni();
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span>{Skor.labelMinggu(minggu)}</span>
+      {tandaiIni && ini && (
+        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-600 text-white">minggu ini</span>
+      )}
+    </span>
+  );
+}
+
+/**
  * ISI SKOR MINGGUAN.
  *
  * Satu isian angka, dan hasilnya langsung terbaca menang/kalah sebelum disimpan.
  * Pratinjau itu penting: orang harus tahu ia sedang mencatat kekalahan, bukan
  * baru sadar setelah tersimpan.
  */
-function GrdIsiSkorModal({ lead, skor, minggu, onSimpan, onClose }) {
+function GrdIsiSkorModal({ lead, skor, minggu, tren, onSimpan, onClose }) {
   const [nilai, setNilai] = useState(skor ? String(skor.nilai) : '');
   const [catatan, setCatatan] = useState(skor?.catatan || '');
   const [pesan, setPesan] = useState('');
@@ -20996,13 +21026,35 @@ function GrdIsiSkorModal({ lead, skor, minggu, onSimpan, onClose }) {
         </GrdField>
       </div>
 
+      {/* Konteks: berapa capaian minggu-minggu sebelumnya. Tanpa ini pengisi
+          hanya melihat angka telanjang dan tidak tahu apakah ia sedang membaik
+          atau menurun. */}
+      {tren && tren.some(t => t.skor) && (
+        <div className="mb-3 rounded-xl border border-slate-200 px-3.5 py-3">
+          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
+            Beberapa minggu terakhir
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {tren.filter(t => t.skor).map(t => {
+              const g = Skor.gayaHasil(t.hasil);
+              return (
+                <span key={t.minggu} title={Skor.labelMinggu(t.minggu)}
+                  className={`text-[11px] font-semibold px-2 py-1 rounded-lg ${g.color} tabular-nums`}>
+                  {t.skor.nilai}/{t.skor.target}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Hasilnya terbaca SEBELUM disimpan. */}
       <div className="rounded-xl bg-slate-50 border border-slate-200/70 px-3.5 py-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-slate-600">Hasil minggu ini</span>
-          <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${gaya.color}`}>
-            {siap ? gaya.label : '—'}
-          </span>
+          {siap
+            ? <GrdLabelHasil hasil={Skor.hasilSkor(pratinjau)} />
+            : <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">—</span>}
         </div>
         <div className="mt-2 h-2 rounded-full bg-slate-200 overflow-hidden">
           <div className={`h-full rounded-full ${siap ? gaya.bar : 'bg-transparent'}`}
@@ -21091,7 +21143,7 @@ function GrdBarisSkor({ lead, goal, skor, tren, user, allUsers, minggu, onIsi })
               {beruntun}× beruntun
             </span>
           )}
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>{gaya.label}</span>
+          <GrdLabelHasil hasil={hasil} kecil />
         </div>
       </div>
 
@@ -21172,6 +21224,12 @@ function GrdScoreboardView({ user, allUsers }) {
   }, [leads, goals, user, allUsers, lingkup, skor, minggu]);
 
   const rekap = useMemo(() => Skor.rekapMinggu(skor, leadTampil, minggu), [skor, leadTampil, minggu]);
+  const rekapOrang = useMemo(() => Skor.rekapPerOrang(skor, leadTampil, minggu, allUsers),
+    [skor, leadTampil, minggu, allUsers]);
+  const [bukaRekap, setBukaRekap] = useState(false);
+  const trenMinggu = useMemo(
+    () => Skor.rekapBeberapaMinggu(skor, leadTampil, { sampai: minggu, jumlah: 8 }),
+    [skor, leadTampil, minggu]);
   const pilihanMinggu = useMemo(() => Skor.daftarMinggu(Skor.mingguIni(), 12), []);
 
   const simpanSkor = async (nilai, catatan) => {
@@ -21188,7 +21246,7 @@ function GrdScoreboardView({ user, allUsers }) {
   return (
     <div className="max-w-5xl">
       <PageHeader title="Scoreboard Mingguan"
-        subtitle={`Menang atau kalah pekan ini — ${Skor.labelMinggu(minggu)}`} />
+        subtitle={<>Menang atau kalah pekan ini — <GrdLabelMinggu minggu={minggu} tandaiIni /></>} />
 
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <div className="inline-flex items-center gap-1">
@@ -21237,6 +21295,103 @@ function GrdScoreboardView({ user, allUsers }) {
           value={rekap.terisi ? `${rekap.persenMenang}%` : '—'} color="blue" />
       </div>
 
+      {/* TREN ANTAR-MINGGU — arahnya membaik atau memburuk. Ditaruh sebelum
+          daftar karena pertanyaan "pekan ini bagaimana?" baru berarti kalau
+          dibandingkan dengan pekan-pekan sebelumnya. */}
+      {trenMinggu.some(r => r.terisi > 0) && (
+        <div className="bg-white rounded-2xl border border-slate-200/70 p-4 mb-6 shadow-sm shadow-slate-200/40">
+          <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">
+            Tren {trenMinggu.length} Minggu Terakhir
+          </div>
+          <div className="flex items-end justify-between gap-2">
+            {trenMinggu.map(r => {
+              const tinggi = r.total ? Math.round((r.menang / r.total) * 56) : 0;
+              const ini = r.minggu === minggu;
+              return (
+                <button key={r.minggu} onClick={() => setMinggu(r.minggu)}
+                  title={`${Skor.labelMinggu(r.minggu)} — ${r.menang} menang, ${r.kalah} kalah, ${r.kosong} belum diisi`}
+                  className={`flex-1 min-w-0 flex flex-col items-center gap-1.5 rounded-lg px-1 py-1.5 transition ${
+                    ini ? 'bg-blue-50 ring-1 ring-blue-300' : 'hover:bg-slate-50'}`}>
+                  <div className="h-14 w-full flex items-end justify-center">
+                    <div className="w-full max-w-[2rem] rounded-t bg-emerald-500"
+                      style={{ height: `${Math.max(2, tinggi)}px` }} />
+                  </div>
+                  <div className="text-[10px] font-bold text-slate-700 tabular-nums">
+                    {r.terisi ? `${r.menang}/${r.total}` : '—'}
+                  </div>
+                  <div className="text-[9px] text-slate-400 tabular-nums truncate w-full text-center">
+                    {r.minggu.slice(8, 10)}/{r.minggu.slice(5, 7)}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-2.5">
+            Tinggi batang = berapa lead measure yang menang dari total minggu itu. Klik untuk membuka minggunya.
+          </div>
+        </div>
+      )}
+
+      {/* REKAP PER ORANG — siapa yang perlu dibantu pekan ini. Hanya untuk yang
+          mengawasi orang lain; buat pemilik tunggal, barisnya cuma dirinya. */}
+      {rekapOrang.length > 1 && (
+        <div className="mb-6">
+          <button onClick={() => setBukaRekap(v => !v)}
+            className="w-full flex items-center justify-between gap-2 bg-white rounded-2xl border border-slate-200/70 px-4 py-3 hover:border-slate-300">
+            <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">
+              Rekap per orang ({rekapOrang.length})
+            </span>
+            <span className="inline-flex items-center gap-2">
+              {rekapOrang.some(r => r.kosong > 0) && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                  {rekapOrang.filter(r => r.kosong > 0).length} belum lengkap
+                </span>
+              )}
+              {bukaRekap ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+            </span>
+          </button>
+
+          {bukaRekap && (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-sm bg-white rounded-2xl border border-slate-200/70 overflow-hidden">
+                <thead>
+                  <tr className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                    <th className="text-left font-bold px-3.5 py-2.5">Anggota</th>
+                    <th className="text-right font-bold px-3.5 py-2.5">Menang</th>
+                    <th className="text-right font-bold px-3.5 py-2.5">Kalah</th>
+                    <th className="text-right font-bold px-3.5 py-2.5">Belum Diisi</th>
+                    <th className="text-right font-bold px-3.5 py-2.5">Menang dari Terisi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rekapOrang.map(r => (
+                    <tr key={r.ownerId} className={`border-t border-slate-100 ${r.ownerId === user.id ? 'bg-blue-50/40' : ''}`}>
+                      <td className="px-3.5 py-2.5">
+                        <span className="inline-flex items-center gap-2">
+                          {r.user && <Avatar person={r.user} size="xs" />}
+                          <span className="font-semibold text-slate-800">{r.user ? r.user.name : 'Akun dihapus'}</span>
+                          {r.ownerId === user.id && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-600 text-white">Saya</span>
+                          )}
+                        </span>
+                      </td>
+                      <td className="px-3.5 py-2.5 text-right tabular-nums text-emerald-700 font-semibold">{r.menang}</td>
+                      <td className="px-3.5 py-2.5 text-right tabular-nums text-slate-600">{r.kalah}</td>
+                      <td className={`px-3.5 py-2.5 text-right tabular-nums ${r.kosong > 0 ? 'text-amber-700 font-semibold' : 'text-slate-400'}`}>
+                        {r.kosong}
+                      </td>
+                      <td className="px-3.5 py-2.5 text-right tabular-nums font-semibold text-slate-800">
+                        {r.terisi ? `${r.persenMenang}%` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {leadTampil.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200/70 p-10 text-center">
           <TrendingUp className="w-10 h-10 text-slate-300 mx-auto mb-3" />
@@ -21260,6 +21415,7 @@ function GrdScoreboardView({ user, allUsers }) {
 
       {isian && (
         <GrdIsiSkorModal lead={isian.lead} skor={isian.skor} minggu={minggu}
+          tren={Skor.trenLead(skor, isian.lead.id, { sampai: Skor.geserMinggu(minggu, -1), jumlah: 5 })}
           onSimpan={simpanSkor} onClose={() => setIsian(null)} />
       )}
     </div>

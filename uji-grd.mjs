@@ -3101,6 +3101,34 @@ cek('60t. Empat minggu = empat prefix terpisah, tidak ada prefix global',
 lepasMockGrd();
 
 judul('61. Penjaga App.jsx — halaman Scoreboard');
+cek('61a-10. Halaman menampilkan tren antar-minggu',
+  /Skor\.rekapBeberapaMinggu\(skor, leadTampil/.test(src) && /Tren \{trenMinggu\.length\} Minggu Terakhir/.test(src));
+cek('61a-11. Batang tren bisa diklik untuk membuka minggunya',
+  /onClick=\{\(\) => setMinggu\(r\.minggu\)\}/.test(src));
+cek('61a-12. Tren disembunyikan kalau belum ada satu pun minggu terisi',
+  /trenMinggu\.some\(r => r\.terisi > 0\)/.test(src));
+cek('61a-7. Halaman punya rekap per orang',
+  /Skor\.rekapPerOrang\(skor, leadTampil, minggu, allUsers\)/.test(src)
+  && /Rekap per orang/.test(src));
+cek('61a-8. Rekap per orang disembunyikan saat cuma satu orang (tidak berguna)',
+  /rekapOrang\.length > 1/.test(src));
+cek('61a-9. Yang belum lengkap ditandai di kepala rekap',
+  /belum lengkap/.test(src));
+cek('61a-4. Label menang/kalah jadi SATU komponen bersama',
+  /function GrdLabelHasil\(/.test(src) && (src.match(/<GrdLabelHasil\b/g) || []).length >= 2);
+cek('61a-5. Label minggu jadi komponen, menandai minggu berjalan',
+  /function GrdLabelMinggu\(/.test(src) && /minggu ini<\/span>/.test(src));
+cek('61a-6. Badge hasil tidak dirangkai ulang di luar komponennya', (() => {
+  const i = src.indexOf('function GrdBarisSkor(');
+  const j = src.indexOf(' * HALAMAN SCOREBOARD MINGGUAN');
+  const blok = src.slice(i, j);
+  return !/\$\{gaya\.color\}`}>\{gaya\.label\}/.test(blok);
+})());
+cek('61a-2. Form isi skor menampilkan capaian minggu-minggu sebelumnya',
+  /Beberapa minggu terakhir/.test(src));
+cek('61a-3. Trennya diambil SAMPAI minggu SEBELUM yang sedang diisi', (() => {
+  return /Skor\.trenLead\(skor, isian\.lead\.id, \{ sampai: Skor\.geserMinggu\(minggu, -1\)/.test(src);
+})());
 cek('61a. Halaman + rute + menu terpasang',
   /function GrdScoreboardView\(/.test(src) && /view === 'grd-skor'/.test(src) && /id: 'grd-skor'/.test(src));
 cek('61b. Skor ikut BACKUP_KEYS (aturan wajib no.3)', (() => {
@@ -3125,6 +3153,53 @@ cek('61h. Istilah OKR tidak dipakai di modul scoreboard', (() => {
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   return !/\bOKR\b|\bkey result\b|\bobjective\b/i.test(isi);
 })());
+
+judul('62. Rekap per orang & lintas minggu');
+const leadTim = [
+  lm({ id: 'ta', ownerId: 'u-staf1', status: 'aktif', targetMingguan: 5 }),
+  lm({ id: 'tb', ownerId: 'u-staf1', status: 'aktif', targetMingguan: 5 }),
+  lm({ id: 'tc', ownerId: 'u-staf2', status: 'aktif', targetMingguan: 5 }),
+  lm({ id: 'td', ownerId: 'u-wakil', status: 'aktif', targetMingguan: 5 }),
+  lm({ id: 'te', ownerId: 'u-staf2', status: 'usul', targetMingguan: 5 }),
+];
+const skorTim = [
+  { id: 'a', leadId: 'ta', minggu: '2026-09-14', nilai: 6, target: 5, uom: 'K' },
+  { id: 'b', leadId: 'tb', minggu: '2026-09-14', nilai: 1, target: 5, uom: 'K' },
+  { id: 'c', leadId: 'tc', minggu: '2026-09-14', nilai: 5, target: 5, uom: 'K' },
+];
+const ro = SB.rekapPerOrang(skorTim, leadTim, '2026-09-14', tim);
+const barisOrang = (id) => ro.find(r => r.ownerId === id);
+
+cek('62a. Satu baris per PEMILIK lead aktif', ro.length === 3, ro.length);
+cek('62b. Lead yang belum disetujui tidak membuat baris',
+  barisOrang('u-staf2').total === 1);
+cek('62c. Menang & kalah per orang',
+  barisOrang('u-staf1').menang === 1 && barisOrang('u-staf1').kalah === 1);
+cek('62d. Yang belum mengisi dihitung', barisOrang('u-wakil').kosong === 1);
+cek('62e. Objek anggota ikut disertakan', barisOrang('u-staf1').user?.name === 'Andi');
+cek('62f. Persen menang dari yang TERISI', barisOrang('u-staf1').persenMenang === 50);
+cek('62g. Belum mengisi sama sekali → persen 0, bukan NaN',
+  barisOrang('u-wakil').persenMenang === 0 && Number.isFinite(barisOrang('u-wakil').persenMenang));
+
+cek('62h. Yang BELUM MENGISI diurutkan paling atas (paling perlu dibantu)',
+  ro[0].ownerId === 'u-wakil', ro.map(r => r.ownerId));
+cek('62i. Setelah itu yang paling banyak kalah', ro[1].ownerId === 'u-staf1', ro.map(r => r.ownerId));
+cek('62j. Urutan stabil antar-panggilan',
+  SB.rekapPerOrang(skorTim, leadTim, '2026-09-14', tim).map(r => r.ownerId).join()
+  === ro.map(r => r.ownerId).join());
+cek('62k. Anggota yang akunnya dihapus tetap muncul (datanya tidak hilang)', (() => {
+  const r = SB.rekapPerOrang(skorTim, [lm({ id: 'zz', ownerId: 'sudah-dihapus', status: 'aktif' })], '2026-09-14', tim);
+  return r.length === 1 && r[0].user === null;
+})());
+cek('62l. Tanpa lead aktif → kosong', SB.rekapPerOrang(skorTim, [], '2026-09-14', tim).length === 0);
+cek('62m. Minggu lain → semua belum diisi',
+  SB.rekapPerOrang(skorTim, leadTim, '2026-09-21', tim).every(r => r.kosong === r.total));
+
+const rbm = SB.rekapBeberapaMinggu(skorTim, leadTim, { sampai: '2026-09-14', jumlah: 3 });
+cek('62n. Rekap lintas minggu, terlama di kiri',
+  rbm.length === 3 && rbm[0].minggu === '2026-08-31' && rbm[2].minggu === '2026-09-14');
+cek('62o. Minggu berisi terbaca', rbm[2].terisi === 3 && rbm[2].menang === 2);
+cek('62p. Minggu kosong tetap muncul (bukan dilewati)', rbm[0].terisi === 0 && rbm[0].total === 4);
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

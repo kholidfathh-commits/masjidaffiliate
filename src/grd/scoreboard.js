@@ -211,6 +211,48 @@ export function rekapMinggu(daftarSkor, leadAktif, mk) {
 }
 
 /**
+ * REKAP PER ORANG untuk satu minggu — siapa menang berapa, siapa belum mengisi.
+ *
+ * Diurutkan: yang BELUM MENGISI di atas, lalu yang paling banyak kalah. Bukan
+ * untuk mempermalukan — papan skor mingguan gunanya justru menemukan siapa yang
+ * perlu dibantu pekan ini, dan itu hilang kalau yang sudah rapi ditaruh duluan.
+ */
+export function rekapPerOrang(daftarSkor, leadAktif, mk, allUsers) {
+  const m = awalMinggu(mk);
+  const aktif = (leadAktif || []).map(normalisasiLead).filter(l => l && l.status === 'aktif');
+
+  const perOrang = new Map();
+  for (const l of aktif) {
+    if (!perOrang.has(l.ownerId)) {
+      perOrang.set(l.ownerId, { ownerId: l.ownerId, total: 0, menang: 0, kalah: 0, kosong: 0 });
+    }
+    const baris = perOrang.get(l.ownerId);
+    baris.total += 1;
+    const s = skorLeadMinggu(daftarSkor, l.id, m);
+    if (!s) baris.kosong += 1;
+    else if (menang(s)) baris.menang += 1;
+    else baris.kalah += 1;
+  }
+
+  return [...perOrang.values()].map(b => ({
+    ...b,
+    user: (allUsers || []).find(u => u && u.id === b.ownerId) || null,
+    terisi: b.menang + b.kalah,
+    persenMenang: (b.menang + b.kalah) ? Math.round((b.menang / (b.menang + b.kalah)) * 100) : 0,
+  })).sort((a, b) => {
+    if (a.kosong !== b.kosong) return b.kosong - a.kosong;   // belum mengisi dulu
+    if (a.kalah !== b.kalah) return b.kalah - a.kalah;       // lalu yang paling banyak kalah
+    return String(a.user?.name || '').localeCompare(String(b.user?.name || ''));
+  });
+}
+
+/** Rekap beberapa minggu terakhir — untuk melihat arahnya, bukan cuma pekan ini. */
+export function rekapBeberapaMinggu(daftarSkor, leadAktif, { sampai = mingguIni(), jumlah = 6 } = {}) {
+  return daftarMinggu(sampai, jumlah).slice().reverse()
+    .map(mk => rekapMinggu(daftarSkor, leadAktif, mk));
+}
+
+/**
  * Tren beberapa minggu terakhir untuk satu lead measure — dipakai garis kecil
  * di kartu. Minggu yang belum diisi tetap muncul sebagai lubang, bukan
  * dilewati: minggu yang terlewat itu informasi, bukan ketiadaan data.
