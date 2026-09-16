@@ -6605,7 +6605,10 @@ function TaskForm({ task, prefill, user, assignableUsers, onSave, onClose }) {
 
 // ============ REPORTS ============
 function ReportsView({ user, allUsers }) {
-  if (!isPengelola(user)) return <NoAccess />;
+  // Pagar halaman, bukan cuma menu: menu yang disembunyikan masih bisa dicapai
+  // lewat state/deep link. Pesannya menyebut Co-Leader juga — sejak peran itu
+  // ada, "Manajer / Leader" saja membuat Co-Leader mengira dirinya tak berhak.
+  if (!isPengelola(user)) return <NoAccess text="Halaman Laporan Mingguan hanya untuk Manajer, Leader, dan Co-Leader." />;
   const [reports, setReports] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);

@@ -4249,6 +4249,12 @@ cek('82e. isPengelola memang mencakup Leader DAN Co-Leader',
   H.isPengelola({ role: 'leader' }) === true && H.isPengelola({ role: 'wakil' }) === true);
 cek('82f. Tapi tidak mencakup karyawan biasa', H.isPengelola({ role: 'operasional' }) === false);
 
+cek('82g0. Halamannya sendiri berpagar, bukan cuma menunya (menu tersembunyi masih bisa dicapai)',
+  /if\s*\(!isPengelola\(user\)\)\s*return\s*<NoAccess/.test(badanLap));
+cek('82g1. Pagarnya dipasang SEBELUM data dibaca/ditampilkan',
+  badanLap.indexOf('isPengelola(user)') < badanLap.indexOf('lingkupTimIds('));
+cek('82g2. Pesan tolaknya menyebut Co-Leader (sejak peran itu ada, "Manajer / Leader" menyesatkan)',
+  /NoAccess text="[^"]*Co-Leader/.test(badanLap));
 cek('82g. Isi halaman disaring lewat lingkupTimIds (satu sumber kebenaran, bukan rumus salinan)',
   /lingkupTimIds\(user,\s*allUsers\)/.test(badanLap));
 cek('82h. TIDAK ada rumus atasan yang disalin ulang di halaman ini',
