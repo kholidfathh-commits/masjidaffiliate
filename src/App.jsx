@@ -20261,6 +20261,14 @@ function GrdFormLead({ lead, goal, user, allUsers, adaSekarang, onSimpan, onClos
   const ubah = (k, v) => { setForm(f => ({ ...f, [k]: v })); setPesan(''); };
   const st = Lead.statusLeadGoal(adaSekarang || [], goal.id);
   const penilai = Lead.calonPenilai({ ownerId: goal.ownerId }, allUsers);
+  // Contoh mengikuti peran PEMILIK GOAL — tindakan seorang Leader memang beda
+  // jenisnya dengan tindakan staf.
+  const peranPemilikGoal = (allUsers || []).find(u => u && u.id === goal.ownerId)?.role || 'operasional';
+  const contohLead = Lead.templateLeadUntuk(peranPemilikGoal);
+  const pakaiContoh = (t) => {
+    setForm(f => ({ ...f, description: t.description, targetMingguan: String(t.targetMingguan), uom: t.uom }));
+    setPesan('');
+  };
 
   const simpan = async () => {
     const calon = {
@@ -20311,6 +20319,26 @@ function GrdFormLead({ lead, goal, user, allUsers, adaSekarang, onSimpan, onClos
         &ldquo;GMV naik&rdquo;. Maksimal {Lead.MAKS_LEAD_AKTIF} per goal
         {st.aktif > 0 && <> (sekarang {st.aktif} aktif{st.menunggu > 0 && `, ${st.menunggu} menunggu`})</>}.
       </div>
+
+      {/* Contoh siap pakai — hanya saat MEMBUAT usulan baru. Saat memperbaiki,
+          yang perlu dibaca adalah catatan penilai, bukan daftar contoh. */}
+      {!lama && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+          <div className="text-[11px] font-bold text-slate-600 mb-2">
+            Contoh untuk {ROLES[peranPemilikGoal]?.label || 'Karyawan'} — klik untuk mengisi, angkanya boleh diubah
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {contohLead.map((t, i) => (
+              <button key={i} onClick={() => pakaiContoh(t)}
+                title={`${t.targetMingguan} ${t.uom} / minggu`}
+                className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 hover:border-blue-400 hover:text-blue-700 transition text-left">
+                {t.description}
+                <span className="text-slate-400 font-normal"> · {t.targetMingguan} {t.uom}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-4">
         <GrdField label="Tindakan mingguan" wajib hint="Apa yang dikerjakan tiap minggu.">
@@ -20379,6 +20407,7 @@ function GrdNilaiLeadModal({ lead, goal, user, allUsers, adaSekarang, onNilai, o
   const pengusul = (allUsers || []).find(u => u && u.id === l.ownerId);
   const st = Lead.statusLeadGoal(adaSekarang || [], l.goalId);
   const slotPenuh = st.aktif >= Lead.MAKS_LEAD_AKTIF && l.status !== 'aktif';
+  const riwayat = Lead.riwayatLead(l);
 
   const kirim = async (status) => {
     setProses(status);
@@ -20409,6 +20438,28 @@ function GrdNilaiLeadModal({ lead, goal, user, allUsers, adaSekarang, onNilai, o
         <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-[12px] text-amber-800">
           Goal ini sudah punya {st.aktif} lead measure aktif (batas {Lead.MAKS_LEAD_AKTIF}).
           Untuk menyetujui yang ini, cabut salah satu yang aktif dulu.
+        </div>
+      )}
+
+      {/* Riwayat langkah: penting saat usulan sudah bolak-balik — penilai perlu
+          tahu apa yang sudah pernah diminta sebelumnya. */}
+      {riwayat.length > 0 && (
+        <div className="mt-3 rounded-xl border border-slate-200 px-3.5 py-3">
+          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
+            Riwayat ({riwayat.length} langkah)
+          </div>
+          <div className="space-y-1.5">
+            {riwayat.map((r, i) => (
+              <div key={i} className="flex items-start justify-between gap-3 text-[11px]">
+                <div className="min-w-0">
+                  <span className="font-semibold text-slate-700">{Lead.labelAksiLead(r.aksi)}</span>
+                  <span className="text-slate-400"> oleh {r.olehNama}</span>
+                  {r.catatan && <div className="text-slate-500 mt-0.5">&ldquo;{r.catatan}&rdquo;</div>}
+                </div>
+                <span className="text-slate-400 flex-shrink-0 tabular-nums">{grdWaktuJejak(r.waktu)}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -20565,6 +20616,80 @@ function GrdBlokLeadGoal({ goal, leads, user, allUsers, onUsul, onNilai, onUbah 
 }
 
 /**
+ * KOTAK MASUK PENILAIAN — semua usulan yang menunggu penilaian saya, datar.
+ *
+ * Disusun datar (bukan per goal seperti daftar utama) karena pertanyaannya beda:
+ * di daftar utama orang bertanya "goal ini sehat tidak?", di sini "apa yang
+ * harus saya kerjakan sekarang?". Atasan dengan banyak bawahan tidak perlu
+ * menyusuri goal satu per satu untuk menemukan yang menunggu.
+ *
+ * Setujui bisa satu klik. Tolak & minta perbaiki TIDAK — keduanya wajib catatan,
+ * jadi tetap lewat panel penilaian.
+ */
+function GrdKotakMasukLead({ daftar, goals, user, allUsers, leads, onSetujui, onBukaNilai }) {
+  const [proses, setProses] = useState('');
+
+  if (daftar.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200/70 p-10 text-center">
+        <CheckCircle2 className="w-10 h-10 text-emerald-300 mx-auto mb-3" />
+        <div className="font-semibold text-slate-700">Tidak ada usulan yang menunggu Anda</div>
+        <div className="text-sm text-slate-500 mt-1">Semua usulan dari tim Anda sudah dinilai.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {daftar.map(l => {
+        const goal = goals.find(g => g.id === l.goalId);
+        const pengusul = allUsers.find(u => u && u.id === l.ownerId);
+        const st = Lead.statusLeadGoal(leads, l.goalId);
+        const slotPenuh = st.aktif >= Lead.MAKS_LEAD_AKTIF;
+        return (
+          <div key={l.id} className="bg-white rounded-2xl border border-slate-200/70 p-4 shadow-sm shadow-slate-200/40">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-slate-800">{l.description}</div>
+                <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
+                  <span className="font-semibold text-slate-700">{l.targetMingguan}</span> {l.uom} / minggu
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1.5 inline-flex items-center gap-1.5 flex-wrap">
+                  {pengusul && <Avatar person={pengusul} size="xs" />}
+                  <span>{pengusul ? pengusul.name : 'seseorang'}</span>
+                  {goal && (
+                    <>
+                      <span className="text-slate-300">·</span>
+                      <span className="text-slate-400">untuk goal: {goal.description}</span>
+                    </>
+                  )}
+                </div>
+                {slotPenuh && (
+                  <div className="text-[11px] text-amber-700 mt-1.5">
+                    Goal ini sudah punya {st.aktif} lead aktif — cabut salah satu dulu untuk menyetujui.
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button onClick={async () => { setProses(l.id); await onSetujui(l); setProses(''); }}
+                  disabled={proses === l.id || slotPenuh}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3 py-2 rounded-lg font-semibold text-sm inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4" /> {proses === l.id ? 'Menyimpan…' : 'Setujui'}
+                </button>
+                <button onClick={() => onBukaNilai(l)} disabled={proses === l.id}
+                  className="bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 text-slate-700 px-3 py-2 rounded-lg font-semibold text-sm">
+                  Tolak / Perbaiki
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * HALAMAN LEAD MEASURE — tindakan mingguan yang mendorong tiap goal.
  *
  * Disusun PER GOAL, bukan sebagai satu daftar panjang: lead measure tidak punya
@@ -20580,6 +20705,15 @@ function GrdLeadView({ user, allUsers }) {
   const [hanyaPerluSaya, setHanyaPerluSaya] = useState(false);
   const [formLead, setFormLead] = useState(null); // { goal, lead? }
   const [nilaiLead, setNilaiLead] = useState(null); // { goal, lead }
+
+  // Setujui satu klik dari kotak masuk. Tolak & minta perbaiki tidak disediakan
+  // di sini karena keduanya wajib catatan — itu tetap lewat panel penilaian.
+  const setujuiCepat = async (l) => {
+    try {
+      await GrdSvc.nilaiLead(l, 'aktif', { user, allUsers });
+      await muat();
+    } catch (e) { alert('⚠️ ' + (e?.message || e)); }
+  };
 
   const kirimNilai = async (l, status, catatan) => {
     try {
@@ -20686,7 +20820,11 @@ function GrdLeadView({ user, allUsers }) {
         <MiniStat label="Goal Tanpa Lead" value={goalPeriode.filter(g => Lead.leadAktif(leads, g.id).length === 0).length} />
       </div>
 
-      {tampil.length === 0 ? (
+      {hanyaPerluSaya ? (
+        <GrdKotakMasukLead daftar={perluSaya} goals={goalPeriode} user={user} allUsers={allUsers}
+          leads={leads} onSetujui={setujuiCepat}
+          onBukaNilai={(l) => setNilaiLead({ goal: goalPeriode.find(g => g.id === l.goalId), lead: l })} />
+      ) : tampil.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200/70 p-10 text-center">
           <ClipboardCheck className="w-10 h-10 text-slate-300 mx-auto mb-3" />
           <div className="font-semibold text-slate-700">

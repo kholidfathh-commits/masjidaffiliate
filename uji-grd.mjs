@@ -2414,6 +2414,37 @@ cek('46d. Ringkasan menghitung tiap status',
 cek('46e. Daftar kosong aman', L.ringkasLead([]).total === 0 && L.ringkasLead(null).total === 0);
 
 judul('47. Penjaga App.jsx — halaman Lead Measure');
+cek('47a-19. Kotak masuk penilaian ada & dipakai halaman',
+  /function GrdKotakMasukLead\(/.test(src) && /<GrdKotakMasukLead\b/.test(src));
+cek('47a-20. Setujui bisa satu klik dari kotak masuk',
+  /const setujuiCepat = async \(l\) =>/.test(src));
+cek('47a-21. Tolak & perbaiki TIDAK satu klik (keduanya wajib catatan)', (() => {
+  const i = src.indexOf('function GrdKotakMasukLead(');
+  const j = src.indexOf(' * HALAMAN LEAD MEASURE');
+  const blok = src.slice(i, j);
+  // hanya ada satu tombol aksi langsung; sisanya membuka panel penilaian
+  return /onBukaNilai\(l\)/.test(blok) && /Tolak \/ Perbaiki/.test(blok);
+})());
+cek('47a-22. Kotak masuk kosong diberi keadaan yang jelas', (() => {
+  const i = src.indexOf('function GrdKotakMasukLead(');
+  const j = src.indexOf(' * HALAMAN LEAD MEASURE');
+  return /Tidak ada usulan yang menunggu Anda/.test(src.slice(i, j));
+})());
+cek('47a-23. Tombol setujui terkunci saat slot goal penuh', (() => {
+  const i = src.indexOf('function GrdKotakMasukLead(');
+  const j = src.indexOf(' * HALAMAN LEAD MEASURE');
+  return /disabled=\{proses === l\.id \|\| slotPenuh\}/.test(src.slice(i, j));
+})());
+cek('47a-17. Form usul punya contoh siap pakai per peran pemilik goal',
+  /Lead\.templateLeadUntuk\(peranPemilikGoal\)/.test(src));
+cek('47a-18. Contoh hanya muncul saat MEMBUAT, bukan saat memperbaiki', (() => {
+  const i = src.indexOf('function GrdFormLead(');
+  const j = src.indexOf('function GrdNilaiLeadModal(');
+  const blok = src.slice(i, j);
+  return /\{!lama && \(\s*<div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/.test(blok);
+})());
+cek('47a-16. Panel penilaian menampilkan riwayat langkah',
+  /Lead\.riwayatLead\(l\)/.test(src) && /Riwayat \(\{riwayat\.length\} langkah\)/.test(src));
 cek('47a-14. Kartu goal di pohon memakai lencana lead measure', (() => {
   const i = src.indexOf('function GrdKartuGoal(');
   const j = src.indexOf('function GrdSimpul(');
@@ -2684,6 +2715,101 @@ cek('51h. Lead goal lain tidak memengaruhi',
 cek('51i. Tiap lencana punya warna & penjelasan',
   ['teks', 'color', 'judul'].every(k => k in bg([], 'gx')));
 cek('51j. Daftar kosong/null aman', bg(null, 'gx')?.teks === 'tanpa lead');
+
+judul('52. Riwayat langkah lead measure');
+const spRw = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spRw });
+const goalRw = { id: 'gr1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(goalRw, { user: OWNER, allUsers: tim });
+
+let rw = await Svc.usulkanLead(
+  { goalId: 'gr1', ownerId: 'u-staf1', description: 'Konten tayang', targetMingguan: 2, uom: 'Konten' },
+  { user: STAF1, allUsers: tim, goal: goalRw });
+cek('52a. Usulan pertama mencatat langkah "usul"',
+  rw.riwayat.length === 1 && rw.riwayat[0].aksi === 'usul');
+cek('52b. Siapa & kapan tercatat',
+  rw.riwayat[0].olehId === 'u-staf1' && !!rw.riwayat[0].waktu);
+
+rw = await Svc.nilaiLead(rw, 'perbaiki', { user: LEADER, allUsers: tim, catatan: 'Terlalu rendah.' });
+cek('52c. Penilaian menambah langkah, tidak menimpa', rw.riwayat.length === 2);
+cek('52d. Catatan penilai ikut tersimpan di riwayat',
+  rw.riwayat[1].aksi === 'perbaiki' && /Terlalu rendah/.test(rw.riwayat[1].catatan));
+
+rw = await Svc.usulkanLead({ ...rw, targetMingguan: 10 },
+  { user: STAF1, allUsers: tim, goal: goalRw, leadLama: rw });
+cek('52e. Usulan ulang mencatat "usulUlang"',
+  rw.riwayat.length === 3 && rw.riwayat[2].aksi === 'usulUlang');
+cek('52f. Riwayat lama TIDAK hilang saat diusulkan ulang',
+  rw.riwayat.map(r => r.aksi).join() === 'usul,perbaiki,usulUlang', rw.riwayat.map(r => r.aksi));
+cek('52g. Catatan penilai TERAKHIR tetap dibersihkan (itu status, bukan riwayat)',
+  rw.catatan === '');
+
+rw = await Svc.nilaiLead(rw, 'aktif', { user: LEADER, allUsers: tim });
+cek('52h. Persetujuan jadi langkah keempat', rw.riwayat.length === 4 && rw.riwayat[3].aksi === 'aktif');
+cek('52i. Riwayat tersimpan ikut record (bukan hilang saat dibaca ulang)',
+  (await Svc.ambilLeadGoal('gr1'))[0].riwayat.length === 4);
+
+cek('52j. riwayatLead menampilkan TERBARU di atas',
+  L.riwayatLead(rw)[0].aksi === 'aktif' && L.riwayatLead(rw)[3].aksi === 'usul');
+cek('52k. riwayatLead tidak mengubah urutan aslinya',
+  rw.riwayat[0].aksi === 'usul');
+cek('52l. Label aksi manusiawi',
+  L.labelAksiLead('usulUlang') === 'Diusulkan ulang' && L.labelAksiLead('aktif') === 'Disetujui');
+cek('52m. Aksi tak dikenal tidak kosong', L.labelAksiLead('ngawur') === 'ngawur');
+cek('52n. Riwayat dibatasi supaya record tidak membengkak', (() => {
+  let dummy = { id: 'x', goalId: 'g', ownerId: 'u', description: 'a', targetMingguan: 1, uom: 'x', riwayat: [] };
+  for (let i = 0; i < L.MAKS_RIWAYAT_LEAD + 10; i++) {
+    dummy = { ...dummy, riwayat: L.tambahRiwayatLead(dummy, { aksi: 'usul', oleh: STAF1 }) };
+  }
+  return dummy.riwayat.length === L.MAKS_RIWAYAT_LEAD;
+})());
+cek('52o. Yang dibuang yang PALING LAMA, bukan yang terbaru', (() => {
+  let dummy = { id: 'x', goalId: 'g', ownerId: 'u', description: 'a', targetMingguan: 1, uom: 'x', riwayat: [] };
+  for (let i = 0; i < L.MAKS_RIWAYAT_LEAD + 3; i++) {
+    dummy = { ...dummy, riwayat: L.tambahRiwayatLead(dummy, { aksi: 'usul', oleh: STAF1, catatan: 'ke-' + i }) };
+  }
+  const akhir = dummy.riwayat[dummy.riwayat.length - 1].catatan;
+  return akhir === 'ke-' + (L.MAKS_RIWAYAT_LEAD + 2);
+})());
+cek('52p. Record lama tanpa riwayat tidak error',
+  L.riwayatLead({ id: 'z', goalId: 'g', ownerId: 'u', description: 'a', targetMingguan: 1, uom: 'x' }).length === 0);
+lepasMockGrd();
+
+judul('53. Contoh lead measure siap pakai');
+cek('53a. Tiap peran punya contoh', ['owner','manajer','leader','wakil','operasional']
+  .every(r => Array.isArray(L.TEMPLATE_LEAD[r]) && L.TEMPLATE_LEAD[r].length > 0));
+cek('53b. Peran tak dikenal jatuh ke contoh karyawan',
+  L.templateLeadUntuk('ngawur') === L.TEMPLATE_LEAD.operasional);
+cek('53c. Semua contoh punya angka mingguan > 0',
+  Object.values(L.TEMPLATE_LEAD).flat().every(t => t.targetMingguan > 0));
+cek('53d. Semua contoh punya satuan', Object.values(L.TEMPLATE_LEAD).flat().every(t => !!t.uom));
+cek('53e. Contoh berbentuk TINDAKAN, bukan hasil', (() => {
+  // "GMV naik", "omzet", "profit" itu hasil — bukan sesuatu yang dikerjakan.
+  return Object.values(L.TEMPLATE_LEAD).flat()
+    .every(t => !/\bGMV\b|\bomzet\b|\bprofit\b|\bpendapatan\b/i.test(t.description));
+})());
+cek('53f. Contoh bukan niat kabur', (() => {
+  return Object.values(L.TEMPLATE_LEAD).flat()
+    .every(t => !/^(lebih|rajin|giat|semangat|berusaha)\b/i.test(t.description));
+})());
+
+const goalCth = { id: 'gc9', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+cek('53g. Contoh + goal = usulan yang LOLOS validasi', (() => {
+  return Object.values(L.TEMPLATE_LEAD).flat()
+    .every(t => L.validasiLead(L.terapkanTemplateLead(t, goalCth)) === '');
+})());
+cek('53h. goalId & ownerId ikut terpasang dari goalnya', (() => {
+  const c = L.terapkanTemplateLead(L.TEMPLATE_LEAD.operasional[0], goalCth);
+  return c.goalId === 'gc9' && c.ownerId === 'u-staf1';
+})());
+cek('53i. Statusnya mulai dari "usul"',
+  L.terapkanTemplateLead(L.TEMPLATE_LEAD.leader[0], goalCth).status === 'usul');
+cek('53j. Contoh kosong tidak error (ditolak validasi, bukan meledak)', (() => {
+  const c = L.terapkanTemplateLead(null, goalCth);
+  return c !== null && L.validasiLead(c) !== '';
+})());
+cek('53k. Goal kosong tidak error', L.terapkanTemplateLead(L.TEMPLATE_LEAD.leader[0], null) !== null);
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

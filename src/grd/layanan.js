@@ -386,6 +386,9 @@ export async function usulkanLead(lead, { user, allUsers, goal, leadLama = null 
     status: 'usul',
     catatan: '',           // catatan penilai dibersihkan saat diusulkan ulang
     penilaiId: '', penilaiNama: '',
+    riwayat: Lead.tambahRiwayatLead(leadLama || l, {
+      aksi: leadLama ? 'usulUlang' : 'usul', oleh: user,
+    }),
     diusulkanOleh: (user && user.id) || '',
     diusulkanNama: (user && user.name) || '',
     diusulkanPada: new Date().toISOString(),
@@ -447,6 +450,7 @@ export async function nilaiLead(lead, statusBaru, { user, allUsers, catatan = ''
     penilaiId: (user && user.id) || '',
     penilaiNama: (user && user.name) || '',
     dinilaiPada: new Date().toISOString(),
+    riwayat: Lead.tambahRiwayatLead(l, { aksi: statusBaru, oleh: user, catatan: alasan }),
   };
   const ok = await st().set(kunciLead(rec), rec);
   if (!ok) throw new GrdDitolak('Gagal menyimpan penilaian. Coba lagi.');

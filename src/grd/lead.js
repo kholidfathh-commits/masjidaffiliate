@@ -78,7 +78,51 @@ export function normalisasiLead(l) {
     catatan: String(l.catatan || '').trim(),
     penilaiId: l.penilaiId ? String(l.penilaiId) : '',
     penilaiNama: String(l.penilaiNama || ''),
+    riwayat: Array.isArray(l.riwayat) ? l.riwayat : [],
   };
+}
+
+/**
+ * Riwayat langkah disimpan DI DALAM record lead, bukan sebagai baris terpisah
+ * seperti jejak goal.
+ *
+ * Alasannya: jumlahnya kecil (beberapa langkah usul–nilai), selalu dibutuhkan
+ * bersama lead-nya, dan tidak pernah ditulis dua pihak bersamaan — satu
+ * penilaian adalah satu penulisan. Jejak goal beda: ia bisa panjang tak
+ * terbatas dan dibaca terpisah, karena itu dipisah jadi baris sendiri.
+ *
+ * Dibatasi supaya record tidak membengkak tanpa henti; yang dibuang yang
+ * PALING LAMA, bukan yang terbaru.
+ */
+export const MAKS_RIWAYAT_LEAD = 20;
+
+export function tambahRiwayatLead(lead, { aksi, oleh, catatan = '', waktu = new Date().toISOString() }) {
+  const n = normalisasiLead(lead);
+  const baris = {
+    aksi,
+    olehId: (oleh && oleh.id) || '',
+    olehNama: (oleh && oleh.name) || 'Tidak diketahui',
+    catatan: String(catatan || '').trim(),
+    waktu,
+  };
+  const semua = [...(n ? n.riwayat : []), baris];
+  return semua.slice(-MAKS_RIWAYAT_LEAD);
+}
+
+export const LABEL_AKSI_LEAD = {
+  usul: 'Diusulkan',
+  usulUlang: 'Diusulkan ulang',
+  aktif: 'Disetujui',
+  perbaiki: 'Diminta perbaiki',
+  ditolak: 'Ditolak',
+};
+export const labelAksiLead = (a) => LABEL_AKSI_LEAD[a] || a;
+
+/** Riwayat terbaru di atas — untuk ditampilkan. */
+export function riwayatLead(lead) {
+  const n = normalisasiLead(lead);
+  if (!n) return [];
+  return [...n.riwayat].reverse();
 }
 
 /** Pesan kesalahan pertama, atau '' bila isian sudah layak diusulkan. */
@@ -141,6 +185,62 @@ export function badgeLeadGoal(daftar, goalId) {
       judul: 'Goal ini belum punya lead measure aktif — belum ada tindakan mingguan yang mendorongnya' };
   }
   return null;
+}
+
+/**
+ * CONTOH LEAD MEASURE siap pakai.
+ *
+ * Alasannya sama dengan template goal: menulis lead measure yang tajam itu
+ * sulit dari nol, dan yang ditulis terburu-buru biasanya berupa HASIL
+ * ("GMV naik") atau NIAT ("lebih rajin") — dua-duanya tidak bisa diisi mingguan.
+ * Contoh di sini semuanya berbentuk tindakan yang bisa dihitung.
+ *
+ * Dikelompokkan menurut peran pemilik goal, bukan menurut divisi: tindakan
+ * seorang Leader memang beda jenisnya dengan tindakan staf, sedangkan dua
+ * divisi yang berbeda bisa punya tindakan yang mirip.
+ */
+export const TEMPLATE_LEAD = {
+  owner: [
+    { description: 'Sesi tinjauan goal bersama manajer', targetMingguan: 1, uom: 'Sesi' },
+    { description: 'Divisi yang laporan mingguannya ditinjau', targetMingguan: 7, uom: 'Divisi' },
+  ],
+  manajer: [
+    { description: 'Sesi pendampingan leader', targetMingguan: 2, uom: 'Sesi' },
+    { description: 'Laporan mingguan tim yang ditinjau', targetMingguan: 5, uom: 'Laporan' },
+  ],
+  leader: [
+    { description: 'Sesi 1-on-1 dengan anggota tim', targetMingguan: 3, uom: 'Sesi' },
+    { description: 'Tiket tim yang ditinjau sebelum tenggat', targetMingguan: 10, uom: 'Tiket' },
+    { description: 'Anggota tim yang dicek progres belajarnya', targetMingguan: 5, uom: 'Orang' },
+  ],
+  wakil: [
+    { description: 'Pendampingan anggota tim', targetMingguan: 3, uom: 'Sesi' },
+    { description: 'Laporan harian anggota yang dicek', targetMingguan: 15, uom: 'Laporan' },
+  ],
+  operasional: [
+    { description: 'Konten affiliate tayang', targetMingguan: 7, uom: 'Konten' },
+    { description: 'Sesi live', targetMingguan: 3, uom: 'Sesi' },
+    { description: 'Sampel produk dipakai untuk konten', targetMingguan: 3, uom: 'Produk' },
+    { description: 'Riset produk baru', targetMingguan: 5, uom: 'Produk' },
+  ],
+};
+
+/** Contoh untuk sebuah peran — peran tak dikenal jatuh ke contoh karyawan. */
+export function templateLeadUntuk(peran) {
+  return TEMPLATE_LEAD[peran] || TEMPLATE_LEAD.operasional;
+}
+
+/** Contoh + goal = calon lead measure yang siap diperiksa `validasiLead`. */
+export function terapkanTemplateLead(template, goal) {
+  const t = template || {};
+  const g = normalisasiGoal(goal);
+  return normalisasiLead({
+    goalId: (g && g.id) || '',
+    ownerId: (g && g.ownerId) || '',
+    description: t.description || '',
+    targetMingguan: t.targetMingguan,
+    uom: t.uom || '',
+  });
 }
 
 // ====== HAK AKSES ======
