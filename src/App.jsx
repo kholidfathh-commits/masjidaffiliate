@@ -711,19 +711,6 @@ async function loadSampleStats() {
   return await storage.listByPrefix(Sampel.STAT_REC_PREFIX);
 }
 
-// ====== GRD (Goal Roll Down) ======
-// Per-record: 1 baris = 1 goal (`grdgoal:rec:<id>`) dan 1 baris = 1 catatan jejak
-// (`grdjejak:rec:<id>`). Dipilih begini supaya dua orang yang menyimpan goal
-// hampir bersamaan tidak saling menimpa — pelajaran yang sama dari modul
-// tiket/absensi/catatan. `listByPrefix` memakai LIKE (aturan wajib no.5).
-async function loadGoals() {
-  const recs = await storage.listByPrefix(Grd.GOAL_REC_PREFIX); // throw saat koneksi gagal → pemanggil pertahankan state lama
-  return recs.map(Grd.normalisasiGoal).filter(Boolean);
-}
-async function loadJejakGrd() {
-  return await storage.listByPrefix(Grd.JEJAK_REC_PREFIX);
-}
-
 // ====== GRD: suntik dependensi app ke modul layanan ======
 // Sama alasannya dengan initLms di bawah: src/grd/layanan.js tidak boleh
 // meng-import App.jsx, jadi `storage` dioper dari sini. `log` dibungkus arrow
@@ -737,6 +724,23 @@ initGrd({
   // polanya dengan foto → Storage: setup yang belum dijalankan tidak merusak app.
   rpc: supabase ? (nama, args) => supabase.rpc(nama, args) : null,
 });
+
+// ====== GRD (Goal Roll Down) ======
+// Per-record: 1 baris = 1 goal (`grdgoal:rec:<id>`) dan 1 baris = 1 catatan jejak
+// (`grdjejak:rec:<id>`). Dipilih begini supaya dua orang yang menyimpan goal
+// hampir bersamaan tidak saling menimpa — pelajaran yang sama dari modul
+// tiket/absensi/catatan. `listByPrefix` memakai LIKE (aturan wajib no.5).
+// Loader untuk mesin backup/restore. Sengaja lewat layanan juga, bukan menyentuh
+// storage sendiri: kalau nanti pembacaan goal pindah ke RPC, backup ikut pindah
+// tanpa ada yang ketinggalan. Keduanya melempar saat koneksi gagal → pemanggil
+// mempertahankan state lama, tidak mengosongkan layar.
+async function loadGoals() {
+  return await GrdSvc.ambilGoal();
+}
+async function loadJejakGrd() {
+  return await GrdSvc.ambilJejak();
+}
+
 
 // ====== LMS: suntik dependensi app ke modul pembelajaran ======
 // Dipanggil SEKALI di sini, tepat sebelum registry di bawah, karena loader LMS butuh
@@ -18817,8 +18821,14 @@ function GrdDetailGoal({ goal, user, allUsers, semuaGoal, jejak = [], onClose, o
   const gaya = Grd.gayaStatus(Grd.statusCapaian(g));
   const persen = Grd.persenCapaian(g);
   const sisa = Grd.sisaMenujuTarget(g);
-  const induk = Grd.goalInduk(g, semuaGoal);
-  const turunan = Grd.goalTurunan(g, semuaGoal);
+  // GERBANG: rantai ditelusuri hanya di antara goal yang boleh dilihat pengguna
+  // ini — supaya "diturunkan ke N goal" tidak ikut menghitung cabang lain.
+  // SENGAJA bukan useMemo: komponen ini punya `if (!g) return null` di atas, dan
+  // hook setelah early return melanggar aturan hooks React (jumlah hook berubah
+  // antar-render). Penyaringannya ringan, jadi dihitung biasa saja.
+  const terlihat = Grd.goalYangBisaDilihat(user, semuaGoal, allUsers);
+  const induk = Grd.goalInduk(g, terlihat);
+  const turunan = Grd.goalTurunan(g, terlihat);
   const pemilikInduk = induk ? Grd.pemilikGoal(induk, allUsers) : null;
   const bolehUbah = Grd.bisaUbahGoal(user, g, allUsers);
   const riwayat = Grd.riwayatGoal(jejak, g.id);
@@ -19635,9 +19645,13 @@ function GrdHapusGoalModal({ goal, allUsers, goalAda, onHapus, onClose }) {
 }
 
 /** Satu baris goal di halaman Kelola Goal. */
-function GrdBarisGoal({ g, pemilik, onBuka, onUbah, onTurunkan, onHapus }) {
+function GrdBarisGoal({ g, pemilik, user, allUsers, onBuka, onUbah, onTurunkan, onHapus }) {
   const gaya = Grd.gayaStatus(Grd.statusCapaian(g));
   const persen = Grd.persenCapaian(g);
+  // Baris ini MEMERIKSA SENDIRI wewenangnya, tidak mengandalkan pemanggil sudah
+  // menyaring daftarnya. Pemanggil hari ini memang menyaring — tapi kalau besok
+  // daftarnya diperluas (mis. menampilkan goal tim), tombolnya tidak ikut bocor.
+  const bolehUbah = !user || Grd.bisaUbahGoal(user, g, allUsers);
   return (
     <div onClick={() => onBuka && onBuka(g)} role="button" tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBuka && onBuka(g); } }}
@@ -19664,19 +19678,19 @@ function GrdBarisGoal({ g, pemilik, onBuka, onUbah, onTurunkan, onHapus }) {
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>{gaya.label}</span>
           <span className="font-display font-bold text-sm text-slate-700 tabular-nums w-11 text-right">{persen}%</span>
-          {onTurunkan && (
+          {bolehUbah && onTurunkan && (
             <button onClick={e => { e.stopPropagation(); onTurunkan(g); }} title="Turunkan ke bawahan langsung"
               className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50">
               <Network className="w-3.5 h-3.5" />
             </button>
           )}
-          {onUbah && (
+          {bolehUbah && onUbah && (
             <button onClick={e => { e.stopPropagation(); onUbah(g); }} title="Ubah goal"
               className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50">
               <Edit2 className="w-3.5 h-3.5" />
             </button>
           )}
-          {onHapus && (
+          {bolehUbah && onHapus && (
             <button onClick={e => { e.stopPropagation(); onHapus(g); }} title="Hapus goal"
               className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50">
               <Trash2 className="w-3.5 h-3.5" />
@@ -19692,7 +19706,7 @@ function GrdBarisGoal({ g, pemilik, onBuka, onUbah, onTurunkan, onHapus }) {
 }
 
 /** Satu simpul RANTAI GOAL: goal induk di atas, turunannya menjorok ke dalam. */
-function GrdSimpulRantai({ simpul, allUsers, onBuka, onUbah, onTurunkan, onHapus }) {
+function GrdSimpulRantai({ simpul, user, allUsers, onBuka, onUbah, onTurunkan, onHapus }) {
   const g = simpul.goal;
   const pemilik = Grd.pemilikGoal(g, allUsers);
   const punyaAnak = (simpul.anak || []).length > 0;
@@ -19701,11 +19715,12 @@ function GrdSimpulRantai({ simpul, allUsers, onBuka, onUbah, onTurunkan, onHapus
       {simpul.level > 0 && (
         <span aria-hidden="true" className="absolute -left-4 sm:-left-6 top-7 w-4 sm:w-6 h-px bg-slate-200" />
       )}
-      <GrdBarisGoal g={g} pemilik={pemilik} onBuka={onBuka} onUbah={onUbah} onTurunkan={onTurunkan} onHapus={onHapus} />
+      <GrdBarisGoal g={g} pemilik={pemilik} user={user} allUsers={allUsers}
+        onBuka={onBuka} onUbah={onUbah} onTurunkan={onTurunkan} onHapus={onHapus} />
       {punyaAnak && (
         <div className="mt-2.5 ml-4 sm:ml-7 pl-4 sm:pl-6 border-l-2 border-slate-200 space-y-2.5">
           {simpul.anak.map(a => (
-            <GrdSimpulRantai key={a.goal.id} simpul={a} allUsers={allUsers}
+            <GrdSimpulRantai key={a.goal.id} simpul={a} user={user} allUsers={allUsers}
               onBuka={onBuka} onUbah={onUbah} onTurunkan={onTurunkan} onHapus={onHapus} />
           ))}
         </div>
@@ -19858,7 +19873,7 @@ function GrdKelolaView({ user, allUsers }) {
           )}
           <div className="space-y-2.5">
             {rantai.map(s => (
-              <GrdSimpulRantai key={s.goal.id} simpul={s} allUsers={allUsers}
+              <GrdSimpulRantai key={s.goal.id} simpul={s} user={user} allUsers={allUsers}
                 onBuka={setDetail} onUbah={tulis.bukaUbah} onTurunkan={tulis.setTurunkan} onHapus={tulis.setHapus} />
             ))}
           </div>
@@ -19867,6 +19882,7 @@ function GrdKelolaView({ user, allUsers }) {
         <div className="space-y-2.5">
           {tampil.map(g => (
             <GrdBarisGoal key={g.id} g={g} pemilik={Grd.pemilikGoal(g, allUsers)}
+              user={user} allUsers={allUsers}
               onBuka={setDetail} onUbah={tulis.bukaUbah} onHapus={tulis.setHapus}
               onTurunkan={bolehTurunkan(g) ? tulis.setTurunkan : null} />
           ))}
@@ -19948,6 +19964,12 @@ function GrdAksesView({ user, allUsers }) {
   const goalUji = goals.find(g => g && g.id === ujiGoal) || null;
   const hasilUji = goalUji ? Grd.alasanUbahGoal(orangUji, goalUji, allUsers) : null;
   const hasilLihat = goalUji ? Grd.alasanLihatGoal(orangUji, goalUji, allUsers) : null;
+  const pratinjau = useMemo(() => Grd.pratinjauAkses(orangUji, allUsers, goals),
+    [orangUji, allUsers, goals]);
+  // Status pengguna sendiri.
+  const statusSaya = useMemo(() => Grd.ringkasAksesUser(user, allUsers, goals), [user, allUsers, goals]);
+  const praSaya = useMemo(() => Grd.pratinjauAkses(user, allUsers, goals), [user, allUsers, goals]);
+  const jalur = GrdSvc.jalurGrd();
 
   if (loading) return <div className="text-slate-400 text-sm">Memuat data akses…</div>;
 
@@ -19955,6 +19977,37 @@ function GrdAksesView({ user, allUsers }) {
     <div className="max-w-5xl">
       <PageHeader title="Kontrol Akses Data GRD"
         subtitle="Siapa boleh melihat dan mengubah goal — beserta alasannya" />
+
+      {/* Status peran pengguna sendiri — pertanyaan pertama yang biasanya muncul
+          saat membuka halaman ini adalah "saya sendiri bisa apa?". */}
+      <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50/50 p-4">
+        <div className="flex items-start gap-3 flex-wrap">
+          <Avatar person={user} size="md" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-slate-900">{user.name}</span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${ROLES[user.role]?.color || ''}`}>
+                {ROLES[user.role]?.label || 'Karyawan'}
+              </span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${Grd.gayaLingkup(statusSaya.lingkup).color}`}>
+                {Grd.gayaLingkup(statusSaya.lingkup).label}
+              </span>
+            </div>
+            <div className="text-[12px] text-slate-600 mt-1.5 leading-relaxed">
+              Anda melihat <span className="font-bold text-slate-800">{praSaya.terlihat}</span> dari {praSaya.totalGoal} goal
+              {praSaya.tersembunyi > 0 && <> ({praSaya.tersembunyi} di luar kewenangan)</>}
+              {' · '}boleh mengubah <span className="font-bold text-slate-800">{praSaya.bisaUbah}</span>
+              {' · '}boleh membuat goal untuk <span className="font-bold text-slate-800">{statusSaya.jumlahBisaBuatUntuk}</span> orang
+              {statusSaya.jumlahBawahan > 0 && <> ({statusSaya.jumlahBawahan} bawahan berjenjang)</>}.
+            </div>
+            <div className="text-[11px] text-slate-400 mt-1">
+              Jalur data: {jalur === 'rpc'
+                ? 'lewat fungsi server (RPC)'
+                : jalur === 'kv' ? 'tulis langsung ke kv_store' : 'menyesuaikan otomatis'}
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="grid md:grid-cols-3 gap-3 mb-5">
         <GrdKartuPrinsip icon={Eye} judul="Lihat Sesuai Peran"
@@ -20011,6 +20064,34 @@ function GrdAksesView({ user, allUsers }) {
         {goals.length === 0 && (
           <div className="mt-3 text-[12px] text-slate-500">
             Belum ada goal untuk diperiksa. Buat dulu di halaman Kelola Goal.
+          </div>
+        )}
+
+        {/* Pratinjau: apa yang SEBENARNYA dilihat orang ini. Hanya menghitung —
+            tidak pernah dipakai untuk bertindak atas namanya. */}
+        {goals.length > 0 && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
+              Yang dilihat {orangUji.name}
+            </div>
+            <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-[12px] text-slate-700">
+              <span><span className="font-bold text-slate-900">{pratinjau.terlihat}</span> dari {pratinjau.totalGoal} goal terlihat</span>
+              <span><span className="font-bold text-slate-900">{pratinjau.bisaUbah}</span> bisa diubah</span>
+              {pratinjau.tersembunyi > 0 && (
+                <span className="text-slate-500 inline-flex items-center gap-1">
+                  <EyeOff className="w-3 h-3" /> {pratinjau.tersembunyi} tersembunyi
+                </span>
+              )}
+            </div>
+            {pratinjau.orangTersembunyi.length > 0 && (
+              <div className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                Goal milik <span className="font-semibold">{pratinjau.orangTersembunyi.map(u => u.name).join(', ')}</span>
+                {' '}tidak terlihat olehnya — bukan dirinya, bukan bawahannya, bukan atasannya.
+              </div>
+            )}
+            {pratinjau.tersembunyi === 0 && pratinjau.totalGoal > 0 && (
+              <div className="text-[11px] text-slate-500 mt-2">Seluruh goal terlihat olehnya.</div>
+            )}
           </div>
         )}
 
