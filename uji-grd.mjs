@@ -2477,8 +2477,8 @@ cek('47a-12. Goal tanpa lead aktif diberi tahu + jalan pintas ke halamannya', ((
   const blok = src.slice(i, j);
   return /belum punya tindakan mingguan/.test(blok) && /onBukaLead/.test(blok);
 })());
-cek('47a-13. Kedua halaman goal memuat lead measure',
-  (src.match(/GrdSvc\.ambilLead\(\)/g) || []).length >= 3);
+cek('47a-13. Halaman goal & lead sama-sama meminta lead measure lewat satu pintu',
+  (src.match(/butuh: \['goal', 'lead'/g) || []).length >= 3);
 cek('47a-8. Usulan DITOLAK bisa diperbaiki dari layar (sesuai ALUR_LEAD)', (() => {
   const i = src.indexOf('function GrdKartuLead(');
   const j = src.indexOf('function GrdBlokLeadGoal(');
@@ -3201,12 +3201,104 @@ cek('62n. Rekap lintas minggu, terlama di kiri',
 cek('62o. Minggu berisi terbaca', rbm[2].terisi === 3 && rbm[2].menang === 2);
 cek('62p. Minggu kosong tetap muncul (bukan dilewati)', rbm[0].terisi === 0 && rbm[0].total === 4);
 
+judul('63. Satu pintu pemuatan konteks GRD');
+const spKx = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spKx });
+// Dua cabang: staf A tidak boleh melihat goal cabang B.
+const kxGoalA = { id: 'kx-a', ownerId: 's1', periode: '2026-09', description: 'Cabang A', base: 0, target: 10, uom: 'x' };
+const kxGoalB = { id: 'kx-b', ownerId: 's2', periode: '2026-09', description: 'Cabang B', base: 0, target: 10, uom: 'x' };
+Svc.initGrd({ storage: spKx });
+for (const g of [kxGoalA, kxGoalB]) {
+  await spKx.set('grdgoal:rec:' + g.id, g);
+}
+await spKx.set('grdlead:rec:kx-a:la', { id: 'la', goalId: 'kx-a', ownerId: 's1', status: 'aktif',
+  description: 'Lead A', targetMingguan: 5, uom: 'x' });
+await spKx.set('grdlead:rec:kx-b:lb', { id: 'lb', goalId: 'kx-b', ownerId: 's2', status: 'aktif',
+  description: 'Lead B', targetMingguan: 5, uom: 'x' });
+
+const kxStafA = timCabang.find(u => u.id === 's1');
+const kxA = await Svc.muatKonteksGrd({ user: kxStafA, allUsers: timCabang, butuh: ['goal', 'lead'] });
+cek('63a. goals memuat semuanya (data mentah)', kxA.goals.length === 2);
+cek('63b. goalTerlihat SUDAH digerbangi', kxA.goalTerlihat.some(g => g.id === 'kx-a'));
+cek('63c. Goal cabang lain tidak masuk goalTerlihat',
+  !kxA.goalTerlihat.some(g => g.id === 'kx-b'), kxA.goalTerlihat.map(g => g.id));
+cek('63d. LEAD ikut digerbangi lewat goal induknya',
+  kxA.leads.length === 1 && kxA.leads[0].id === 'la', kxA.leads.map(l => l.id));
+
+const kxOwner = await Svc.muatKonteksGrd({ user: timCabang[0], allUsers: timCabang, butuh: ['goal', 'lead'] });
+cek('63e. Owner melihat kedua cabang', kxOwner.goalTerlihat.length === 2 && kxOwner.leads.length === 2);
+
+spKx.bersihkanRekaman();
+await Svc.muatKonteksGrd({ user: kxStafA, allUsers: timCabang });
+cek('63g. Hanya prefix goal yang diminta',
+  spKx.prefixDiminta.join() === 'grdgoal:rec:', spKx.prefixDiminta);
+
+spKx.bersihkanRekaman();
+await Svc.muatKonteksGrd({ user: kxStafA, allUsers: timCabang, butuh: ['goal', 'jejak'] });
+cek('63h. Minta jejak → jejak ikut ditarik, lead TIDAK',
+  spKx.prefixDiminta.includes('grdjejak:rec:') && !spKx.prefixDiminta.includes('grdlead:rec:'),
+  spKx.prefixDiminta);
+
+spKx.bersihkanRekaman();
+await Svc.muatKonteksGrd({ user: kxStafA, allUsers: timCabang, butuh: ['goal', 'skor'],
+  minggu: SB.mingguIni(), mingguTren: 3 });
+cek('63i. Skor ditarik PER MINGGU (3 minggu = 3 prefix)',
+  spKx.prefixDiminta.filter(x => x.startsWith('grdskor:rec:')).length === 3,
+  spKx.prefixDiminta.filter(x => x.startsWith('grdskor:rec:')));
+cek('63j. Tidak pernah meminta prefix skor global',
+  !spKx.prefixDiminta.includes('grdskor:rec:'));
+
+const kxPeriode = await Svc.muatKonteksGrd({ user: timCabang[0], allUsers: timCabang, periode: '2026-09' });
+cek('63k. Periode menghasilkan goalPeriode tersaring', kxPeriode.goalPeriode.length === 2);
+const kxLain = await Svc.muatKonteksGrd({ user: timCabang[0], allUsers: timCabang, periode: '2026-12' });
+cek('63m. Periode tanpa goal → goalPeriode kosong', kxLain.goalPeriode.length === 0);
+
+const kxTanpa = await Svc.muatKonteksGrd({ allUsers: timCabang, butuh: ['goal', 'lead'] });
+cek('63o. Tanpa user: semua terlihat', kxTanpa.goalTerlihat.length === 2 && kxTanpa.leads.length === 2);
+cek('63p. Tanpa argumen sama sekali tidak error', (await Svc.muatKonteksGrd()).goals.length >= 0);
+
+judul('64. Gerbang baca berlaku untuk SELURUH turunan goal');
+const spGb2 = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spGb2 });
+await spGb2.set('grdgoal:rec:ga', { id: 'ga', ownerId: 's1', periode: '2026-09',
+  description: 'Cabang A', base: 0, target: 10, uom: 'x' });
+await spGb2.set('grdgoal:rec:gb', { id: 'gb', ownerId: 's2', periode: '2026-09',
+  description: 'Cabang B', base: 0, target: 10, uom: 'x' });
+// jejak & skor untuk KEDUA cabang
+await spGb2.set('grdjejak:rec:ga:target:t1', { id: 'ga:target:t1', goalId: 'ga', field: 'target', dari: 1, ke: 2, waktu: 'a' });
+await spGb2.set('grdjejak:rec:gb:target:t1', { id: 'gb:target:t1', goalId: 'gb', field: 'target', dari: 1, ke: 2, waktu: 'a' });
+const mgN = SB.mingguIni();
+await spGb2.set(`grdskor:rec:${mgN}:la`, { id: `${mgN}:la`, leadId: 'la', goalId: 'ga', minggu: mgN, nilai: 5, target: 5, uom: 'x' });
+await spGb2.set(`grdskor:rec:${mgN}:lb`, { id: `${mgN}:lb`, leadId: 'lb', goalId: 'gb', minggu: mgN, nilai: 5, target: 5, uom: 'x' });
+
+const orgA = timCabang.find(u => u.id === 's1');
+const kx2 = await Svc.muatKonteksGrd({
+  user: orgA, allUsers: timCabang, minggu: mgN, butuh: ['goal', 'jejak', 'skor'], mingguTren: 1,
+});
+cek('64a. Goal cabang lain tidak terlihat', !kx2.goalTerlihat.some(g => g.id === 'gb'));
+cek('64b. JEJAK cabang lain ikut tersaring',
+  kx2.jejak.length === 1 && kx2.jejak[0].goalId === 'ga', kx2.jejak.map(j => j.goalId));
+cek('64c. SKOR cabang lain ikut tersaring',
+  kx2.skor.length === 1 && kx2.skor[0].goalId === 'ga', kx2.skor.map(s => s.goalId));
+
+const kxOwner2 = await Svc.muatKonteksGrd({
+  user: timCabang[0], allUsers: timCabang, minggu: mgN, butuh: ['goal', 'jejak', 'skor'], mingguTren: 1,
+});
+cek('64d. Owner tetap melihat keduanya', kxOwner2.jejak.length === 2 && kxOwner2.skor.length === 2);
+const kxBackup = await Svc.muatKonteksGrd({
+  allUsers: timCabang, minggu: mgN, butuh: ['goal', 'jejak', 'skor'], mingguTren: 1,
+});
+cek('64f. Backup membaca seluruhnya', kxBackup.jejak.length === 2 && kxBackup.skor.length === 2);
+lepasMockGrd();
+
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
 // ada aturan yang terlanggar — bukan regexnya yang perlu dilonggarkan.
 // ============================================================================
 cek('18a. Loader goal per-record ada', /async function loadGoals\(/.test(src));
+cek('18a-5. Semua halaman GRD memuat lewat SATU pintu (muatKonteksGrd)',
+  (src.match(/GrdSvc\.muatKonteksGrd\(/g) || []).length === 4);
+cek('18a-6. Tidak ada halaman yang merangkai pemanggilan bacanya sendiri lagi',
+  !/Promise\.all\(\[GrdSvc\.ambilGoal/.test(src));
 cek('18a-2. SATU JALUR: App.jsx tidak menyentuh penyimpanan GRD di luar layanan', (() => {
   // Prefix boleh muncul sebagai KONSTANTA di registry & BACKUP_KEYS (mesin
   // backup generik memang butuh tahu prefixnya). Yang dilarang: memanggil

@@ -19180,8 +19180,8 @@ function GrdTreeView({ user, allUsers, setView }) {
   const [loading, setLoading] = useState(true);
   const muat = async () => {
     try {
-      const [g, l] = await Promise.all([GrdSvc.ambilGoal(), GrdSvc.ambilLead()]);
-      setGoals(g); setLeads(l);
+      const k = await GrdSvc.muatKonteksGrd({ user, allUsers, butuh: ['goal', 'lead'] });
+      setGoals(k.goals); setLeads(k.leads);
     } catch (e) { console.warn('Muat goal gagal (pertahankan data lama):', e?.message || e); }
     finally { setLoading(false); }
   };
@@ -19831,8 +19831,8 @@ function GrdKelolaView({ user, allUsers, setView }) {
   // goalnya hilang, dan polling hanya jalan saat tab terlihat (hemat egress).
   const muat = async () => {
     try {
-      const [g, j, l] = await Promise.all([GrdSvc.ambilGoal(), GrdSvc.ambilJejak(), GrdSvc.ambilLead()]);
-      setGoals(g); setJejak(j); setLeads(l);
+      const k = await GrdSvc.muatKonteksGrd({ user, allUsers, butuh: ['goal', 'lead', 'jejak'] });
+      setGoals(k.goals); setJejak(k.jejak); setLeads(k.leads);
     } catch (e) {
       console.warn('Muat GRD gagal (pertahankan data lama):', e?.message || e);
     } finally { setLoading(false); }
@@ -20745,8 +20745,8 @@ function GrdLeadView({ user, allUsers }) {
 
   const muat = async () => {
     try {
-      const [g, l] = await Promise.all([GrdSvc.ambilGoal(), GrdSvc.ambilLead()]);
-      setGoals(g); setLeads(l);
+      const k = await GrdSvc.muatKonteksGrd({ user, allUsers, butuh: ['goal', 'lead'] });
+      setGoals(k.goals); setLeads(k.leads);
     } catch (e) {
       console.warn('Muat lead measure gagal (pertahankan data lama):', e?.message || e);
     } finally { setLoading(false); }
@@ -21195,12 +21195,10 @@ function GrdScoreboardView({ user, allUsers }) {
 
   const muat = async () => {
     try {
-      const [g, l, s] = await Promise.all([
-        GrdSvc.ambilGoal(),
-        GrdSvc.ambilLead(),
-        GrdSvc.ambilSkorBeberapaMinggu(minggu, 8),
-      ]);
-      setGoals(g); setLeads(l); setSkor(s);
+      const k = await GrdSvc.muatKonteksGrd({
+        user, allUsers, minggu, butuh: ['goal', 'lead', 'skor'], mingguTren: 8,
+      });
+      setGoals(k.goals); setLeads(k.leads); setSkor(k.skor);
     } catch (e) {
       console.warn('Muat scoreboard gagal (pertahankan data lama):', e?.message || e);
     } finally { setLoading(false); }

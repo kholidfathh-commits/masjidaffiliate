@@ -543,6 +543,58 @@ export async function ambilSkorBeberapaMinggu(sampai, jumlah = 8) {
   return hasil;
 }
 
+/**
+ * SATU PINTU PEMUATAN untuk halaman-halaman GRD.
+ *
+ * Kenapa perlu, padahal fungsi bacanya sudah ada satu per satu: tiap halaman
+ * tadinya merangkai sendiri urutan pemanggilan DAN menggerbangi sendiri dengan
+ * `goalYangBisaDilihat`. Dua hal itu gampang terlewat di halaman baru — dan
+ * yang terlewat justru gerbangnya, karena halaman tetap terlihat benar tanpa itu.
+ *
+ * `butuh` menyebut bagian mana yang dipakai, supaya halaman tidak menarik data
+ * yang tidak ia tampilkan (egress Supabase di project ini pernah kehabisan kuota).
+ *
+ * Gagal memuat MELEMPAR — pemanggil menangkapnya dan mempertahankan data lama
+ * di layar, bukan mengosongkannya.
+ */
+export async function muatKonteksGrd({
+  user = null, allUsers = [], periode = '', minggu = null,
+  butuh = ['goal'], mingguTren = 8,
+} = {}) {
+  const perlu = new Set(butuh);
+  const hasil = { goals: [], goalTerlihat: [], leads: [], jejak: [], skor: [] };
+
+  if (perlu.has('goal') || perlu.has('lead') || perlu.has('skor')) {
+    hasil.goals = await ambilGoal();
+    // GERBANG dipasang DI SINI, sekali — bukan diulang di tiap halaman.
+    hasil.goalTerlihat = user
+      ? Grd.goalYangBisaDilihat(user, hasil.goals, allUsers)
+      : hasil.goals;
+    if (periode) hasil.goalPeriode = Grd.goalPeriode(hasil.goalTerlihat, periode);
+  }
+
+  const paralel = [];
+  if (perlu.has('lead')) paralel.push(ambilLead().then(v => { hasil.leads = v; }));
+  if (perlu.has('jejak')) paralel.push(ambilJejak().then(v => { hasil.jejak = v; }));
+  if (perlu.has('skor')) {
+    paralel.push(ambilSkorBeberapaMinggu(minggu || Skor.mingguIni(), mingguTren)
+      .then(v => { hasil.skor = v; }));
+  }
+  await Promise.all(paralel);
+
+  // SEMUA turunan digerbangi lewat goal induknya. Lead measure, jejak perubahan,
+  // dan skor mingguan tidak punya aturan lihat sendiri — ketiganya mengikuti
+  // goal yang mereka tempeli. Kalau salah satu terlewat, isi cabang lain bocor
+  // walau goalnya sendiri sudah disembunyikan.
+  if (user) {
+    const boleh = new Set(hasil.goalTerlihat.map(g => g.id));
+    if (perlu.has('lead')) hasil.leads = hasil.leads.filter(l => boleh.has(l.goalId));
+    if (perlu.has('jejak')) hasil.jejak = hasil.jejak.filter(j => j && boleh.has(j.goalId));
+    if (perlu.has('skor')) hasil.skor = hasil.skor.filter(s => s && boleh.has(s.goalId));
+  }
+  return hasil;
+}
+
 // ============================================================================
 // TULIS
 // ----------------------------------------------------------------------------
