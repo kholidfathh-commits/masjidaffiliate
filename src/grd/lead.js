@@ -325,6 +325,54 @@ export function pilihanLeadUntukTiket(leads, goals, pemilikId, periodeBerjalan =
       : (a.berjalan ? -1 : 1));
 }
 
+/**
+ * TIKET YANG MENYUMBANG SEBUAH GOAL — arah sebaliknya dari pilihanLeadUntukTiket.
+ *
+ * KENAPA TIKETNYA DIOPER, BUKAN DIBACA DI SINI: modul GRD tidak boleh meng-import
+ * App.jsx (aturan anti circular import), dan pembaca tiket ada di sana. Jadi yang
+ * tinggal di file ini adalah KEPUTUSANNYA — mana yang termasuk, urutannya apa —
+ * dan itu yang perlu bisa diuji.
+ *
+ * `bolehLihat` juga dioper, bukan ditulis ulang di sini. Tiket bersifat tertutup
+ * dan aturannya sudah ada satu tempat di App.jsx (`can.canSeeTask`); menyalinnya
+ * ke sini berarti dua salinan yang bisa menyimpang — dan kalau menyimpang, yang
+ * bocor adalah isi tiket orang lain.
+ *
+ * Urutannya: yang BELUM selesai dulu (paling telat di atas), baru yang selesai.
+ * Goal yang tertinggal biasanya dibuka untuk mencari apa yang macet, bukan untuk
+ * membaca daftar pekerjaan yang sudah beres.
+ */
+export function tiketUntukGoal(tiket, leads, goalId, { bolehLihat = null, hariIni = '' } = {}) {
+  const id = String(goalId || '');
+  const idLead = new Set((leads || []).map(normalisasiLead).filter(Boolean)
+    .filter(l => l.goalId === id).map(l => l.id));
+
+  // Goal tanpa lead measure MUSTAHIL punya tiket terkait — dibedakan dari
+  // "punya lead tapi belum ada tiket", karena saran di layarnya berbeda.
+  if (idLead.size === 0) return { hasil: [], total: 0, selesai: 0, telat: 0, adaLead: false };
+
+  let hasil = (tiket || []).filter(t => t && t.leadId && idLead.has(t.leadId));
+  if (typeof bolehLihat === 'function') hasil = hasil.filter(t => bolehLihat(t));
+
+  const lewat = (t) => !!hariIni && t.status !== 'done' && !!t.deadline && String(t.deadline) < hariIni;
+  const selesai = hasil.filter(t => t.status === 'done').length;
+  const telat = hasil.filter(lewat).length;
+
+  hasil = hasil.slice().sort((a, b) => {
+    const aSelesai = a.status === 'done', bSelesai = b.status === 'done';
+    if (aSelesai !== bSelesai) return aSelesai ? 1 : -1;      // belum selesai dulu
+    const aTelat = lewat(a), bTelat = lewat(b);
+    if (aTelat !== bTelat) return aTelat ? -1 : 1;            // yang telat paling atas
+    // Tanpa deadline ditaruh SETELAH yang berdeadline: yang punya batas waktu
+    // lebih mendesak, dan '' akan menang kalau diurut sebagai teks biasa.
+    const ad = a.deadline || '9999-12-31', bd = b.deadline || '9999-12-31';
+    if (ad !== bd) return String(ad).localeCompare(String(bd));
+    return String(a.title || '').localeCompare(String(b.title || ''));
+  });
+
+  return { hasil, total: hasil.length, selesai, telat, adaLead: true };
+}
+
 // ====== HAK AKSES ======
 /**
  * Boleh MENGUSULKAN lead measure untuk goal ini? Pemilik goalnya, atau atasannya.

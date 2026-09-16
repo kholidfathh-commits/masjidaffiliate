@@ -19114,15 +19114,20 @@ function GrdTiketTerkaitGoal({ user, allUsers, goalId, leads = [] }) {
   const [tiket, setTiket] = useState(null);   // null = belum pernah dimuat
   const [sibuk, setSibuk] = useState(false);
 
-  const idLead = useMemo(
-    () => new Set(leads.filter(l => l && l.goalId === goalId).map(l => l.id)),
-    [leads, goalId]);
+  // Penyaringan, hitungan & urutannya ada di Lead.tiketUntukGoal (fungsi murni,
+  // bisa diuji tanpa merender React). Tiketnya DIOPER dari sini karena modul GRD
+  // tidak boleh meng-import App.jsx — begitu juga aturan hak lihatnya.
+  const ringkas = useMemo(
+    () => Lead.tiketUntukGoal(tiket || [], leads, goalId, {
+      bolehLihat: (t) => can.canSeeTask(user, t),
+      hariIni: Abs.wibDayKey(),
+    }),
+    [tiket, leads, goalId, user]);
 
   const muat = async () => {
     setSibuk(true);
     try {
-      const semua = await loadTasks();
-      setTiket(semua.filter(t => t && t.leadId && idLead.has(t.leadId) && can.canSeeTask(user, t)));
+      setTiket(await loadTasks());
     } catch (e) {
       console.warn('Muat tiket terkait gagal:', e?.message || e);
       setTiket([]);
@@ -19131,13 +19136,13 @@ function GrdTiketTerkaitGoal({ user, allUsers, goalId, leads = [] }) {
 
   const bukaDaftar = () => { setBuka(true); if (tiket === null) muat(); };
 
-  if (idLead.size === 0) return null;   // goal tanpa lead measure tak mungkin punya tiket terkait
+  if (!ringkas.adaLead) return null;   // goal tanpa lead measure tak mungkin punya tiket terkait
 
-  // Hitungan ringkas: "ada berapa" saja belum menjawab apa pun — 5 tiket yang
-  // semuanya belum mulai bercerita lain daripada 5 tiket yang 4-nya selesai.
-  const daftar = tiket || [];
-  const selesai = daftar.filter(t => t.status === 'done').length;
-  const telat = daftar.filter(t => t.status !== 'done' && t.deadline && daysUntil(t.deadline) < 0).length;
+  // "Ada berapa" saja belum menjawab apa pun — 5 tiket yang semuanya belum mulai
+  // bercerita lain daripada 5 tiket yang 4-nya selesai.
+  const daftar = ringkas.hasil;
+  const selesai = ringkas.selesai;
+  const telat = ringkas.telat;
 
   return (
     <div className="mt-4 rounded-2xl border border-slate-200/70 p-4">

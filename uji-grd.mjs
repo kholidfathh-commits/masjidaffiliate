@@ -4506,11 +4506,45 @@ cek('85b. HAK LIHAT tiket tidak dilonggarkan — tetap lewat can.canSeeTask',
   /can\.canSeeTask\(user, t\)/.test(badanTk));
 cek('85c. Tidak menulis ulang aturan siapa boleh lihat tiket',
   !/assigneeId === user\.id/.test(badanTk) && !/createdById === user\.id/.test(badanTk));
-cek('85d. Hanya tiket yang PUNYA kaitan yang dihitung', /t\.leadId && idLead\.has\(t\.leadId\)/.test(badanTk));
-cek('85e. Kaitannya lewat lead measure milik goal ini', /l\.goalId === goalId/.test(badanTk));
+// Keputusannya ada di Lead.tiketUntukGoal (murni) — jadi diuji PERILAKUNYA.
+const lGl = [
+  lm({ id: 'la', goalId: 'gx', ownerId: 'u-staf1', status: 'aktif' }),
+  lm({ id: 'lb', goalId: 'gx', ownerId: 'u-staf1', status: 'ditolak' }),
+  lm({ id: 'lc', goalId: 'gy', ownerId: 'u-staf2', status: 'aktif' }),
+];
+const tkt = [
+  { id: 't1', title: 'Belum, telat', leadId: 'la', status: 'todo', deadline: '2026-09-01' },
+  { id: 't2', title: 'Belum, deadline jauh', leadId: 'la', status: 'todo', deadline: '2026-12-01' },
+  { id: 't3', title: 'Sudah selesai', leadId: 'lb', status: 'done', deadline: '2026-09-01' },
+  { id: 't4', title: 'Goal lain', leadId: 'lc', status: 'todo' },
+  { id: 't5', title: 'Tanpa kaitan', status: 'todo' },
+  { id: 't6', title: 'Belum, tanpa deadline', leadId: 'la', status: 'todo' },
+];
+const rTk = L.tiketUntukGoal(tkt, lGl, 'gx', { hariIni: '2026-09-16' });
+cek('85d. Hanya tiket yang PUNYA kaitan yang dihitung',
+  !rTk.hasil.some(t => t.id === 't5'), rTk.hasil.map(t => t.id));
+cek('85e. Kaitannya lewat lead measure milik goal ini — tiket goal lain tidak ikut',
+  !rTk.hasil.some(t => t.id === 't4'), rTk.hasil.map(t => t.id));
+cek('85e1. Lead yang statusnya bukan aktif tetap menghitung tiketnya (pekerjaannya sungguh terjadi)',
+  rTk.hasil.some(t => t.id === 't3'), rTk.hasil.map(t => t.id));
+cek('85e2. Urutan: belum selesai dulu, yang TELAT paling atas',
+  rTk.hasil.map(t => t.id).join() === 't1,t2,t6,t3', rTk.hasil.map(t => t.id));
+cek('85e3. Tanpa deadline ditaruh setelah yang berdeadline, bukan dianggap paling mendesak',
+  rTk.hasil.findIndex(t => t.id === 't6') > rTk.hasil.findIndex(t => t.id === 't2'));
+cek('85e4. Hak lihat dioper dari luar, dan benar-benar dipakai',
+  L.tiketUntukGoal(tkt, lGl, 'gx', { bolehLihat: (t) => t.id !== 't1' }).hasil.every(t => t.id !== 't1'));
+cek('85e5. Aturan hak lihat TIDAK disalin ke modul GRD', (() => {
+  const isi = fs.readFileSync(ROOT + '/src/grd/lead.js', 'utf8');
+  const i = isi.indexOf('export function tiketUntukGoal(');
+  const b = isi.slice(i, isi.indexOf('\n}', i));
+  return !/assigneeId/.test(b) && !/createdById/.test(b) && /bolehLihat/.test(b);
+})());
 cek('85f. Dimuat SAAT DIMINTA, bukan saat detail goal dibuka (bacaan tiket paling besar)',
   /const bukaDaftar = \(\) => \{ setBuka\(true\); if \(tiket === null\) muat\(\); \};/.test(badanTk));
-cek('85g. Goal tanpa lead measure tidak memuat apa pun', /if \(idLead\.size === 0\) return null;/.test(badanTk));
+cek('85g. Goal tanpa lead measure tidak memuat apa pun', /if \(!ringkas\.adaLead\) return null;/.test(badanTk));
+cek('85g1. "Belum punya lead" dibedakan dari "punya lead tapi belum ada tiket"',
+  L.tiketUntukGoal(tkt, [], 'gx').adaLead === false
+  && L.tiketUntukGoal([], lGl, 'gx').adaLead === true);
 cek('85h. Dikatakan bahwa daftarnya bisa kurang karena tiket memang tertutup',
   /Tiket bersifat tertutup/.test(badanTk));
 cek('85i. Gagal muat tidak menggantung — jadi daftar kosong, bukan "memuat" selamanya',
@@ -4521,9 +4555,15 @@ cek('85j. Komponen terpisah dari GrdDetailGoal — sebab detail goal punya early
 cek('85k. Dipasang di detail goal', /<GrdTiketTerkaitGoal /.test(src));
 cek('85m. Jumlah tiket ditampilkan setelah dimuat', /\{daftar\.length\} tiket/.test(badanTk));
 cek('85n. Jumlah SELESAI ikut ditampilkan — "ada 5 tiket" saja belum bercerita apa-apa',
-  /\{selesai\} selesai/.test(badanTk) && /t\.status === 'done'/.test(badanTk));
+  /\{selesai\} selesai/.test(badanTk) && rTk.selesai === 1, rTk.selesai);
 cek('85o. Yang lewat deadline ditandai terpisah',
-  /\{telat\} lewat deadline/.test(badanTk) && /daysUntil\(t\.deadline\) < 0/.test(badanTk));
+  /\{telat\} lewat deadline/.test(badanTk) && rTk.telat === 1, rTk.telat);
+cek('85o1. Telat dihitung dari tanggal WIB yang dioper, bukan jam perangkat',
+  /hariIni: Abs\.wibDayKey\(\)/.test(badanTk));
+cek('85o2. Tanpa acuan hari, tidak ada yang dituduh telat',
+  L.tiketUntukGoal(tkt, lGl, 'gx').telat === 0);
+cek('85o3. Tiket selesai TIDAK dihitung telat walau deadlinya lewat',
+  rTk.hasil.filter(t => t.status === 'done').length === 1 && rTk.telat === 1);
 cek('85p. Jumlah tidak muncul sebelum datanya benar-benar dimuat (0 palsu)',
   /buka && !sibuk && tiket !== null &&/.test(badanTk));
 cek('85q. Keterangan bawah menyebut jumlahnya sekaligus mengingatkan tiket itu tertutup',
