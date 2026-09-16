@@ -5019,6 +5019,47 @@ cek('89o. Langkah penilaian tetap bersih dari field ubah',
   !('ubah' in lUb.riwayat[1]), lUb.riwayat[1]);
 lepasMockGrd();
 
+// --- identitas pengubah & waktu: disimpan sebagai INSTANT, ditampilkan WIB ---
+const spId = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spId });
+const gId = { id: 'gid', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Goal identitas', base: 0, target: 10, uom: 'x' };
+await Svc.simpanGoal(gId, { user: LEADER, allUsers: tim });
+await Svc.simpanGoal({ ...gId, target: 50 }, { user: OWNER, allUsers: tim, goalLama: gId });
+const barisId = spId.kunci('grdjejak:rec:gid:').map(k => spId.baris.get(k));
+const brsTarget = barisId.find(j => j.field === 'target');
+
+cek('89q. Jejak goal menyimpan SIAPA — id dan namanya sekaligus',
+  brsTarget.olehId === 'u-owner' && brsTarget.olehNama === 'Owner', brsTarget);
+cek('89r. Nama disimpan APA ADANYA saat itu, bukan dicari ulang nanti — ganti nama tidak menulis ulang sejarah', (() => {
+  const isi = fs.readFileSync(ROOT + '/src/grd/data.js', 'utf8');
+  const i = isi.indexOf('export function catatPerubahan(');
+  const b = isi.slice(i, isi.indexOf('\n}', i));
+  return /olehNama = \(oleh && oleh\.name\)/.test(b);
+})());
+cek('89s. Waktu disimpan sebagai INSTANT ISO (UTC), bukan teks jam lokal',
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(brsTarget.waktu), brsTarget.waktu);
+cek('89t. Instant itu memang bisa diubah jadi tanggal WIB yang sah',
+  /^\d{4}-\d{2}-\d{2}$/.test(Abs.wibDayKey(brsTarget.waktu)), Abs.wibDayKey(brsTarget.waktu));
+cek('89u. Dua pengubah berbeda tercatat berbeda — bukan ikut siapa yang terakhir login',
+  barisId.some(j => j.olehId === 'u-leader') && barisId.some(j => j.olehId === 'u-owner'),
+  barisId.map(j => `${j.field}:${j.olehId}`));
+
+const lId = await Svc.usulkanLead(
+  { goalId: 'gid', ownerId: 'u-staf1', description: 'Tindakan', targetMingguan: 2, uom: 'x' },
+  { user: STAF1, allUsers: tim, goal: gId });
+const lIdNilai = await Svc.nilaiLead(lId, 'aktif', { user: WAKIL, allUsers: tim });
+cek('89v. Riwayat lead juga menyimpan siapa & kapan di TIAP langkah',
+  lIdNilai.riwayat.every(r => r.olehNama && r.waktu), lIdNilai.riwayat);
+cek('89w. Pengusul dan penilai tercatat sebagai orang yang BERBEDA',
+  lIdNilai.riwayat[0].olehId === 'u-staf1' && lIdNilai.riwayat[1].olehId === 'u-wakil',
+  lIdNilai.riwayat.map(r => `${r.aksi}:${r.olehId}`));
+cek('89x. Waktu di riwayat lead juga instant ISO',
+  lIdNilai.riwayat.every(r => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(r.waktu)),
+  lIdNilai.riwayat.map(r => r.waktu));
+cek('89y. Tanpa user, "siapa"-nya tidak dikarang jadi nama orang lain',
+  L.tambahRiwayatLead(lmA, { aksi: 'usul', oleh: null }).slice(-1)[0].olehNama === 'Tidak diketahui');
+lepasMockGrd();
+
 cek('89p. Layar menampilkan perubahannya, bukan cuma "diusulkan ulang"',
   /\(r\.ubah \|\| \[\]\)\.length > 0/.test(src) && /Lead\.labelUbahLead\(u\.field\)/.test(src));
 
