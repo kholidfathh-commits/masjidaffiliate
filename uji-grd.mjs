@@ -18,6 +18,7 @@ import { fileURLToPath } from 'url';
 import * as G from './src/grd/data.js';
 import { goalContoh } from './src/grd/contoh.js';
 import * as Svc from './src/grd/layanan.js';
+import { storageMock, rpcMock, lepasMockGrd } from './src/grd/mock.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const src = fs.readFileSync(ROOT + '/src/App.jsx', 'utf8');
@@ -980,6 +981,46 @@ cek('17d-45. Goal tersembunyi ditandai jelas, tidak disamakan dengan "belum puny
   && /Belum punya goal periode ini/.test(src));
 cek('17d-46. Pemeriksa akses menampilkan hak LIHAT dan UBAH sekaligus',
   /Grd\.alasanLihatGoal/.test(src) && /Grd\.alasanUbahGoal/.test(src));
+cek('17f-2. Modul mock TIDAK ikut masuk bundle (tidak di-import App.jsx)',
+  !/grd\/mock\.js/.test(src));
+cek('17f-3. Mock tidak meng-import App.jsx', (() => {
+  const mock = fs.readFileSync(ROOT + '/src/grd/mock.js', 'utf8');
+  return !/from\s+'.*App\.jsx'/.test(mock);
+})());
+cek('17d-62. Halaman Kontrol Akses menampilkan status peran pengguna sendiri',
+  /const statusSaya = useMemo\(\) => Grd\.ringkasAksesUser/.test(src.replace(/\(\) =>/g, '() =>'))
+  || /Grd\.ringkasAksesUser\(user, allUsers, goals\)/.test(src));
+cek('17d-63. Status menyebut berapa goal terlihat & bisa diubah',
+  /Anda melihat/.test(src) && /boleh mengubah/.test(src));
+cek('17d-64. Status menampilkan jalur data yang sedang dipakai',
+  /GrdSvc\.jalurGrd\(\)/.test(src) && /lewat fungsi server \(RPC\)/.test(src));
+cek('17d-59. Baris goal memeriksa wewenangnya SENDIRI (tidak mengandalkan pemanggil)', (() => {
+  const i = src.indexOf('function GrdBarisGoal(');
+  const j = src.indexOf('function GrdSimpulRantai(');
+  const blok = src.slice(i, j);
+  return /const bolehUbah = !user \|\| Grd\.bisaUbahGoal\(user, g, allUsers\)/.test(blok);
+})());
+cek('17d-60. Ketiga tombol aksi digerbangi wewenang yang sama', (() => {
+  const i = src.indexOf('function GrdBarisGoal(');
+  const j = src.indexOf('function GrdSimpulRantai(');
+  const blok = src.slice(i, j);
+  return (blok.match(/\{bolehUbah && on(Ubah|Hapus|Turunkan) && \(/g) || []).length === 3;
+})());
+cek('17d-61. user & allUsers benar-benar dioper ke baris goal',
+  /<GrdBarisGoal[^>]*user=\{user\}/.test(src.replace(/\n/g, ' ')));
+cek('17d-57. Panel detail menelusuri rantai hanya di goal yang boleh dilihat',
+  /Grd\.goalYangBisaDilihat\(user, semuaGoal, allUsers\)/.test(src));
+cek('17d-58. Penyaring itu BUKAN hook (komponennya punya early return)', (() => {
+  const i = src.indexOf('function GrdDetailGoal(');
+  const j = src.indexOf('function GrdSimpul(');
+  const blok = src.slice(i, j);
+  return /const terlihat = Grd\.goalYangBisaDilihat/.test(blok)
+    && !/const terlihat = useMemo/.test(blok);
+})());
+cek('17d-55. Halaman Kontrol Akses menampilkan pratinjau "yang dilihat X"',
+  /Grd\.pratinjauAkses/.test(src) && /Yang dilihat \{orangUji\.name\}/.test(src));
+cek('17d-56. Pratinjau menyebut siapa yang goalnya tersembunyi',
+  /orangTersembunyi\.map\(u => u\.name\)\.join/.test(src));
 cek('17d-52. Penolakan simpan tampil INLINE di form, bukan lewat alert', (() => {
   const i = src.indexOf('function useGrdTulis(');
   const j = src.indexOf('function GrdPemilihPeriode(');
@@ -1107,29 +1148,13 @@ judul('19. Modul layanan tipis (satu pintu baca/tulis GRD)');
 // disuntik lewat initGrd(): jalur tulisnya bisa diperiksa tanpa Supabase dan
 // tanpa pernah menyentuh database production.
 // ============================================================================
-function storagePalsu(awal = {}) {
-  const baris = new Map(Object.entries(awal));
-  return {
-    baris,
-    gagalSet: false,
-    prefixDiminta: [],
-    async listByPrefix(prefix) {
-      this.prefixDiminta.push(prefix);
-      return [...baris.entries()].filter(([k]) => k.startsWith(prefix))
-        .sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v);
-    },
-    async get(k) { return baris.has(k) ? baris.get(k) : null; },
-    async set(k, v) { if (this.gagalSet) return false; baris.set(k, v); return true; },
-    async delete(k) { baris.delete(k); return true; },
-  };
-}
 const OWNER = orang('u-owner'), LEADER = orang('u-leader'), STAF1 = orang('u-staf1'), STAF2 = orang('u-staf2');
 const goalSah = (extra = {}) => ({
   id: 'sv1', ownerId: 'u-staf1', periode: '2026-09',
   description: 'Konten tayang', base: 0, target: 30, uom: 'Konten', ...extra,
 });
 
-let sp = storagePalsu();
+let sp = storageMock();
 Svc.initGrd({ storage: sp });
 
 cek('19a. Sebelum initGrd, layanan menolak dengan pesan jelas (bukan crash diam)', (() => {
@@ -1213,7 +1238,7 @@ await Svc.hapusGoal(goalSah(), { user: OWNER, allUsers: tim });
 cek('19u. Owner boleh menghapus', !sp.baris.has('grdgoal:rec:sv1'));
 
 // ---- turunkan ----
-sp = storagePalsu(); Svc.initGrd({ storage: sp });
+sp = storageMock(); Svc.initGrd({ storage: sp });
 const gIndukSvc = { id: 'ind1', ownerId: 'u-leader', periode: '2026-09', description: 'GMV tim', base: 0, target: 900, uom: 'Juta Rupiah' };
 await Svc.simpanGoal(gIndukSvc, { user: LEADER, allUsers: tim });
 const hasilTurun = (await Svc.turunkanGoal(gIndukSvc, { user: LEADER, allUsers: tim })).dibuat;
@@ -1253,7 +1278,7 @@ cek('19z-10. Periode lain menghasilkan pohon tanpa goal', (() => {
 })());
 
 judul('20. Endpoint detail goal (satu panggilan, konteks lengkap)');
-const spD = storagePalsu(); Svc.initGrd({ storage: spD });
+const spD = storageMock(); Svc.initGrd({ storage: spD });
 const dIndukG = { id: 'd-induk', ownerId: 'u-leader', periode: '2026-09', description: 'GMV tim', base: 0, target: 900, uom: 'Juta Rupiah' };
 await Svc.simpanGoal(dIndukG, { user: LEADER, allUsers: tim });
 const dAnak = (await Svc.turunkanGoal(dIndukG, { user: LEADER, allUsers: tim })).dibuat;
@@ -1329,7 +1354,7 @@ cek('21j. Daftar kuartal ikut menarik kuartal yang berisi', (() => {
 })());
 
 judul('22. Endpoint query pohon per periode');
-const spQ = storagePalsu(); Svc.initGrd({ storage: spQ });
+const spQ = storageMock(); Svc.initGrd({ storage: spQ });
 for (const g of [
   { id: 'q-lead', ownerId: 'u-leader', periode: '2026-09', description: 'GMV tim', base: 0, target: 900, uom: 'Juta' },
   { id: 'q-staf', ownerId: 'u-staf1', periode: '2026-09', description: 'Konten tayang', base: 0, target: 30, uom: 'Konten' },
@@ -1407,7 +1432,7 @@ cek('23q. Sumber tidak ikut berubah urutannya', (() => {
 })());
 
 judul('24. Endpoint pencarian goal');
-const spC = storagePalsu(); Svc.initGrd({ storage: spC });
+const spC = storageMock(); Svc.initGrd({ storage: spC });
 for (const g of goalsCari) await Svc.simpanGoal(g, { user: OWNER, allUsers: tim });
 
 const r1 = await Svc.cariGoal({ kata: 'sampel', allUsers: tim });
@@ -1432,22 +1457,11 @@ judul('25. Jalur RPC + fallback otomatis');
 // Yang diuji di sini BUKAN SQL-nya (itu jalan di Supabase), melainkan ADAPTER-nya:
 // kapan aplikasi memakai RPC, kapan jatuh ke kv_store, dan penolakan mana yang
 // harus sampai ke pengguna apa adanya.
-function rpcPalsu({ belumDipasang = false, tolakDengan = null, rekam = [] } = {}) {
-  return async (nama, args) => {
-    rekam.push({ nama, args });
-    if (belumDipasang) {
-      return { data: null, error: { message: 'Could not find the function public.' + nama + ' in the schema cache' } };
-    }
-    if (tolakDengan) return { data: null, error: { message: tolakDengan } };
-    return { data: args.p_goal || true, error: null };
-  };
-}
-
 // --- RPC belum dipasang → fallback ke kv_store, TANPA error ke pengguna ---
 let rekamA = [];
-let spR = storagePalsu();
+let spR = storageMock();
 Svc.setJalurGrd('auto');
-Svc.initGrd({ storage: spR, rpc: rpcPalsu({ belumDipasang: true, rekam: rekamA }) });
+Svc.initGrd({ storage: spR, rpc: rpcMock({ belumDipasang: true, rekam: rekamA }) });
 const gR = await Svc.simpanGoal(goalSah({ id: 'r1' }), { user: STAF1, allUsers: tim });
 cek('25a. RPC belum dipasang → goal TETAP tersimpan lewat kv_store',
   spR.baris.has('grdgoal:rec:r1') && gR.id === 'r1');
@@ -1459,9 +1473,9 @@ cek('25e. Goal kedua tetap tersimpan', spR.baris.has('grdgoal:rec:r2'));
 
 // --- RPC tersedia → dipakai, kv_store TIDAK ditulis langsung ---
 let rekamB = [];
-const spB = storagePalsu();
+const spB = storageMock();
 Svc.setJalurGrd('auto');
-Svc.initGrd({ storage: spB, rpc: rpcPalsu({ rekam: rekamB }) });
+Svc.initGrd({ storage: spB, rpc: rpcMock({ rekam: rekamB }) });
 await Svc.simpanGoal(goalSah({ id: 'b1' }), { user: STAF1, allUsers: tim });
 cek('25f. RPC dipakai saat tersedia', rekamB.some(r => r.nama === 'grd_simpan_goal'));
 cek('25g. Goal TIDAK ditulis dua kali (kv_store tidak disentuh untuk goalnya)',
@@ -1473,9 +1487,9 @@ cek('25j. Goal dikirim utuh ke RPC sebagai jsonb',
   rekamB[0].args.p_goal.description === 'Konten tayang');
 
 // --- penolakan server TIDAK boleh disiasati dengan menulis langsung ---
-const spC2 = storagePalsu();
+const spC2 = storageMock();
 Svc.setJalurGrd('auto');
-Svc.initGrd({ storage: spC2, rpc: rpcPalsu({ tolakDengan: 'Anda bukan pemilik goal ini.' }) });
+Svc.initGrd({ storage: spC2, rpc: rpcMock({ tolakDengan: 'Anda bukan pemilik goal ini.' }) });
 let pesanTolak = '';
 try { await Svc.simpanGoal(goalSah({ id: 'c1' }), { user: STAF1, allUsers: tim }); }
 catch (e) { pesanTolak = e.message; }
@@ -1486,17 +1500,17 @@ cek('25l. Ditolak server → TIDAK diam-diam ditulis ke kv_store',
 
 // --- hapus & turunkan ikut jalur yang sama ---
 let rekamD = [];
-const spD2 = storagePalsu();
+const spD2 = storageMock();
 Svc.setJalurGrd('auto');
-Svc.initGrd({ storage: spD2, rpc: rpcPalsu({ rekam: rekamD }) });
+Svc.initGrd({ storage: spD2, rpc: rpcMock({ rekam: rekamD }) });
 await Svc.hapusGoal(goalSah({ id: 'd1' }), { user: OWNER, allUsers: tim });
 cek('25m. Hapus lewat RPC saat tersedia', rekamD.some(r => r.nama === 'grd_hapus_goal'));
 cek('25n. Id dikirim ke RPC hapus', rekamD.find(r => r.nama === 'grd_hapus_goal').args.p_id === 'd1');
 
 let rekamE = [];
-const spE = storagePalsu();
+const spE = storageMock();
 Svc.setJalurGrd('auto');
-Svc.initGrd({ storage: spE, rpc: rpcPalsu({ rekam: rekamE }) });
+Svc.initGrd({ storage: spE, rpc: rpcMock({ rekam: rekamE }) });
 const turunRpc = await Svc.turunkanGoal(
   { id: 'e1', ownerId: 'u-leader', periode: '2026-09', description: 'GMV tim', base: 0, target: 900, uom: 'Juta' },
   { user: LEADER, allUsers: tim, goalAda: [] });
@@ -1504,7 +1518,7 @@ cek('25o. Turunkan ikut lewat RPC', turunRpc.dibuat.length === 2
   && rekamE.filter(r => r.nama === 'grd_simpan_goal').length === 2);
 
 // --- tanpa rpc disuntik sama sekali ---
-const spF = storagePalsu();
+const spF = storageMock();
 Svc.setJalurGrd('auto');
 Svc.initGrd({ storage: spF, rpc: null });
 await Svc.simpanGoal(goalSah({ id: 'f1' }), { user: STAF1, allUsers: tim });
@@ -1539,7 +1553,7 @@ cek('26h. security invoker (tidak memberi hak lebih besar diam-diam)',
   /security invoker/.test(sqlRpc) && !/security definer/.test(sqlRpc));
 
 judul('27. Turunkan goal — kegagalan sebagian harus dilaporkan');
-const spT = storagePalsu(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spT });
+const spT = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spT });
 const gT = { id: 't1', ownerId: 'u-leader', periode: '2026-09', description: 'GMV tim', base: 0, target: 900, uom: 'Juta' };
 await Svc.simpanGoal(gT, { user: LEADER, allUsers: tim });
 
@@ -1550,7 +1564,7 @@ cek('27b. Semua berhasil → gagal kosong', okSemua.dibuat.length === 2 && okSem
 cek('27c. Tidak ada yang dilewati pada percobaan pertama', okSemua.dilewati === 0);
 
 // storage yang SELALU gagal menulis
-const spGagal = storagePalsu(); spGagal.gagalSet = true;
+const spGagal = storageMock(); spGagal.gagalSet = true;
 Svc.initGrd({ storage: spGagal });
 const semuaGagal = await Svc.turunkanGoal(gT, { user: LEADER, allUsers: tim, goalAda: [] });
 cek('27d. Semua gagal → dibuat kosong, gagal terisi',
@@ -1562,7 +1576,7 @@ cek('27g. Kegagalan membawa ownerId (untuk mencoba ulang)',
   semuaGagal.gagal.every(x => !!x.ownerId));
 
 // sebagian sudah punya turunan → dilewati, bukan dobel
-const spSebagian = storagePalsu(); Svc.initGrd({ storage: spSebagian });
+const spSebagian = storageMock(); Svc.initGrd({ storage: spSebagian });
 const sudahAda = [{
   id: 'sudah', ownerId: 'u-wakil', parentId: 't1', periode: '2026-09',
   description: 'GMV tim', base: 0, target: 450, uom: 'Juta',
@@ -1650,7 +1664,7 @@ cek('28p. Daftar sah → lolos',
 cek('28q. Bukan array ditolak', G.validasiDaftarTemplate('x') !== '');
 
 judul('29. Layanan template');
-const spTpl = storagePalsu(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spTpl });
+const spTpl = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spTpl });
 const tplAwal = await Svc.ambilTemplate();
 cek('29a. Tanpa simpanan → template bawaan', tplAwal.leader === G.TEMPLATE_GOAL.leader);
 
@@ -1726,7 +1740,7 @@ cek('30l. Tanpa simpanan sama sekali → semua bawaan, tidak ada yang "diubah"',
   return r.every(x => x.diubah === false) && r.every(x => x.jumlah > 0);
 })());
 
-const spDt = storagePalsu(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spDt });
+const spDt = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spDt });
 const dt1 = await Svc.daftarTemplate({ user: STAF1 });
 cek('30m. Staf boleh MELIHAT daftar template', dt1.perPeran.length === 5);
 cek('30n. Staf TIDAK boleh mengubah (bisaUbah=false)', dt1.bisaUbah === false);
@@ -1769,7 +1783,7 @@ cek('31d. Kunci jejak yang ditulis cocok dengan prefixnya', (() => {
   return (G.JEJAK_REC_PREFIX + j[0].id).startsWith(G.prefixJejakGoal('gx'));
 })());
 
-const spJ = storagePalsu(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spJ });
+const spJ = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spJ });
 const gA = { id: 'ja', ownerId: 'u-staf1', periode: '2026-09', description: 'Goal A', base: 0, target: 10, uom: 'x' };
 const gB = { id: 'jb', ownerId: 'u-staf2', periode: '2026-09', description: 'Goal B', base: 0, target: 10, uom: 'x' };
 await Svc.simpanGoal(gA, { user: OWNER, allUsers: tim });
@@ -1827,7 +1841,7 @@ judul('32. SKENARIO UTUH — roll down dari perusahaan sampai staf');
 // diperiksa lewat kedua sudut pandang (pohon ORANG & rantai GOAL) dan lewat
 // panel detail. Kalau salah satu lapisan bergeser sendiri, blok ini yang jatuh.
 // ============================================================================
-const spSkenario = storagePalsu();
+const spSkenario = storageMock();
 Svc.setJalurGrd('kv');
 Svc.initGrd({ storage: spSkenario });
 
@@ -1909,7 +1923,7 @@ cek('32z-2. Turunan yatim naik jadi akar rantai',
 
 judul('33. Per-record: dua orang menulis bersamaan tidak saling menimpa');
 // Inilah alasan goal disimpan satu baris per goal, bukan satu array besar.
-const spBarengan = storagePalsu();
+const spBarengan = storageMock();
 Svc.initGrd({ storage: spBarengan });
 const gStaf1 = { id: 'br1', ownerId: 'u-staf1', periode: '2026-09', description: 'Punya Andi', base: 0, target: 30, uom: 'Konten' };
 const gStaf2 = { id: 'br2', ownerId: 'u-staf2', periode: '2026-09', description: 'Punya Budi', base: 0, target: 10, uom: 'Produk' };
@@ -2126,7 +2140,7 @@ cek('37i. Owner melihat seluruh goal', (() => {
 })());
 
 judul('38. Pesan penolakan harus MENJELASKAN, bukan sekadar menolak');
-const spTolak = storagePalsu(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spTolak });
+const spTolak = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spTolak });
 const gMilikLeader = { id: 'tk1', ownerId: 'u-leader', periode: '2026-09',
   description: 'GMV tim', base: 0, target: 900, uom: 'Juta' };
 await Svc.simpanGoal(gMilikLeader, { user: LEADER, allUsers: tim });
@@ -2165,26 +2179,155 @@ cek('38h. Penolakan tidak meninggalkan perubahan',
   spTolak.baris.get('grdgoal:rec:tk1').target === 950 && !spTolak.baris.has('grdgoal:rec:tk2'));
 Svc.setJalurGrd('auto');
 
+judul('39. Pratinjau akses — membuktikan aturan, bukan sekadar menyatakannya');
+const goalsPra = timCabang.map(u => gc(u.id));
+const pra = (id) => G.pratinjauAkses(timCabang.find(u => u.id === id), timCabang, goalsPra);
+
+cek('39a. Owner melihat seluruh goal',
+  pra('o').terlihat === goalsPra.length && pra('o').tersembunyi === 0);
+cek('39b. Owner bisa mengubah semua', pra('o').bisaUbah === goalsPra.length);
+cek('39c. Staf cabang A hanya melihat jalurnya (diri + atasan ke atas)',
+  pra('s1').terlihat === 4, pra('s1').terlihat);
+cek('39d. Sisanya dihitung tersembunyi',
+  pra('s1').tersembunyi === goalsPra.length - 4);
+cek('39e. Staf hanya bisa mengubah goalnya sendiri', pra('s1').bisaUbah === 1);
+cek('39f. Orang yang goalnya tersembunyi disebutkan',
+  pra('s1').orangTersembunyi.map(u => u.id).sort().join() === 'l2,m,s2',
+  pra('s1').orangTersembunyi.map(u => u.id));
+cek('39g. Orang yang goalnya terlihat disebutkan',
+  pra('s1').orangTerlihat.map(u => u.id).sort().join() === 'l1,o,s1,w1');
+cek('39h. terlihat + tersembunyi = total (tidak ada yang hilang dihitung)',
+  timCabang.every(u => {
+    const p = G.pratinjauAkses(u, timCabang, goalsPra);
+    return p.terlihat + p.tersembunyi === p.totalGoal;
+  }));
+cek('39i. Leader B tidak melihat cabang A',
+  pra('l2').orangTersembunyi.some(u => u.id === 's1'));
+cek('39j. Sejalan dengan bisaLihatGoal (tidak ada aturan kembar)',
+  timCabang.every(u => {
+    const p = G.pratinjauAkses(u, timCabang, goalsPra);
+    const hitung = goalsPra.filter(g => G.bisaLihatGoal(u, g, timCabang)).length;
+    return p.terlihat === hitung;
+  }));
+cek('39k. Tanpa goal → semua nol, tidak error', (() => {
+  const p = G.pratinjauAkses(timCabang[0], timCabang, []);
+  return p.totalGoal === 0 && p.terlihat === 0 && p.orangTersembunyi.length === 0;
+})());
+cek('39l. Tanpa pengguna → tidak ada yang terlihat',
+  G.pratinjauAkses(null, timCabang, goalsPra).terlihat === 0);
+cek('39m. orangTersembunyi hanya memuat yang PUNYA goal', (() => {
+  const p = G.pratinjauAkses(timCabang[4], timCabang, [gc('s2')]);
+  return p.orangTersembunyi.length === 1 && p.orangTersembunyi[0].id === 's2';
+})());
+
+judul('40. Modul mock — dudukan uji yang dipakai bersama');
+const mk = storageMock();
+await mk.set('a:1', { id: 1 });
+await mk.set('a:2', { id: 2 });
+await mk.set('b:1', { id: 3 });
+cek('40b. listByPrefix hanya mengambil prefix yang diminta',
+  (await mk.listByPrefix('a:')).length === 2);
+const urut = await mk.listByPrefix('a:');
+cek('40d. Urutan menaik menurut kunci', urut[0].id === 1 && urut[1].id === 2);
+cek('40e. get mengembalikan null kalau tidak ada', (await mk.get('entah')) === null);
+await mk.delete('a:1');
+cek('40g. Setelah delete, barisnya hilang', (await mk.listByPrefix('a:')).length === 1);
+cek('40h. Merekam prefix yang diminta (untuk membuktikan jalur hemat)',
+  mk.prefixDiminta.filter(x => x === 'a:').length >= 2);
+cek('40i. bersihkanRekaman mengosongkan rekaman', (() => {
+  mk.bersihkanRekaman();
+  return mk.prefixDiminta.length === 0;
+})());
+cek('40j. jumlah() menghitung baris per prefix', mk.jumlah('a:') === 1 && mk.jumlah('b:') === 1);
+mk.gagalSet = true;
+cek('40l. set mengembalikan false saat gagalSet', (await mk.set('c:1', {})) === false);
+cek('40m. Baris tidak bertambah saat gagal', mk.jumlah('c:') === 0);
+mk.gagalSet = false;
+
+const rekamMock = [];
+const rm = rpcMock({ rekam: rekamMock });
+await rm('grd_simpan_goal', { p_goal: { id: 'x' } });
+cek('40o. Panggilan tercatat dengan nama & argumen',
+  rekamMock.length === 1 && rekamMock[0].nama === 'grd_simpan_goal');
+cek('40p. dipanggil() menghitung per nama fungsi', rm.dipanggil('grd_simpan_goal') === 1);
+const rmBelum = rpcMock({ belumDipasang: true });
+const hasilBelum = await rmBelum('grd_simpan_goal', {});
+cek('40r. Pesannya dikenali layanan sebagai "belum dipasang"',
+  /Could not find the function/.test(hasilBelum.error.message));
+const rmTolak = rpcMock({ tolakDengan: 'Ditolak aturan.' });
+cek('40s. tolakDengan meniru penolakan aturan server',
+  (await rmTolak('grd_simpan_goal', {})).error.message === 'Ditolak aturan.');
+
+judul('41. Gerbang tampilan — rantai tidak bocor ke cabang lain');
+const spGb = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spGb });
+// Owner punya goal induk; dua cabang menurunkannya.
+const gbInduk = { id: 'gb-induk', ownerId: 'o', periode: '2026-09',
+  description: 'GMV Corp', base: 0, target: 12, uom: 'Miliar' };
+const gbA = { id: 'gb-a', ownerId: 'l1', parentId: 'gb-induk', periode: '2026-09',
+  description: 'GMV cabang A', base: 0, target: 6, uom: 'Miliar' };
+const gbB = { id: 'gb-b', ownerId: 'l2', parentId: 'gb-induk', periode: '2026-09',
+  description: 'GMV cabang B', base: 0, target: 6, uom: 'Miliar' };
+for (const g of [gbInduk, gbA, gbB]) {
+  await Svc.simpanGoal(g, { user: timCabang[0], allUsers: timCabang });
+}
+
+const detailOwner = await Svc.ambilDetailGoal('gb-induk', { user: timCabang[0], allUsers: timCabang });
+cek('41a. Owner melihat kedua turunan', detailOwner.turunan.length === 2);
+
+const stafA = timCabang.find(u => u.id === 's1');
+const detailStafA = await Svc.ambilDetailGoal('gb-induk', { user: stafA, allUsers: timCabang });
+cek('41b. Staf cabang A boleh membuka goal perusahaan (atasannya)', detailStafA !== null);
+cek('41c. Tapi hanya melihat turunan cabangnya sendiri',
+  detailStafA.turunan.length === 1 && detailStafA.turunan[0].id === 'gb-a',
+  detailStafA.turunan.map(t => t.id));
+cek('41d. Goal cabang lain TIDAK bocor walau cuma jumlahnya',
+  !detailStafA.turunan.some(t => t.id === 'gb-b'));
+
+const detailCabangLain = await Svc.ambilDetailGoal('gb-b', { user: stafA, allUsers: timCabang });
+cek('41e. Goal cabang lain tidak bisa dibuka sama sekali', detailCabangLain === null);
+
+const detailTanpaUser = await Svc.ambilDetailGoal('gb-induk', { allUsers: timCabang });
+cek('41g. Tanpa user: seluruh rantai terbaca (dipakai backup & rekap)',
+  detailTanpaUser.turunan.length === 2);
+cek('41h. Induk pun ikut digerbangi', (() => {
+  return detailStafA.induk === null; // gb-induk memang tidak punya induk
+})());
+lepasMockGrd();
+
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
 // ada aturan yang terlanggar — bukan regexnya yang perlu dilonggarkan.
 // ============================================================================
 cek('18a. Loader goal per-record ada', /async function loadGoals\(/.test(src));
-cek('18b. Loader jejak per-record ada', /async function loadJejakGrd\(/.test(src));
-cek('18c. Loader goal memakai listByPrefix (BUKAN satu array besar)', (() => {
-  const i = src.indexOf('async function loadGoals(');
-  const blok = src.slice(i, i + 400);
-  return /storage\.listByPrefix\(Grd\.GOAL_REC_PREFIX\)/.test(blok);
+cek('18a-2. SATU JALUR: App.jsx tidak menyentuh penyimpanan GRD di luar layanan', (() => {
+  // Prefix boleh muncul sebagai KONSTANTA di registry & BACKUP_KEYS (mesin
+  // backup generik memang butuh tahu prefixnya). Yang dilarang: memanggil
+  // storage langsung dengan prefix GRD, melewati src/grd/layanan.js.
+  return !/storage\.(listByPrefix|set|delete|get)\(\s*Grd\.(GOAL_REC_PREFIX|JEJAK_REC_PREFIX|TEMPLATE_KEY)/.test(src)
+    && !/storage\.(set|delete)\(\s*['"`]grd/.test(src);
 })());
-cek('18d. Loader jejak memakai listByPrefix', (() => {
-  const i = src.indexOf('async function loadJejakGrd(');
+cek('18a-3. Loader backup pun lewat layanan (ikut pindah kalau sumbernya pindah)', (() => {
+  const i = src.indexOf('async function loadGoals(');
   const blok = src.slice(i, i + 300);
-  return /storage\.listByPrefix\(Grd\.JEJAK_REC_PREFIX\)/.test(blok);
+  return /GrdSvc\.ambilGoal\(\)/.test(blok);
+})());
+cek('18a-4. initGrd dipanggil SEBELUM loader dideklarasikan (urutan aman)', (() => {
+  return src.indexOf('initGrd({') < src.indexOf('async function loadGoals(');
+})());
+cek('18b. Loader jejak per-record ada', /async function loadJejakGrd\(/.test(src));
+cek('18c. Pembacaan goal tetap per-record lewat listByPrefix (bukan satu array besar)', (() => {
+  const svc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+  return /listByPrefix\(Grd\.GOAL_REC_PREFIX\)/.test(svc);
+})());
+cek('18d. Pembacaan jejak per-record', (() => {
+  const svc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+  return /listByPrefix\(Grd\.JEJAK_REC_PREFIX\)/.test(svc);
 })());
 cek('18e. Goal ternormalisasi saat dimuat (record lama tidak merusak halaman)', (() => {
-  const i = src.indexOf('async function loadGoals(');
-  return /Grd\.normalisasiGoal/.test(src.slice(i, i + 400));
+  const svc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+  const i = svc.indexOf('export async function ambilGoal(');
+  return /Grd\.normalisasiGoal/.test(svc.slice(i, i + 300));
 })());
 
 cek('18f. ATURAN 4 — goal terdaftar di PER_RECORD_LOADERS', (() => {

@@ -166,11 +166,17 @@ export function susunPohonDari({ users = [], goals = [], periode = '', batasKeda
  * sementara halaman kita masih terbuka) — pemanggil menampilkan pesan, bukan
  * layar rusak.
  */
-export async function ambilDetailGoal(goalId, { allUsers = [], goals = null, jejak = null } = {}) {
+export async function ambilDetailGoal(goalId, { user = null, allUsers = [], goals = null, jejak = null } = {}) {
   const id = String(goalId || '');
   if (!id) return null;
 
-  const semua = goals || await ambilGoal();
+  const dasar = goals || await ambilGoal();
+  // GERBANG: rantai induk & turunan hanya ditelusuri di antara goal yang boleh
+  // DILIHAT pengguna ini. Tanpa gerbang, baris "diturunkan ke N goal" ikut
+  // menghitung goal cabang lain — yang bocor memang cuma jumlahnya, tapi itu
+  // tetap memberi tahu sesuatu yang bukan urusannya.
+  const semua = user ? Grd.goalYangBisaDilihat(user, dasar, allUsers) : dasar;
+
   const goal = semua.map(Grd.normalisasiGoal).find(g => g && g.id === id);
   if (!goal) return null;
 

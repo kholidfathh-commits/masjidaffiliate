@@ -1158,6 +1158,30 @@ export const LINGKUP_AKSES = {
 };
 export const gayaLingkup = (l) => LINGKUP_AKSES[l] || LINGKUP_AKSES.diri;
 
+/**
+ * Apa yang SEBENARNYA dilihat seorang anggota — dipakai pratinjau di halaman
+ * Kontrol Akses supaya aturannya bisa dibuktikan, bukan hanya dibaca.
+ *
+ * Read-only: menghitung dan menjelaskan, tidak pernah dipakai untuk bertindak
+ * atas nama orang lain.
+ */
+export function pratinjauAkses(user, allUsers, goals) {
+  const semua = (goals || []).map(normalisasiGoal).filter(Boolean);
+  const terlihat = semua.filter(g => bisaLihatGoal(user, g, allUsers));
+  const pemilikTerlihat = new Set(terlihat.map(g => g.ownerId));
+  return {
+    totalGoal: semua.length,
+    terlihat: terlihat.length,
+    tersembunyi: semua.length - terlihat.length,
+    bisaUbah: semua.filter(g => bisaUbahGoal(user, g, allUsers)).length,
+    orangTerlihat: (allUsers || []).filter(u => u && pemilikTerlihat.has(u.id)),
+    // Orang yang PUNYA goal tapi goalnya tidak terlihat oleh `user`.
+    orangTersembunyi: (allUsers || []).filter(u => u && u.id
+      && semua.some(g => g.ownerId === u.id)
+      && !pemilikTerlihat.has(u.id)),
+  };
+}
+
 /** Tabel hak akses seluruh anggota — urut pangkat lalu nama, supaya stabil. */
 export function matriksAkses(allUsers, goals) {
   return (allUsers || []).filter(u => u && u.id)
