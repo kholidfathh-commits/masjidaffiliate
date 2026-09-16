@@ -4472,6 +4472,15 @@ cek('85j. Komponen terpisah dari GrdDetailGoal — sebab detail goal punya early
   /function GrdTiketTerkaitGoal\(/.test(src) && iTk < jTk
   && /const \[buka, setBuka\] = useState\(false\)/.test(badanTk));
 cek('85k. Dipasang di detail goal', /<GrdTiketTerkaitGoal /.test(src));
+cek('85m. Jumlah tiket ditampilkan setelah dimuat', /\{daftar\.length\} tiket/.test(badanTk));
+cek('85n. Jumlah SELESAI ikut ditampilkan — "ada 5 tiket" saja belum bercerita apa-apa',
+  /\{selesai\} selesai/.test(badanTk) && /t\.status === 'done'/.test(badanTk));
+cek('85o. Yang lewat deadline ditandai terpisah',
+  /\{telat\} lewat deadline/.test(badanTk) && /daysUntil\(t\.deadline\) < 0/.test(badanTk));
+cek('85p. Jumlah tidak muncul sebelum datanya benar-benar dimuat (0 palsu)',
+  /buka && !sibuk && tiket !== null &&/.test(badanTk));
+cek('85q. Keterangan bawah menyebut jumlahnya sekaligus mengingatkan tiket itu tertutup',
+  /Menampilkan \{daftar\.length\} tiket yang boleh Anda lihat/.test(badanTk));
 cek('85l. GrdDetailGoal tetap tanpa hook setelah early return', (() => {
   const b = src.slice(jTk, src.indexOf('function GrdSimpul('));
   const i = b.indexOf('if (!g) return null;');

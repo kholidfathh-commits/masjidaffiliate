@@ -19138,10 +19138,33 @@ function GrdTiketTerkaitGoal({ user, allUsers, goalId, leads = [] }) {
 
   if (idLead.size === 0) return null;   // goal tanpa lead measure tak mungkin punya tiket terkait
 
+  // Hitungan ringkas: "ada berapa" saja belum menjawab apa pun — 5 tiket yang
+  // semuanya belum mulai bercerita lain daripada 5 tiket yang 4-nya selesai.
+  const daftar = tiket || [];
+  const selesai = daftar.filter(t => t.status === 'done').length;
+  const telat = daftar.filter(t => t.status !== 'done' && t.deadline && daysUntil(t.deadline) < 0).length;
+
   return (
     <div className="mt-4 rounded-2xl border border-slate-200/70 p-4">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-xs font-bold text-slate-600 uppercase tracking-wide">Tiket Terkait</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="text-xs font-bold text-slate-600 uppercase tracking-wide">Tiket Terkait</div>
+          {buka && !sibuk && tiket !== null && (
+            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+              {daftar.length} tiket
+            </span>
+          )}
+          {buka && !sibuk && daftar.length > 0 && (
+            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+              {selesai} selesai
+            </span>
+          )}
+          {buka && !sibuk && telat > 0 && (
+            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+              {telat} lewat deadline
+            </span>
+          )}
+        </div>
         {!buka && (
           <button type="button" onClick={bukaDaftar}
             className="text-xs font-semibold text-blue-700 hover:underline">
@@ -19179,7 +19202,8 @@ function GrdTiketTerkaitGoal({ user, allUsers, goalId, leads = [] }) {
             ))}
           </div>
           <div className="text-xs text-slate-500 mt-2">
-            Hanya tiket yang boleh Anda lihat yang ditampilkan.
+            Menampilkan {daftar.length} tiket yang boleh Anda lihat. Tiket bersifat tertutup,
+            jadi bisa saja ada tiket lain yang menyumbang goal ini tapi tidak muncul di sini.
           </div>
         </>
       )}
