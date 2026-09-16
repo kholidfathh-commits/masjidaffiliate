@@ -17,6 +17,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as G from './src/grd/data.js';
 import * as L from './src/grd/lead.js';
+import * as SB from './src/grd/scoreboard.js';
 import { goalContoh } from './src/grd/contoh.js';
 import * as Svc from './src/grd/layanan.js';
 import { storageMock, rpcMock, lepasMockGrd } from './src/grd/mock.js';
@@ -2880,6 +2881,250 @@ cek('55m. Lead tanpa satuan tidak merusak hitungan',
   Object.keys(L.bebanMingguan([{ id: 'x', goalId: 'g', ownerId: 'u', description: 'a', targetMingguan: 5, uom: '' }])).length === 0);
 cek('55n. Angkanya tidak pernah NaN',
   Object.values(L.bebanMingguan(km)).every(Number.isFinite));
+
+// ============================================================================
+judul('56. Minggu WIB — kunci minggu = tanggal Senin');
+// ============================================================================
+cek('56a. Rabu 16 Sep 2026 → Senin 14 Sep', SB.awalMinggu('2026-09-16') === '2026-09-14');
+cek('56b. Senin sendiri → dirinya', SB.awalMinggu('2026-09-14') === '2026-09-14');
+cek('56c. Minggu (Ahad) masuk minggu yang SAMA, bukan minggu baru',
+  SB.awalMinggu('2026-09-20') === '2026-09-14', SB.awalMinggu('2026-09-20'));
+cek('56d. Senin berikutnya mulai minggu baru', SB.awalMinggu('2026-09-21') === '2026-09-21');
+cek('56e. akhirMinggu = Ahad', SB.akhirMinggu('2026-09-16') === '2026-09-20');
+cek('56f. Rentangnya tepat 7 hari', (() => {
+  const a = SB.awalMinggu('2026-09-16'), b = SB.akhirMinggu('2026-09-16');
+  return G.jenisPeriode !== undefined && a < b;
+})());
+cek('56g. Menyeberang bulan ditangani', SB.awalMinggu('2026-10-01') === '2026-09-28');
+cek('56h. Menyeberang tahun ditangani', SB.awalMinggu('2027-01-01') === '2026-12-28');
+cek('56i. Tanggal tidak sah → kosong',
+  SB.awalMinggu('ngawur') === '' && SB.awalMinggu('') === '' && SB.awalMinggu(null) === '');
+cek('56j. mingguValid hanya untuk tanggal Senin',
+  SB.mingguValid('2026-09-14') && !SB.mingguValid('2026-09-16') && !SB.mingguValid('ngawur'));
+cek('56k. mingguIni menghasilkan Senin yang sah', SB.mingguValid(SB.mingguIni()));
+
+cek('56l. Geser minggu maju/mundur',
+  SB.geserMinggu('2026-09-14', 1) === '2026-09-21' && SB.geserMinggu('2026-09-14', -1) === '2026-09-07');
+cek('56m. Geser dari tanggal tengah minggu tetap mendarat di Senin',
+  SB.geserMinggu('2026-09-16', 1) === '2026-09-21');
+cek('56n. Maju lalu mundur kembali ke asal',
+  SB.geserMinggu(SB.geserMinggu('2026-09-14', 5), -5) === '2026-09-14');
+cek('56o. Hasil geser selalu Senin', (() => {
+  for (let i = -20; i <= 20; i++) if (!SB.mingguValid(SB.geserMinggu('2026-09-14', i))) return false;
+  return true;
+})());
+
+cek('56p. Label dalam satu bulan', SB.labelMinggu('2026-09-16') === '14–20 Sep 2026');
+cek('56q. Label menyeberang bulan', SB.labelMinggu('2026-09-30') === '28 Sep–4 Okt 2026',
+  SB.labelMinggu('2026-09-30'));
+cek('56r. Label menyeberang tahun memuat dua tahun',
+  /2026.*2027/.test(SB.labelMinggu('2027-01-01')), SB.labelMinggu('2027-01-01'));
+cek('56s. Label tidak sah tidak kosong melompong', SB.labelMinggu('ngawur') === '—');
+cek('56t. daftarMinggu TERBARU di atas & semuanya Senin', (() => {
+  const d = SB.daftarMinggu('2026-09-14', 4);
+  return d[0] === '2026-09-14' && d[3] === '2026-08-24' && d.every(SB.mingguValid);
+})(), SB.daftarMinggu('2026-09-14', 4));
+cek('56u. daftarMinggu minimal 1', SB.daftarMinggu('2026-09-14', 0).length === 1);
+
+judul('57. Skor: menang/kalah tanpa tawar-menawar');
+const sk = (extra = {}) => ({ id: 's1', leadId: 'l1', goalId: 'g1', ownerId: 'u-staf1',
+  minggu: '2026-09-14', nilai: 5, target: 5, uom: 'Konten', ...extra });
+cek('57a. Tepat target = MENANG', SB.menang(sk({ nilai: 5, target: 5 })));
+cek('57b. Lebih dari target = menang', SB.menang(sk({ nilai: 9, target: 5 })));
+cek('57c. Kurang sedikit pun = KALAH (tidak ada "hampir")',
+  !SB.menang(sk({ nilai: 4.9, target: 5 })));
+cek('57d. Nol = kalah', !SB.menang(sk({ nilai: 0 })));
+cek('57e. Target nol tidak dianggap menang otomatis', !SB.menang(sk({ nilai: 0, target: 0 })));
+cek('57f. Skor null = kalah/kosong, bukan error', !SB.menang(null));
+cek('57g. Persen dihitung dari target', SB.persenSkor(sk({ nilai: 3, target: 6 })) === 50);
+cek('57h. Persen tidak pernah NaN saat target nol',
+  Number.isFinite(SB.persenSkor(sk({ target: 0 }))) && SB.persenSkor(sk({ target: 0 })) === 0);
+cek('57i. Persen bar ditahan 100', SB.persenBarSkor(sk({ nilai: 50, target: 5 })) === 100);
+cek('57j. Angka rusak tidak bocor', Number.isFinite(SB.persenSkor(sk({ nilai: 'x', target: 'y' }))));
+cek('57k. hasilSkor tiga keadaan',
+  SB.hasilSkor(sk()) === 'menang' && SB.hasilSkor(sk({ nilai: 1 })) === 'kalah' && SB.hasilSkor(null) === 'kosong');
+cek('57l. Tiap hasil punya label & warna',
+  ['menang', 'kalah', 'kosong'].every(h => !!SB.gayaHasil(h).label && !!SB.gayaHasil(h).bar));
+
+cek('57m. Validasi: tanpa lead ditolak', /menempel pada sebuah lead/.test(SB.validasiSkor(sk({ leadId: '' }))));
+cek('57n. Validasi: minggu tidak sah ditolak', /Minggu tidak sah/.test(SB.validasiSkor(sk({ minggu: 'xx' }))));
+cek('57o. Validasi: angka minus ditolak', /tidak boleh minus/.test(SB.validasiSkor(sk({ nilai: -1 }))));
+cek('57p. Validasi: target nol ditolak', /Target mingguan tidak sah/.test(SB.validasiSkor(sk({ target: 0 }))));
+cek('57q. Skor sah lolos', SB.validasiSkor(sk()) === '');
+cek('57r. Minggu tengah pekan dirapikan ke Senin saat normalisasi',
+  SB.normalisasiSkor(sk({ minggu: '2026-09-16' })).minggu === '2026-09-14');
+
+judul('58. Rekap mingguan & tren');
+const leadAktifUji = [
+  lm({ id: 'la', status: 'aktif', targetMingguan: 5 }),
+  lm({ id: 'lb', status: 'aktif', targetMingguan: 5 }),
+  lm({ id: 'lc', status: 'aktif', targetMingguan: 5 }),
+  lm({ id: 'ld', status: 'usul', targetMingguan: 5 }),
+];
+const skorUji = [
+  { id: 'x1', leadId: 'la', minggu: '2026-09-14', nilai: 6, target: 5, uom: 'K', ownerId: 'u-staf1', goalId: 'g1' },
+  { id: 'x2', leadId: 'lb', minggu: '2026-09-14', nilai: 2, target: 5, uom: 'K', ownerId: 'u-staf1', goalId: 'g1' },
+];
+const rk = SB.rekapMinggu(skorUji, leadAktifUji, '2026-09-14');
+cek('58a. Hanya lead AKTIF yang dihitung (usulan tidak)', rk.total === 3, rk);
+cek('58b. Menang & kalah dihitung terpisah', rk.menang === 1 && rk.kalah === 1);
+cek('58c. Yang belum diisi dihitung sebagai kosong, bukan kalah', rk.kosong === 1);
+cek('58d. terisi = menang + kalah', rk.terisi === 2);
+cek('58e. Persen menang dihitung dari yang TERISI, bukan dari total',
+  rk.persenMenang === 50, rk.persenMenang);
+cek('58f. Tidak ada yang terisi → persen 0, bukan NaN', (() => {
+  const r = SB.rekapMinggu([], leadAktifUji, '2026-09-14');
+  return r.persenMenang === 0 && Number.isFinite(r.persenMenang) && r.kosong === 3;
+})());
+cek('58g. Tanpa lead aktif → semua nol', SB.rekapMinggu(skorUji, [], '2026-09-14').total === 0);
+cek('58h. Skor minggu lain tidak tercampur',
+  SB.rekapMinggu(skorUji, leadAktifUji, '2026-09-21').terisi === 0);
+
+cek('58i. skorLeadMinggu menemukan yang tepat',
+  SB.skorLeadMinggu(skorUji, 'la', '2026-09-14')?.nilai === 6);
+cek('58j. Tanggal tengah pekan tetap menemukan skornya',
+  SB.skorLeadMinggu(skorUji, 'la', '2026-09-17')?.nilai === 6);
+cek('58k. Belum diisi → null', SB.skorLeadMinggu(skorUji, 'lc', '2026-09-14') === null);
+cek('58l. skorMinggu menyaring per minggu', SB.skorMinggu(skorUji, '2026-09-14').length === 2);
+
+const skorTren = [
+  { id: 't1', leadId: 'la', minggu: '2026-08-31', nilai: 5, target: 5, uom: 'K' },
+  { id: 't2', leadId: 'la', minggu: '2026-09-07', nilai: 2, target: 5, uom: 'K' },
+  { id: 't3', leadId: 'la', minggu: '2026-09-14', nilai: 7, target: 5, uom: 'K' },
+];
+const tren = SB.trenLead(skorTren, 'la', { sampai: '2026-09-14', jumlah: 4 });
+cek('58m. Tren terlama di kiri, terbaru di kanan',
+  tren[tren.length - 1].minggu === '2026-09-14' && tren[0].minggu === '2026-08-24');
+cek('58n. Minggu yang belum diisi tetap muncul sebagai lubang, bukan dilewati',
+  tren.length === 4 && tren[0].hasil === 'kosong');
+cek('58o. Hasil tiap minggu terbaca',
+  tren.map(t => t.hasil).join() === 'kosong,menang,kalah,menang', tren.map(t => t.hasil));
+cek('58p. Tren lead tanpa skor sama sekali → semua kosong',
+  SB.trenLead(skorTren, 'lz', { sampai: '2026-09-14', jumlah: 3 }).every(t => t.hasil === 'kosong'));
+
+cek('58q. Beruntun dihitung mundur dari minggu terbaru',
+  SB.beruntun(skorTren, 'la', { sampai: '2026-09-14', jumlah: 4 }) === 1);
+cek('58r. Kekalahan memutus rangkaian', (() => {
+  const s2 = [...skorTren, { id: 't4', leadId: 'la', minggu: '2026-09-21', nilai: 6, target: 5, uom: 'K' }];
+  return SB.beruntun(s2, 'la', { sampai: '2026-09-21', jumlah: 5 }) === 2;
+})());
+cek('58s. Belum diisi juga memutus rangkaian',
+  SB.beruntun(skorTren, 'la', { sampai: '2026-09-21', jumlah: 5 }) === 0);
+
+cek('58t. riwayatLead terurut maju', (() => {
+  const r = SB.riwayatLead(skorTren, 'la');
+  return r[0].minggu === '2026-08-31' && r[2].minggu === '2026-09-14';
+})());
+
+judul('59. Hak isi skor');
+cek('59a. Pemilik boleh mengisi skornya',
+  SB.bisaIsiSkor(orang('u-staf1'), lm({ ownerId: 'u-staf1', status: 'aktif' }), tim));
+cek('59b. Atasan boleh',
+  SB.bisaIsiSkor(orang('u-leader'), lm({ ownerId: 'u-staf1', status: 'aktif' }), tim));
+cek('59c. Owner boleh',
+  SB.bisaIsiSkor(orang('u-owner'), lm({ ownerId: 'u-staf1', status: 'aktif' }), tim));
+cek('59d. Rekan sejajar TIDAK boleh',
+  !SB.bisaIsiSkor(orang('u-staf2'), lm({ ownerId: 'u-staf1', status: 'aktif' }), tim));
+cek('59e. Lead yang BELUM disetujui tidak bisa diisi skornya',
+  !SB.bisaIsiSkor(orang('u-staf1'), lm({ ownerId: 'u-staf1', status: 'usul' }), tim));
+cek('59f. Lead yang ditolak juga tidak',
+  !SB.bisaIsiSkor(orang('u-staf1'), lm({ ownerId: 'u-staf1', status: 'ditolak' }), tim));
+cek('59g. Tanpa pengguna → tidak boleh', !SB.bisaIsiSkor(null, lm({ status: 'aktif' }), tim));
+
+judul('60. Layanan skor mingguan');
+const spSk = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spSk });
+const goalSk = { id: 'gs1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(goalSk, { user: OWNER, allUsers: tim });
+let leadSk = await Svc.usulkanLead(
+  { goalId: 'gs1', ownerId: 'u-staf1', description: 'Konten tayang', targetMingguan: 5, uom: 'Konten' },
+  { user: STAF1, allUsers: tim, goal: goalSk });
+leadSk = await Svc.nilaiLead(leadSk, 'aktif', { user: LEADER, allUsers: tim });
+const pesanSk = async (fn) => { try { await fn(); return ''; } catch (e) { return e.message; } };
+const mgIni = SB.mingguIni();
+
+const s1 = await Svc.simpanSkor({ lead: leadSk, minggu: mgIni, nilai: 6 }, { user: STAF1, allUsers: tim });
+cek('60a. Skor tersimpan', spSk.jumlah('grdskor:rec:') === 1);
+cek('60b. Kuncinya memuat MINGGU di depan (dibaca per minggu)',
+  spSk.kunci(`grdskor:rec:${mgIni}:`).length === 1, spSk.kunci('grdskor:rec:'));
+cek('60c. Menang karena melewati target', SB.menang(s1));
+cek('60d. Target DISALIN dari lead saat pencatatan', s1.target === 5);
+cek('60e. Pencatat tercatat', s1.dicatatOleh === 'u-staf1' && !!s1.dicatatPada);
+
+// isi ulang minggu yang sama = memperbarui, bukan menumpuk
+const s2 = await Svc.simpanSkor({ lead: leadSk, minggu: mgIni, nilai: 3 }, { user: STAF1, allUsers: tim });
+cek('60f. Mengisi ulang minggu yang sama MEMPERBARUI, tidak menumpuk',
+  spSk.jumlah('grdskor:rec:') === 1 && s2.nilai === 3);
+cek('60g. Hasilnya ikut berubah jadi kalah', !SB.menang(s2));
+
+cek('60h. ambilSkorMinggu menarik lewat prefix minggu',
+  (await Svc.ambilSkorMinggu(mgIni)).length === 1);
+cek('60i. Minggu lain kosong', (await Svc.ambilSkorMinggu(SB.geserMinggu(mgIni, -1))).length === 0);
+cek('60j. Minggu tidak sah → kosong tanpa menyentuh server',
+  (await Svc.ambilSkorMinggu('ngawur')).length === 0);
+
+// TARGET BERUBAH tidak boleh mengubah minggu lama
+const leadNaik = await Svc.usulkanLead({ ...leadSk, targetMingguan: 20 },
+  { user: STAF1, allUsers: tim, goal: goalSk, leadLama: leadSk });
+await Svc.nilaiLead(leadNaik, 'aktif', { user: LEADER, allUsers: tim });
+const skorLama = (await Svc.ambilSkorMinggu(mgIni))[0];
+cek('60k. Skor minggu lama TETAP memakai target saat itu (5), bukan target baru (20)',
+  skorLama.target === 5, skorLama.target);
+cek('60l. Menang/kalah minggu lama tidak berubah gara-gara target baru',
+  SB.hasilSkor(skorLama) === SB.hasilSkor(s2));
+
+// hak akses & aturan waktu
+cek('60m. Rekan sejajar tidak boleh mengisi',
+  /tidak berwenang mengisi skor/.test(await pesanSk(() =>
+    Svc.simpanSkor({ lead: leadSk, minggu: mgIni, nilai: 1 }, { user: STAF2, allUsers: tim }))));
+const pDepan = await pesanSk(() => Svc.simpanSkor(
+  { lead: leadSk, minggu: SB.geserMinggu(mgIni, 1), nilai: 1 }, { user: STAF1, allUsers: tim }));
+cek('60o. Pesannya menjelaskan mingguya belum berjalan', /belum berjalan/.test(pDepan), pDepan);
+cek('60p. Minggu LALU boleh diisi (mengejar ketertinggalan)',
+  (await pesanSk(() => Svc.simpanSkor({ lead: leadSk, minggu: SB.geserMinggu(mgIni, -1), nilai: 5 },
+    { user: STAF1, allUsers: tim }))) === '');
+
+const leadUsul = await Svc.usulkanLead(
+  { goalId: 'gs1', ownerId: 'u-staf1', description: 'Belum disetujui', targetMingguan: 3, uom: 'Sesi' },
+  { user: STAF1, allUsers: tim, goal: goalSk });
+cek('60q. Lead yang BELUM disetujui tidak bisa diisi skornya',
+  /sudah disetujui/.test(await pesanSk(() =>
+    Svc.simpanSkor({ lead: leadUsul, minggu: mgIni, nilai: 1 }, { user: STAF1, allUsers: tim }))));
+cek('60r. Angka minus ditolak',
+  /tidak boleh minus/.test(await pesanSk(() =>
+    Svc.simpanSkor({ lead: leadSk, minggu: mgIni, nilai: -5 }, { user: STAF1, allUsers: tim }))));
+spSk.bersihkanRekaman();
+await Svc.ambilSkorBeberapaMinggu(mgIni, 4);
+cek('60t. Empat minggu = empat prefix terpisah, tidak ada prefix global',
+  spSk.prefixDiminta.length === 4 && !spSk.prefixDiminta.includes('grdskor:rec:'),
+  spSk.prefixDiminta);
+lepasMockGrd();
+
+judul('61. Penjaga App.jsx — halaman Scoreboard');
+cek('61a. Halaman + rute + menu terpasang',
+  /function GrdScoreboardView\(/.test(src) && /view === 'grd-skor'/.test(src) && /id: 'grd-skor'/.test(src));
+cek('61b. Skor ikut BACKUP_KEYS (aturan wajib no.3)', (() => {
+  const i = src.indexOf('const BACKUP_KEYS = [');
+  return /Skor\.SKOR_BACKUP_KEY/.test(src.slice(i, src.indexOf('];', i)));
+})());
+cek('61c. Terdaftar di PER_RECORD_LOADERS & PREFIX (aturan wajib no.4)',
+  /\[Skor\.SKOR_BACKUP_KEY\]: loadSkorGrd/.test(src)
+  && /\[Skor\.SKOR_BACKUP_KEY\]: Skor\.SKOR_REC_PREFIX/.test(src));
+cek('61d. Rekap berupa hitungan menang/kalah, bukan rata-rata persen',
+  /label="Menang"/.test(src) && /label="Kalah"/.test(src));
+cek('61e. Hasil terbaca SEBELUM disimpan (pratinjau menang/kalah)',
+  /Hasil minggu ini/.test(src) && /Isi angkanya untuk melihat hasilnya/.test(src));
+cek('61f. Tidak bisa maju ke minggu yang belum berjalan',
+  /disabled=\{minggu >= Skor\.mingguIni\(\)\}/.test(src));
+cek('61g. Modul scoreboard TIDAK meng-import App.jsx', (() => {
+  const isi = fs.readFileSync(ROOT + '/src/grd/scoreboard.js', 'utf8');
+  return !/from\s+'.*App\.jsx'/.test(isi);
+})());
+cek('61h. Istilah OKR tidak dipakai di modul scoreboard', (() => {
+  const isi = fs.readFileSync(ROOT + '/src/grd/scoreboard.js', 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  return !/\bOKR\b|\bkey result\b|\bobjective\b/i.test(isi);
+})());
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');

@@ -89,6 +89,7 @@ import * as Qr from './sampel/qr.js';
 // penyimpanannya dikerjakan; hapus import itu begitu kv_store sudah dipakai.
 import * as Grd from './grd/data.js';
 import * as Lead from './grd/lead.js';
+import * as Skor from './grd/scoreboard.js';
 import * as GrdSvc from './grd/layanan.js';
 import { initGrd } from './grd/layanan.js';
 
@@ -744,6 +745,9 @@ async function loadJejakGrd() {
 async function loadLeadGrd() {
   return await GrdSvc.ambilLead();
 }
+async function loadSkorGrd() {
+  return await GrdSvc.ambilSkor();
+}
 
 
 // ====== LMS: suntik dependensi app ke modul pembelajaran ======
@@ -771,7 +775,7 @@ const PER_RECORD_LOADERS = {
   [Sampel.SAMPEL_BACKUP_KEY]: loadSamples, [Sampel.PAKAI_BACKUP_KEY]: loadSampleUsages, [Sampel.STAT_BACKUP_KEY]: loadSampleStats,
   // GRD (Goal Roll Down)
   [Grd.GOAL_BACKUP_KEY]: loadGoals, [Grd.JEJAK_BACKUP_KEY]: loadJejakGrd,
-  [Lead.LEAD_BACKUP_KEY]: loadLeadGrd,
+  [Lead.LEAD_BACKUP_KEY]: loadLeadGrd, [Skor.SKOR_BACKUP_KEY]: loadSkorGrd,
   // LMS (Pembelajaran)
   'lms:paths:all': loadLmsPaths, 'lms:courses:all': loadLmsCourses, 'lms:lesson-bodies:all': loadLmsBodies,
   'lms:enrollments:all': loadLmsEnrollments, 'lms:progress:all': loadLmsProgress, 'lms:attempts:all': loadLmsAttempts,
@@ -787,7 +791,7 @@ const PER_RECORD_PREFIX = {
   [Sampel.SAMPEL_BACKUP_KEY]: Sampel.SAMPEL_REC_PREFIX, [Sampel.PAKAI_BACKUP_KEY]: Sampel.PAKAI_REC_PREFIX, [Sampel.STAT_BACKUP_KEY]: Sampel.STAT_REC_PREFIX,
   // GRD (Goal Roll Down)
   [Grd.GOAL_BACKUP_KEY]: Grd.GOAL_REC_PREFIX, [Grd.JEJAK_BACKUP_KEY]: Grd.JEJAK_REC_PREFIX,
-  [Lead.LEAD_BACKUP_KEY]: Lead.LEAD_REC_PREFIX,
+  [Lead.LEAD_BACKUP_KEY]: Lead.LEAD_REC_PREFIX, [Skor.SKOR_BACKUP_KEY]: Skor.SKOR_REC_PREFIX,
   // LMS (Pembelajaran)
   'lms:paths:all': LMS_PATH_PREFIX, 'lms:courses:all': LMS_COURSE_PREFIX, 'lms:lesson-bodies:all': LMS_BODY_PREFIX,
   'lms:enrollments:all': LMS_ENROLL_PREFIX, 'lms:progress:all': LMS_PROGRESS_PREFIX, 'lms:attempts:all': LMS_ATTEMPT_PREFIX,
@@ -1077,7 +1081,7 @@ const BACKUP_KEYS = [
   Sampel.SAMPEL_BACKUP_KEY, Sampel.PAKAI_BACKUP_KEY, Sampel.STAT_BACKUP_KEY,
   // GRD: goal + jejak perubahan angka (jejak = bukti audit, tak tergantikan)
   // + template per peran yang diubah tim (satu baris, seperti app:settings)
-  Grd.GOAL_BACKUP_KEY, Grd.JEJAK_BACKUP_KEY, Grd.TEMPLATE_KEY, Lead.LEAD_BACKUP_KEY,
+  Grd.GOAL_BACKUP_KEY, Grd.JEJAK_BACKUP_KEY, Grd.TEMPLATE_KEY, Lead.LEAD_BACKUP_KEY, Skor.SKOR_BACKUP_KEY,
   'img:store', // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
   ...LMS_BACKUP_KEYS // LMS: jalur, kursus, isi materi, enrollment, progres, kuis, tugas, validasi, modul bacaan
 ];
@@ -1690,6 +1694,7 @@ export default function App() {
             {view === 'grd-tree' && <GrdTreeView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'grd-kelola' && <GrdKelolaView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'grd-lead' && <GrdLeadView user={currentUser} allUsers={allUsers} />}
+            {view === 'grd-skor' && <GrdScoreboardView user={currentUser} allUsers={allUsers} />}
             {view === 'grd-akses' && <GrdAksesView user={currentUser} allUsers={allUsers} />}
             {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'aset' && <AsetView user={currentUser} />}
@@ -2359,6 +2364,7 @@ function Sidebar({ view, setView, user, settings, onLogout, isOpen, onToggle, mo
         { id: 'grd-tree', label: 'Pohon Goal', icon: Network, show: true },
         { id: 'grd-kelola', label: 'Kelola Goal', icon: Target, show: true },
         { id: 'grd-lead', label: 'Lead Measure', icon: ClipboardCheck, show: true },
+        { id: 'grd-skor', label: 'Scoreboard', icon: TrendingUp, show: true },
         { id: 'grd-akses', label: 'Kontrol Akses', icon: Eye, show: isPengelola(user) }
       ]
     },
@@ -20932,6 +20938,329 @@ function GrdLeadView({ user, allUsers }) {
       {nilaiLead && (
         <GrdNilaiLeadModal lead={nilaiLead.lead} goal={nilaiLead.goal} user={user} allUsers={allUsers}
           adaSekarang={leads} onNilai={kirimNilai} onClose={() => setNilaiLead(null)} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * ISI SKOR MINGGUAN.
+ *
+ * Satu isian angka, dan hasilnya langsung terbaca menang/kalah sebelum disimpan.
+ * Pratinjau itu penting: orang harus tahu ia sedang mencatat kekalahan, bukan
+ * baru sadar setelah tersimpan.
+ */
+function GrdIsiSkorModal({ lead, skor, minggu, onSimpan, onClose }) {
+  const [nilai, setNilai] = useState(skor ? String(skor.nilai) : '');
+  const [catatan, setCatatan] = useState(skor?.catatan || '');
+  const [pesan, setPesan] = useState('');
+  const [menyimpan, setMenyimpan] = useState(false);
+
+  const pratinjau = Skor.normalisasiSkor({
+    leadId: lead.id, minggu, nilai: nilai === '' ? 0 : nilai,
+    target: lead.targetMingguan, uom: lead.uom,
+  });
+  const siap = nilai !== '';
+  const gaya = Skor.gayaHasil(siap ? Skor.hasilSkor(pratinjau) : 'kosong');
+
+  const simpan = async () => {
+    if (nilai === '') { setPesan('Isi angkanya dulu.'); return; }
+    setMenyimpan(true);
+    const salah = await onSimpan(Number(nilai), catatan);
+    setMenyimpan(false);
+    if (salah) setPesan(salah);
+  };
+
+  return (
+    <Modal title={skor ? 'Ubah Skor Mingguan' : 'Isi Skor Mingguan'} onClose={onClose}>
+      <div className="rounded-xl bg-slate-50 border border-slate-200/70 px-3.5 py-3">
+        <div className="text-sm font-semibold text-slate-800">{lead.description}</div>
+        <div className="text-[11px] text-slate-500 mt-1 tabular-nums">
+          Target <span className="font-semibold text-slate-700">{lead.targetMingguan}</span> {lead.uom}/minggu
+          <span className="text-slate-300 mx-1.5">·</span>
+          {Skor.labelMinggu(minggu)}
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <GrdField label={`Tercapai minggu ini (${lead.uom})`} wajib
+          hint="Angka apa adanya — papan skor berguna justru kalau jujur.">
+          <input type="number" inputMode="decimal" value={nilai} autoFocus
+            onChange={e => { setNilai(e.target.value); setPesan(''); }}
+            placeholder="0" className={GRD_INPUT} />
+        </GrdField>
+
+        <GrdField label="Catatan" hint="Opsional — mis. kenapa minggu ini meleset.">
+          <input value={catatan} onChange={e => setCatatan(e.target.value)}
+            placeholder="Contoh: dua hari libur nasional" className={GRD_INPUT} />
+        </GrdField>
+      </div>
+
+      {/* Hasilnya terbaca SEBELUM disimpan. */}
+      <div className="rounded-xl bg-slate-50 border border-slate-200/70 px-3.5 py-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-slate-600">Hasil minggu ini</span>
+          <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${gaya.color}`}>
+            {siap ? gaya.label : '—'}
+          </span>
+        </div>
+        <div className="mt-2 h-2 rounded-full bg-slate-200 overflow-hidden">
+          <div className={`h-full rounded-full ${siap ? gaya.bar : 'bg-transparent'}`}
+            style={{ width: `${siap ? Skor.persenBarSkor(pratinjau) : 0}%` }} />
+        </div>
+        <div className="text-[11px] text-slate-500 mt-1.5 tabular-nums">
+          {siap
+            ? <>{pratinjau.nilai} dari {lead.targetMingguan} {lead.uom} · {Skor.persenSkor(pratinjau)}%</>
+            : 'Isi angkanya untuk melihat hasilnya.'}
+        </div>
+      </div>
+
+      {pesan && (
+        <div className="mt-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-[12px] text-red-700 font-semibold">
+          ⚠️ {pesan}
+        </div>
+      )}
+
+      <div className="flex items-center justify-end gap-2 mt-5">
+        <button onClick={onClose}
+          className="px-4 py-2 rounded-lg font-semibold text-sm text-slate-600 hover:bg-slate-100">
+          Batal
+        </button>
+        <button onClick={simpan} disabled={menyimpan}
+          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-semibold text-sm">
+          {menyimpan ? 'Menyimpan…' : 'Simpan Skor'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Garis tren kecil: satu kotak per minggu, menang/kalah/kosong. */
+function GrdTrenMini({ tren }) {
+  return (
+    <div className="flex items-end gap-0.5" title="Delapan minggu terakhir">
+      {tren.map(t => {
+        const gaya = Skor.gayaHasil(t.hasil);
+        const tinggi = t.hasil === 'kosong' ? 4 : Math.max(4, Math.round((Math.min(100, t.persen) / 100) * 16));
+        return (
+          <span key={t.minggu} title={`${Skor.labelMinggu(t.minggu)} — ${gaya.label}${t.skor ? ` (${t.skor.nilai}/${t.skor.target})` : ''}`}
+            className={`w-1.5 rounded-sm ${gaya.bar}`} style={{ height: `${tinggi}px` }} />
+        );
+      })}
+    </div>
+  );
+}
+
+/** Satu baris papan skor: lead measure + isian minggu ini + trennya. */
+function GrdBarisSkor({ lead, goal, skor, tren, user, allUsers, minggu, onIsi }) {
+  const hasil = Skor.hasilSkor(skor);
+  const gaya = Skor.gayaHasil(hasil);
+  const boleh = Skor.bisaIsiSkor(user, lead, allUsers);
+  const pemilik = (allUsers || []).find(u => u && u.id === lead.ownerId);
+  const runtun = tren ? tren.filter(Boolean) : [];
+  const beruntun = (() => {
+    let n = 0;
+    for (let i = runtun.length - 1; i >= 0; i--) { if (runtun[i].hasil === 'menang') n += 1; else break; }
+    return n;
+  })();
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/70 p-4 shadow-sm shadow-slate-200/40">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-slate-800">{lead.description}</div>
+          <div className="text-[11px] text-slate-500 mt-1 inline-flex items-center gap-1.5 flex-wrap">
+            {pemilik && <Avatar person={pemilik} size="xs" />}
+            <span>{pemilik ? pemilik.name : 'pemilik hilang'}</span>
+            <span className="text-slate-300">·</span>
+            <span className="tabular-nums">target {lead.targetMingguan} {lead.uom}/minggu</span>
+            {goal && (
+              <>
+                <span className="text-slate-300">·</span>
+                <span className="text-slate-400">{goal.description}</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {tren && <GrdTrenMini tren={tren} />}
+          {beruntun >= 2 && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700"
+              title={`${beruntun} minggu menang berturut-turut`}>
+              {beruntun}× beruntun
+            </span>
+          )}
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${gaya.color}`}>{gaya.label}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center gap-3 flex-wrap">
+        <div className="flex-1 min-w-[10rem]">
+          <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${gaya.bar}`}
+              style={{ width: `${skor ? Skor.persenBarSkor(skor) : 0}%` }} />
+          </div>
+          <div className="flex justify-between text-[11px] text-slate-500 mt-1 tabular-nums">
+            <span>
+              {skor
+                ? <><span className="font-bold text-slate-800">{skor.nilai}</span> dari {skor.target} {skor.uom}</>
+                : <span className="italic text-slate-400">Belum diisi minggu ini</span>}
+            </span>
+            {skor && <span>{Skor.persenSkor(skor)}%</span>}
+          </div>
+        </div>
+        {boleh && onIsi && (
+          <button onClick={() => onIsi(lead, skor)}
+            className="bg-white border border-slate-300 hover:border-blue-400 hover:text-blue-700 text-slate-700 px-3 py-2 rounded-lg font-semibold text-sm">
+            {skor ? 'Ubah Skor' : 'Isi Skor'}
+          </button>
+        )}
+      </div>
+      {skor && skor.catatan && (
+        <div className="mt-2 text-[11px] text-slate-500">&ldquo;{skor.catatan}&rdquo;</div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * HALAMAN SCOREBOARD MINGGUAN.
+ *
+ * Satu minggu satu layar. Yang ditanyakan cuma satu: minggu ini menang atau
+ * kalah? Karena itu rekapnya diletakkan paling atas dan berupa hitungan
+ * menang/kalah, bukan rata-rata persen — angka rata-rata membuat orang berdebat
+ * apakah itu bagus, sedangkan "3 dari 5 menang" tidak bisa ditawar.
+ */
+function GrdScoreboardView({ user, allUsers }) {
+  const [minggu, setMinggu] = useState(() => Skor.mingguIni());
+  const [goals, setGoals] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [skor, setSkor] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [lingkup, setLingkup] = useState('tim'); // tim | saya
+  const [isian, setIsian] = useState(null);      // { lead, skor }
+
+  const muat = async () => {
+    try {
+      const [g, l, s] = await Promise.all([
+        GrdSvc.ambilGoal(),
+        GrdSvc.ambilLead(),
+        GrdSvc.ambilSkorBeberapaMinggu(minggu, 8),
+      ]);
+      setGoals(g); setLeads(l); setSkor(s);
+    } catch (e) {
+      console.warn('Muat scoreboard gagal (pertahankan data lama):', e?.message || e);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { muat(); }, [minggu]);
+  useEffect(() => { const iv = setInterval(pollWhenVisible(muat), 60000); return () => clearInterval(iv); }, [minggu]);
+
+  // Lead measure AKTIF yang boleh dilihat, milik saya atau tim saya.
+  const leadTampil = useMemo(() => {
+    const goalTerlihat = new Set(Grd.goalYangBisaDilihat(user, goals, allUsers).map(g => g.id));
+    return leads
+      .filter(l => l.status === 'aktif' && goalTerlihat.has(l.goalId))
+      .filter(l => lingkup === 'tim' || l.ownerId === user.id)
+      .sort((a, b) => {
+        // Yang belum diisi minggu ini diangkat ke atas — itu yang perlu dikerjakan.
+        const sa = Skor.skorLeadMinggu(skor, a.id, minggu);
+        const sb = Skor.skorLeadMinggu(skor, b.id, minggu);
+        if (!sa !== !sb) return sa ? 1 : -1;
+        return a.description.localeCompare(b.description);
+      });
+  }, [leads, goals, user, allUsers, lingkup, skor, minggu]);
+
+  const rekap = useMemo(() => Skor.rekapMinggu(skor, leadTampil, minggu), [skor, leadTampil, minggu]);
+  const pilihanMinggu = useMemo(() => Skor.daftarMinggu(Skor.mingguIni(), 12), []);
+
+  const simpanSkor = async (nilai, catatan) => {
+    try {
+      await GrdSvc.simpanSkor({ lead: isian.lead, minggu, nilai, catatan }, { user, allUsers });
+      setIsian(null);
+      await muat();
+      return '';
+    } catch (e) { return (e && e.message) || 'Gagal menyimpan skor.'; }
+  };
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat papan skor…</div>;
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="Scoreboard Mingguan"
+        subtitle={`Menang atau kalah pekan ini — ${Skor.labelMinggu(minggu)}`} />
+
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <div className="inline-flex items-center gap-1">
+          <button onClick={() => setMinggu(m => Skor.geserMinggu(m, -1))} title="Minggu sebelumnya"
+            className="w-9 h-9 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 flex items-center justify-center">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <select value={minggu} onChange={e => setMinggu(e.target.value)} aria-label="Pilih minggu"
+            className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 min-w-[12rem]">
+            {pilihanMinggu.map(m => (
+              <option key={m} value={m}>
+                {Skor.labelMinggu(m)}{m === Skor.mingguIni() ? ' (minggu ini)' : ''}
+              </option>
+            ))}
+          </select>
+          <button onClick={() => setMinggu(m => Skor.geserMinggu(m, 1))}
+            disabled={minggu >= Skor.mingguIni()} title="Minggu berikutnya"
+            className="w-9 h-9 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 flex items-center justify-center">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        {minggu !== Skor.mingguIni() && (
+          <button onClick={() => setMinggu(Skor.mingguIni())}
+            className="px-3 py-2 rounded-lg text-sm font-semibold text-blue-700 hover:bg-blue-50 border border-blue-200 bg-white">
+            Kembali ke minggu ini
+          </button>
+        )}
+
+        <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden bg-white ml-auto">
+          {[['tim', 'Tim'], ['saya', 'Punya saya']].map(([k, label]) => (
+            <button key={k} onClick={() => setLingkup(k)} aria-pressed={lingkup === k}
+              className={`px-3 py-2 text-sm font-semibold transition ${lingkup === k ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Rekap: hitungan menang/kalah, bukan rata-rata persen. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <MiniStat label="Menang" value={rekap.menang} />
+        <MiniStat label="Kalah" value={rekap.kalah} color="amber" />
+        <MiniStat label="Belum Diisi" value={rekap.kosong} />
+        <MiniStat label="Menang dari Terisi"
+          value={rekap.terisi ? `${rekap.persenMenang}%` : '—'} color="blue" />
+      </div>
+
+      {leadTampil.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200/70 p-10 text-center">
+          <TrendingUp className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+          <div className="font-semibold text-slate-700">Belum ada lead measure aktif</div>
+          <div className="text-sm text-slate-500 mt-1">
+            Papan skor mengisi lead measure yang sudah disetujui. Usulkan dulu di halaman Lead Measure.
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {leadTampil.map(l => (
+            <GrdBarisSkor key={l.id} lead={l}
+              goal={goals.find(g => g.id === l.goalId)}
+              skor={Skor.skorLeadMinggu(skor, l.id, minggu)}
+              tren={Skor.trenLead(skor, l.id, { sampai: minggu, jumlah: 8 })}
+              user={user} allUsers={allUsers} minggu={minggu}
+              onIsi={(lead, s) => setIsian({ lead, skor: s })} />
+          ))}
+        </div>
+      )}
+
+      {isian && (
+        <GrdIsiSkorModal lead={isian.lead} skor={isian.skor} minggu={minggu}
+          onSimpan={simpanSkor} onClose={() => setIsian(null)} />
       )}
     </div>
   );

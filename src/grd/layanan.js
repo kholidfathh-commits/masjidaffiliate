@@ -21,6 +21,7 @@
 
 import * as Grd from './data.js';
 import * as Lead from './lead.js';
+import * as Skor from './scoreboard.js';
 import { isManajemen } from '../peran/hierarki.js';
 
 const _dep = { storage: null, log: null, rpc: null };
@@ -340,6 +341,56 @@ export async function ambilLeadGoal(goalId) {
   return recs.map(Lead.normalisasiLead).filter(l => l && l.goalId === id);
 }
 
+/**
+ * Catat skor mingguan sebuah lead measure.
+ *
+ * Satu lead measure punya SATU skor per minggu — kuncinya memang dibuat begitu,
+ * jadi mengisi ulang minggu yang sama memperbarui, bukan menumpuk. Itu
+ * disengaja: papan skor diisi sekali seminggu, dan salah ketik harus bisa
+ * dibetulkan tanpa meninggalkan dua angka yang saling bertentangan.
+ *
+ * `target` DISALIN dari lead measure saat pencatatan, bukan dibaca ulang nanti —
+ * kalau targetnya berubah lewat usulan baru, minggu-minggu lama tidak ikut
+ * berubah menang/kalahnya.
+ */
+export async function simpanSkor({ lead, minggu, nilai, catatan = '' }, { user, allUsers } = {}) {
+  const l = Lead.normalisasiLead(lead);
+  if (!l || !l.id) throw new GrdDitolak('Lead measure tidak terbaca.');
+  if (l.status !== 'aktif') {
+    throw new GrdDitolak('Hanya lead measure yang sudah disetujui yang bisa diisi skornya.');
+  }
+  if (!Skor.bisaIsiSkor(user, l, allUsers)) {
+    throw new GrdDitolak('Anda tidak berwenang mengisi skor lead measure ini.');
+  }
+
+  const mk = Skor.awalMinggu(minggu);
+  if (!mk) throw new GrdDitolak('Minggu tidak sah.');
+  // Minggu yang belum datang tidak bisa diisi — angkanya belum ada.
+  if (mk > Skor.mingguIni()) {
+    throw new GrdDitolak('Minggu itu belum berjalan — skornya belum bisa diisi.');
+  }
+
+  const rec = {
+    id: `${mk}:${l.id}`,
+    leadId: l.id, goalId: l.goalId, ownerId: l.ownerId,
+    minggu: mk,
+    nilai, target: l.targetMingguan, uom: l.uom,
+    catatan,
+    dicatatOleh: (user && user.id) || '',
+    dicatatNama: (user && user.name) || '',
+    dicatatPada: new Date().toISOString(),
+  };
+  const salah = Skor.validasiSkor(rec);
+  if (salah) throw new GrdDitolak(salah);
+
+  const ok = await st().set(Skor.SKOR_REC_PREFIX + rec.id, Skor.normalisasiSkor(rec));
+  if (!ok) throw new GrdDitolak('Gagal menyimpan skor. Coba lagi.');
+
+  const kata = Skor.menang(rec) ? 'MENANG' : 'kalah';
+  catatAktivitas(`mengisi skor "${l.description}" minggu ${Skor.labelMinggu(mk)} — ${kata}`, user && user.name);
+  return Skor.normalisasiSkor(rec);
+}
+
 /** Id record lead: `grdlead:rec:<goalId>:<id>` supaya bisa ditarik per goal. */
 const kunciLead = (l) => `${Lead.LEAD_REC_PREFIX}${l.goalId}:${l.id}`;
 
@@ -459,6 +510,37 @@ export async function nilaiLead(lead, statusBaru, { user, allUsers, catatan = ''
     : statusBaru === 'ditolak' ? 'menolak' : 'meminta perbaikan';
   catatAktivitas(`${kata} lead measure "${rec.description}"`, user && user.name);
   return rec;
+}
+
+// ============================================================================
+// SCOREBOARD MINGGUAN
+// ============================================================================
+
+/** Seluruh skor. */
+export async function ambilSkor() {
+  const recs = await st().listByPrefix(Skor.SKOR_REC_PREFIX);
+  return recs.map(Skor.normalisasiSkor).filter(Boolean);
+}
+
+/**
+ * Skor SATU MINGGU saja — ditarik lewat prefix.
+ * Kunci record: `grdskor:rec:<minggu>:<leadId>`. Minggu ditaruh di depan karena
+ * papan skor hampir selalu dibaca per minggu, bukan per lead — dan jumlah skor
+ * hanya bertambah tiap pekan, jadi membaca semuanya akan makin berat.
+ */
+export async function ambilSkorMinggu(minggu) {
+  const mk = Skor.awalMinggu(minggu);
+  if (!mk) return [];
+  const recs = await st().listByPrefix(`${Skor.SKOR_REC_PREFIX}${mk}:`);
+  return recs.map(Skor.normalisasiSkor).filter(s => s && s.minggu === mk);
+}
+
+/** Skor beberapa minggu terakhir — untuk tren. Dibaca per minggu, bukan semuanya. */
+export async function ambilSkorBeberapaMinggu(sampai, jumlah = 8) {
+  const mingguList = Skor.daftarMinggu(sampai, jumlah);
+  const hasil = [];
+  for (const mk of mingguList) hasil.push(...(await ambilSkorMinggu(mk)));
+  return hasil;
 }
 
 // ============================================================================
