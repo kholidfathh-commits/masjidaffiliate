@@ -4962,6 +4962,67 @@ cek('88u. Dan mengatakan kenapa tidak dihapus',
   /sengaja TIDAK dihapus/.test(badanJv));
 
 // ============================================================================
+judul('89. Riwayat lead measure mencatat "dari berapa ke berapa"');
+// ----------------------------------------------------------------------------
+// Sebelumnya riwayat lead hanya mencatat AKSI-nya. Usulan yang direvisi dari
+// 2/minggu jadi 8/minggu terbaca persis sama dengan usulan ulang yang isinya
+// tidak berubah sama sekali — padahal itulah satu-satunya hal yang perlu
+// dinilai penilai.
+// ============================================================================
+const lmA = lm({ id: 'ub1', targetMingguan: 2, uom: 'Konten', description: 'Konten tayang' });
+const lmB = lm({ id: 'ub1', targetMingguan: 8, uom: 'Konten', description: 'Konten tayang' });
+const ub1 = L.perubahanLead(lmA, lmB);
+cek('89a. Perubahan target tercatat sebagai dari → ke',
+  ub1.length === 1 && ub1[0].field === 'targetMingguan' && ub1[0].dari === 2 && ub1[0].ke === 8, ub1);
+cek('89b. Tidak ada yang berubah → tidak ada yang dicatat', L.perubahanLead(lmA, lmA).length === 0);
+cek('89c. Satuan ikut dicatat — angka tanpa satuannya bukan target yang sama',
+  L.perubahanLead(lmA, lm({ id: 'ub1', targetMingguan: 2, uom: 'Video' }))
+    .some(u => u.field === 'uom' && u.dari === 'Konten' && u.ke === 'Video'));
+cek('89d. Tindakannya ikut dicatat kalau ditulis ulang',
+  L.perubahanLead(lmA, lm({ id: 'ub1', targetMingguan: 2, description: 'Live harian' }))
+    .some(u => u.field === 'description' && u.ke === 'Live harian'));
+cek('89e. Beberapa perubahan sekaligus tercatat semua',
+  L.perubahanLead(lmA, lm({ id: 'ub1', targetMingguan: 9, uom: 'Video', description: 'Baru' })).length === 3);
+cek('89f. Data rusak tidak bikin crash',
+  L.perubahanLead(null, lmB).length === 0 && L.perubahanLead(lmA, null).length === 0);
+cek('89g. Target ditandai sebagai ANGKA, satuan & tindakan tidak',
+  L.ubahLeadAngka('targetMingguan') === true
+  && L.ubahLeadAngka('uom') === false && L.ubahLeadAngka('description') === false);
+cek('89h. Labelnya terbaca manusia', L.labelUbahLead('targetMingguan') === 'Target mingguan');
+
+const barisUb = L.tambahRiwayatLead(lmA, { aksi: 'usulUlang', oleh: OWNER, leadBaru: lmB });
+cek('89i. Baris riwayat membawa perubahannya',
+  barisUb[barisUb.length - 1].ubah.length === 1, barisUb[barisUb.length - 1]);
+cek('89j. Langkah yang tidak mengubah apa pun TIDAK menambah field (record tidak membengkak)',
+  !('ubah' in L.tambahRiwayatLead(lmA, { aksi: 'aktif', oleh: OWNER }).slice(-1)[0]));
+cek('89k. Baris riwayat LAMA (tanpa field ubah) tetap sah',
+  L.riwayatLead(lm({ riwayat: [{ aksi: 'usul', olehNama: 'X', waktu: '2026-09-01T00:00:00Z' }] })).length === 1);
+
+// Lewat layanan, seperti pemakaian sebenarnya.
+const spUb = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spUb });
+const gUb = { id: 'gub', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Goal ubah', base: 0, target: 40, uom: 'Konten' };
+await Svc.simpanGoal(gUb, { user: OWNER, allUsers: tim });
+let lUb = await Svc.usulkanLead(
+  { goalId: 'gub', ownerId: 'u-staf1', description: 'Konten tayang', targetMingguan: 2, uom: 'Konten' },
+  { user: STAF1, allUsers: tim, goal: gUb });
+cek('89l. Usulan PERTAMA tidak mencatat perubahan (belum ada yang bisa dibandingkan)',
+  !('ubah' in lUb.riwayat[0]), lUb.riwayat[0]);
+lUb = await Svc.nilaiLead(lUb, 'perbaiki', { user: WAKIL, allUsers: tim, catatan: 'Terlalu rendah.' });
+lUb = await Svc.usulkanLead({ ...lUb, targetMingguan: 8 },
+  { user: STAF1, allUsers: tim, goal: gUb, leadLama: lUb });
+const brsUb = lUb.riwayat[lUb.riwayat.length - 1];
+cek('89m. Usulan ULANG mencatat apa yang diperbaiki', (brsUb.ubah || []).length === 1, brsUb);
+cek('89n. Isinya benar: 2 → 8',
+  brsUb.ubah[0].field === 'targetMingguan' && brsUb.ubah[0].dari === 2 && brsUb.ubah[0].ke === 8, brsUb.ubah);
+cek('89o. Langkah penilaian tetap bersih dari field ubah',
+  !('ubah' in lUb.riwayat[1]), lUb.riwayat[1]);
+lepasMockGrd();
+
+cek('89p. Layar menampilkan perubahannya, bukan cuma "diusulkan ulang"',
+  /\(r\.ubah \|\| \[\]\)\.length > 0/.test(src) && /Lead\.labelUbahLead\(u\.field\)/.test(src));
+
+// ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
 // ada aturan yang terlanggar — bukan regexnya yang perlu dilonggarkan.

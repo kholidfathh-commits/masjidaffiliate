@@ -465,6 +465,10 @@ export async function usulkanLead(lead, { user, allUsers, goal, leadLama = null 
     penilaiId: '', penilaiNama: '',
     riwayat: Lead.tambahRiwayatLead(leadLama || l, {
       aksi: leadLama ? 'usulUlang' : 'usul', oleh: user,
+      // Versi BARU dioper supaya barisnya ikut mencatat "dari berapa ke berapa".
+      // Tanpa ini, usulan yang direvisi dari 2/minggu jadi 8/minggu terbaca
+      // persis sama dengan yang isinya tidak berubah sama sekali.
+      leadBaru: leadLama ? l : null,
     }),
     diusulkanOleh: (user && user.id) || '',
     diusulkanNama: (user && user.name) || '',

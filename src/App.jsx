@@ -21079,6 +21079,22 @@ function GrdNilaiLeadModal({ lead, goal, user, allUsers, adaSekarang, onNilai, o
                 <div className="min-w-0">
                   <span className="font-semibold text-slate-700">{Lead.labelAksiLead(r.aksi)}</span>
                   <span className="text-slate-400"> oleh {r.olehNama}</span>
+                  {/* APA yang diperbaiki, bukan cuma "diusulkan ulang". Tanpa ini,
+                      revisi dari 2/minggu jadi 8/minggu terbaca sama persis dengan
+                      usulan ulang yang isinya tidak berubah sama sekali — padahal
+                      itulah satu-satunya hal yang perlu dinilai penilai. */}
+                  {(r.ubah || []).length > 0 && (
+                    <div className="text-slate-600 mt-0.5">
+                      {r.ubah.map((u, k) => (
+                        <div key={k}>
+                          <span className="font-semibold">{Lead.labelUbahLead(u.field)}</span>{' '}
+                          <span className="line-through text-slate-400">{String(u.dari ?? '—')}</span>
+                          {' → '}
+                          <span className="font-semibold text-slate-800">{String(u.ke ?? '—')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {r.catatan && <div className="text-slate-500 mt-0.5">&ldquo;{r.catatan}&rdquo;</div>}
                 </div>
                 <span className="text-slate-400 flex-shrink-0 tabular-nums">{grdWaktuJejak(r.waktu)}</span>

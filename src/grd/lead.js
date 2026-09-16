@@ -96,14 +96,51 @@ export function normalisasiLead(l) {
  */
 export const MAKS_RIWAYAT_LEAD = 20;
 
-export function tambahRiwayatLead(lead, { aksi, oleh, catatan = '', waktu = new Date().toISOString() }) {
+/**
+ * Field lead measure yang perubahannya layak dicatat, beserta labelnya.
+ * `angka: true` menandai yang perlu dibaca sebagai "dari berapa ke berapa".
+ */
+export const FIELD_UBAH_LEAD = {
+  targetMingguan: { label: 'Target mingguan', angka: true },
+  uom:            { label: 'Satuan',          angka: false },
+  description:    { label: 'Tindakan',        angka: false },
+};
+export const labelUbahLead = (f) => (FIELD_UBAH_LEAD[f] || { label: f }).label;
+export const ubahLeadAngka = (f) => !!(FIELD_UBAH_LEAD[f] || {}).angka;
+
+/**
+ * Apa yang BERUBAH antara dua versi usulan — "dari berapa ke berapa".
+ *
+ * Sebelumnya riwayat lead hanya mencatat AKSI-nya ("diusulkan ulang"), jadi
+ * usulan yang direvisi dari 2/minggu jadi 8/minggu terbaca persis sama dengan
+ * yang isinya tidak berubah sama sekali. Penilai tidak bisa melihat apa yang
+ * sebenarnya diperbaiki — padahal itu satu-satunya hal yang perlu ia nilai.
+ *
+ * `uom` ikut dicatat karena angka tanpa satuannya tidak berarti apa-apa:
+ * "5" yang berubah dari Konten jadi Video bukan target yang sama.
+ */
+export function perubahanLead(lama, baru) {
+  const a = normalisasiLead(lama);
+  const b = normalisasiLead(baru);
+  if (!a || !b) return [];
+  return Object.keys(FIELD_UBAH_LEAD)
+    .filter(f => a[f] !== b[f])
+    .map(f => ({ field: f, dari: a[f], ke: b[f] }));
+}
+
+export function tambahRiwayatLead(lead, { aksi, oleh, catatan = '', waktu = new Date().toISOString(), leadBaru = null }) {
   const n = normalisasiLead(lead);
+  const ubah = leadBaru ? perubahanLead(lead, leadBaru) : [];
   const baris = {
     aksi,
     olehId: (oleh && oleh.id) || '',
     olehNama: (oleh && oleh.name) || 'Tidak diketahui',
     catatan: String(catatan || '').trim(),
     waktu,
+    // Hanya ditulis kalau memang ada yang berubah — baris lama tetap sah
+    // tanpa field ini, dan record tidak membengkak untuk langkah yang
+    // tidak mengubah apa pun (mis. "disetujui").
+    ...(ubah.length ? { ubah } : {}),
   };
   const semua = [...(n ? n.riwayat : []), baris];
   return semua.slice(-MAKS_RIWAYAT_LEAD);
