@@ -435,14 +435,24 @@ export async function usulkanLead(lead, { user, allUsers, goal, leadLama = null 
 
   // Batas 1–3 dihitung dari data TERBARU di server, bukan dari yang ada di layar.
   // Dua orang bisa mengusulkan hampir bersamaan; kalau memakai hitungan layar,
-  // keduanya lolos dan goal berakhir dengan 4 lead aktif.
-  if (!leadLama || leadLama.status !== 'usul') {
+  // keduanya lolos dan goal berakhir melewati batas.
+  //
+  // Batas ini HANYA untuk usulan BARU. Memperbaiki usulan yang sudah ada
+  // (termasuk yang ditolak) tetap diizinkan walau slot penuh — ia menggantikan
+  // barisnya, tidak menambah, dan melarangnya berarti berkata "Anda tidak boleh
+  // memperbaiki tulisan Anda sampai orang lain mencabut lead-nya". Itu
+  // menghukum orang atas keadaan yang bukan urusannya.
+  //
+  // Sempat dicoba sebaliknya (batas juga saat usul ulang), dan uji §49q yang
+  // menjatuhkannya. Penjagaan terakhirnya tetap ada di nilaiLead: yang keempat
+  // boleh menunggu, tapi tidak akan pernah bisa disetujui sebelum ada yang dicabut.
+  if (!leadLama) {
     const adaSekarang = await ambilLeadGoal(l.goalId);
-    const calonAktif = Lead.leadAktif(adaSekarang, l.goalId).length
+    const terpakai = Lead.leadAktif(adaSekarang, l.goalId).length
       + Lead.leadMenunggu(adaSekarang, l.goalId).length;
-    if (!leadLama && calonAktif >= Lead.MAKS_LEAD_AKTIF) {
+    if (terpakai >= Lead.MAKS_LEAD_AKTIF) {
       throw new GrdDitolak(
-        `Goal ini sudah punya ${calonAktif} lead measure aktif/menunggu — batasnya ${Lead.MAKS_LEAD_AKTIF}. `
+        `Goal ini sudah punya ${terpakai} lead measure aktif/menunggu — batasnya ${Lead.MAKS_LEAD_AKTIF}. `
         + 'Tolak atau cabut salah satunya dulu.');
     }
   }

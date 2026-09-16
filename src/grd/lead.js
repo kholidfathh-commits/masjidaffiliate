@@ -125,6 +125,43 @@ export function riwayatLead(lead) {
   return [...n.riwayat].reverse();
 }
 
+/**
+ * SKEMA record lead measure — dipakai memeriksa bentuk data, dan sebagai
+ * dokumentasi tunggal tentang field apa saja yang ada.
+ *
+ * `sejak` menandai versi kapan field itu ditambahkan. Record yang ditulis
+ * SEBELUM itu tidak punya fieldnya, dan `normalisasiLead` mengisinya dengan
+ * nilai aman — jadi tidak ada migrasi yang harus dijalankan pengguna. Pola ini
+ * dipilih karena migrasi massal atas kv_store berarti membaca-menulis ulang
+ * ribuan baris, dan itu justru sumber masalah baru.
+ */
+export const SKEMA_LEAD = {
+  id:             { wajib: true,  jenis: 'teks',  sejak: 1 },
+  goalId:         { wajib: true,  jenis: 'teks',  sejak: 1 },
+  ownerId:        { wajib: true,  jenis: 'teks',  sejak: 1 },
+  description:    { wajib: true,  jenis: 'teks',  sejak: 1 },
+  targetMingguan: { wajib: true,  jenis: 'angka', sejak: 1 },
+  uom:            { wajib: true,  jenis: 'teks',  sejak: 1 },
+  status:         { wajib: true,  jenis: 'teks',  sejak: 1 },
+  catatan:        { wajib: false, jenis: 'teks',  sejak: 1 },
+  penilaiId:      { wajib: false, jenis: 'teks',  sejak: 1 },
+  penilaiNama:    { wajib: false, jenis: 'teks',  sejak: 1 },
+  riwayat:        { wajib: false, jenis: 'daftar', sejak: 2 },
+};
+
+/** Field wajib yang HILANG dari sebuah record — kosong berarti bentuknya utuh. */
+export function fieldHilang(l) {
+  const n = normalisasiLead(l);
+  if (!n) return Object.keys(SKEMA_LEAD).filter(k => SKEMA_LEAD[k].wajib);
+  return Object.keys(SKEMA_LEAD)
+    .filter(k => SKEMA_LEAD[k].wajib)
+    .filter(k => {
+      const v = n[k];
+      if (SKEMA_LEAD[k].jenis === 'angka') return !Number.isFinite(v) || v <= 0;
+      return v === undefined || v === null || v === '';
+    });
+}
+
 /** Pesan kesalahan pertama, atau '' bila isian sudah layak diusulkan. */
 export function validasiLead(l) {
   const n = normalisasiLead(l);

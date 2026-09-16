@@ -3811,6 +3811,94 @@ cek('73k. Gunanya dijelaskan: membandingkan, bukan menambah pagar',
   /Gunanya bukan menambah pagar/.test(sqlIzin));
 lepasMockGrd();
 
+judul('74. Skema lead measure & kompatibilitas record lama');
+cek('74a. Skema mendaftar semua field', Object.keys(L.SKEMA_LEAD).length >= 10);
+cek('74b. Field wajib ditandai',
+  ['id', 'goalId', 'ownerId', 'description', 'targetMingguan', 'uom', 'status']
+    .every(k => L.SKEMA_LEAD[k].wajib === true));
+cek('74c. riwayat ditandai sebagai tambahan versi 2', L.SKEMA_LEAD.riwayat.sejak === 2);
+
+// RECORD VERSI LAMA: ditulis sebelum `riwayat` ada.
+const leadLamaV1 = {
+  id: 'v1', goalId: 'g1', ownerId: 'u-staf1',
+  description: 'Konten tayang', targetMingguan: 5, uom: 'Konten', status: 'aktif',
+};
+const nLama = L.normalisasiLead(leadLamaV1);
+cek('74d. Record lama tetap terbaca', nLama !== null && nLama.description === 'Konten tayang');
+cek('74e. Field baru diisi nilai aman, bukan undefined', Array.isArray(nLama.riwayat) && nLama.riwayat.length === 0);
+cek('74f. Tidak ada field wajib yang hilang', L.fieldHilang(leadLamaV1).length === 0);
+cek('74g. Record lama lolos validasi (tidak perlu migrasi)', L.validasiLead(leadLamaV1) === '');
+cek('74h. riwayatLead aman untuk record lama', L.riwayatLead(leadLamaV1).length === 0);
+cek('74i. Bisa langsung ditambahi riwayat tanpa migrasi', (() => {
+  const r = L.tambahRiwayatLead(leadLamaV1, { aksi: 'aktif', oleh: LEADER });
+  return r.length === 1 && r[0].aksi === 'aktif';
+})());
+
+cek('74j. Record RUSAK dilaporkan field mana yang hilang', (() => {
+  const h = L.fieldHilang({ id: 'x', goalId: '', ownerId: 'u', description: '', targetMingguan: 0, uom: '' });
+  return h.includes('goalId') && h.includes('description') && h.includes('targetMingguan') && h.includes('uom');
+})());
+cek('74k. Bukan objek → semua field wajib dianggap hilang',
+  L.fieldHilang(null).length === 7, L.fieldHilang(null).length);
+cek('74l. status kosong diisi bawaan, jadi tidak dianggap hilang',
+  !L.fieldHilang({ id: 'a', goalId: 'g', ownerId: 'u', description: 'd', targetMingguan: 1, uom: 'x' })
+    .includes('status'));
+
+const spMg = storageMock({ 'grdlead:rec:g1:v1': leadLamaV1 });
+Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spMg });
+const dibacaLama = await Svc.ambilLeadGoal('g1');
+cek('74n. Dibaca lewat layanan tanpa error',
+  dibacaLama.length === 1 && dibacaLama[0].id === 'v1');
+cek('74o. Riwayatnya terisi array kosong, bukan undefined',
+  Array.isArray(dibacaLama[0].riwayat));
+lepasMockGrd();
+
+judul('75. Batas tiga: apa yang dibatasi, apa yang tidak');
+const spBt = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spBt });
+const goalBt = { id: 'bt1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten', base: 0, target: 30, uom: 'Konten' };
+await Svc.simpanGoal(goalBt, { user: OWNER, allUsers: tim });
+const usulBt = (d) => Svc.usulkanLead(
+  { goalId: 'bt1', ownerId: 'u-staf1', description: d, targetMingguan: 3, uom: 'Konten' },
+  { user: STAF1, allUsers: tim, goal: goalBt });
+const pesanBt = async (fn) => { try { await fn(); return ''; } catch (e) { return e.message; } };
+
+const b1 = await usulBt('Satu');
+const b2 = await usulBt('Dua');
+const b3 = await usulBt('Tiga');
+cek('75a. Tiga usulan MENUNGGU sudah mencapai batas (aktif + menunggu)',
+  /batasnya 3/.test(await pesanBt(() => usulBt('Empat'))));
+cek('75b. Batas menghitung yang MENUNGGU juga, bukan hanya yang aktif',
+  spBt.jumlah('grdlead:rec:bt1:') === 3);
+
+cek('75c. MEMPERBAIKI usulan yang menunggu tetap boleh saat penuh',
+  (await pesanBt(() => Svc.usulkanLead({ ...b1, description: 'Satu diperbaiki' },
+    { user: STAF1, allUsers: tim, goal: goalBt, leadLama: b1 }))) === '');
+cek('75d. Perbaikan tidak menambah baris', spBt.jumlah('grdlead:rec:bt1:') === 3);
+
+await Svc.nilaiLead(b2, 'ditolak', { user: LEADER, allUsers: tim, catatan: 'Kurang tajam.' });
+const b2Tolak = (await Svc.ambilLeadGoal('bt1')).find(l => l.id === b2.id);
+cek('75f. Kini usulan BARU boleh lagi (slot terpakai 2)',
+  (await pesanBt(() => usulBt('Empat lagi'))) === '');
+cek('75g. Barisnya bertambah jadi 4 (1 ditolak + 3 menunggu)',
+  spBt.jumlah('grdlead:rec:bt1:') === 4);
+cek('75h. Yang DITOLAK tidak dihitung ke batas',
+  L.leadAktif(await Svc.ambilLeadGoal('bt1'), 'bt1').length
+  + L.leadMenunggu(await Svc.ambilLeadGoal('bt1'), 'bt1').length === 3);
+
+const b2Ulang = await Svc.usulkanLead({ ...b2Tolak, description: 'Dua diusulkan ulang' },
+  { user: STAF1, allUsers: tim, goal: goalBt, leadLama: b2Tolak });
+cek('75j. Diusulkan ulang berhasil, statusnya kembali usul', b2Ulang.status === 'usul');
+cek('75k. Antrean boleh melebihi 3 karena perbaikan, tapi...',
+  L.leadMenunggu(await Svc.ambilLeadGoal('bt1'), 'bt1').length === 4);
+const semuaUsul = (await Svc.ambilLeadGoal('bt1')).filter(l => l.status === 'usul');
+for (let i = 0; i < 3; i++) await Svc.nilaiLead(semuaUsul[i], 'aktif', { user: LEADER, allUsers: tim });
+cek('75m. Tiga disetujui', L.leadAktif(await Svc.ambilLeadGoal('bt1'), 'bt1').length === 3);
+const pesanKe4 = await pesanBt(() => Svc.nilaiLead(semuaUsul[3], 'aktif', { user: LEADER, allUsers: tim }));
+cek('75o. Pesannya menyebut batas & cara membereskannya',
+  /batasnya 3/.test(pesanKe4) && /Cabut salah satunya/.test(pesanKe4), pesanKe4);
+lepasMockGrd();
+
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
