@@ -21263,6 +21263,9 @@ function GrdScoreboardView({ user, allUsers }) {
   }, [leads, goals, user, allUsers, lingkup, skor, minggu]);
 
   const rekap = useMemo(() => Skor.rekapMinggu(skor, leadTampil, minggu), [skor, leadTampil, minggu]);
+  // Skor yang lead measure-nya sudah hilang: angkanya tersimpan tapi tidak
+  // pernah muncul di daftar mana pun. Dilaporkan, bukan dihapus diam-diam.
+  const skorHilang = useMemo(() => Skor.skorYatim(skor, leads), [skor, leads]);
   const rekapOrang = useMemo(() => Skor.rekapPerOrang(skor, leadTampil, minggu, allUsers),
     [skor, leadTampil, minggu, allUsers]);
   const [bukaRekap, setBukaRekap] = useState(false);
@@ -21341,6 +21344,14 @@ function GrdScoreboardView({ user, allUsers }) {
           <b>{rekap.rusak} skor minggu ini tidak bisa dinilai</b> — datanya tidak lengkap
           (mis. target mingguannya kosong). Sementara ini dihitung sebagai <b>belum diisi</b>,
           bukan kalah. Isi ulang skornya untuk memperbaiki.
+        </div>
+      )}
+
+      {skorHilang.length > 0 && (
+        <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <b>{skorHilang.length} skor lama</b> menempel pada lead measure yang sudah tidak ada.
+          Angkanya tetap tersimpan dan tidak dihapus — itu catatan kerja yang benar-benar terjadi —
+          tapi tidak ikut dihitung di rekap mana pun.
         </div>
       )}
 

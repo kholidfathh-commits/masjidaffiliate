@@ -4221,6 +4221,8 @@ lepasMockGrd();
 
 cek('81aa. Halaman Scoreboard MEMBERI TAHU kalau ada baris yang tak bisa dinilai',
   /rekap\.rusak\s*>\s*0/.test(src) && /tidak bisa dinilai/.test(src));
+cek('81ab. Halaman Scoreboard juga melaporkan skor yang lead measure-nya hilang',
+  /Skor\.skorYatim\(/.test(src) && /skorHilang\.length\s*>\s*0/.test(src));
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
