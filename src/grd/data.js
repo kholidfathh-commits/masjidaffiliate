@@ -674,6 +674,105 @@ export function riwayatAngka(jejak, goalId) {
 }
 
 /**
+ * JEJAK LINTAS GOAL — bahan halaman "Jejak Perubahan Angka".
+ *
+ * Bedanya dengan `riwayatGoal`: yang itu menjawab "apa yang terjadi pada goal
+ * INI", yang ini menjawab "angka apa saja yang berubah akhir-akhir ini, oleh
+ * siapa". Pertanyaan kedua tidak bisa dijawab dengan membuka goal satu per satu.
+ *
+ * GERBANG-nya adalah daftar `goals` yang dioper pemanggil: hanya jejak milik
+ * goal yang ADA di daftar itu yang lolos. Jadi kalau pemanggil mengoper goal
+ * yang boleh dilihat saja, jejak cabang lain mustahil bocor lewat sini —
+ * aturannya tidak ditulis ulang di sini, dan karena itu tidak bisa menyimpang.
+ *
+ * `hanyaAngka` menyala secara BAWAAN. Nama halamannya "Jejak Perubahan Angka",
+ * dan perubahan judul/pemilik ikut bercampur akan menenggelamkan justru yang
+ * dicari orang saat membuka halaman ini.
+ */
+export function jejakLintasGoal(jejak, goals, allUsers, {
+  periode = '', olehId = '', goalId = '', hanyaAngka = true, kata = '', batas = 300,
+} = {}) {
+  const dalamLingkup = (goals || []).map(normalisasiGoal).filter(Boolean);
+  const dipakai = periode ? goalPeriode(dalamLingkup, periode) : dalamLingkup;
+  const perGoal = new Map(dipakai.map(g => [g.id, g]));
+
+  let hasil = (jejak || []).filter(j => j && j.goalId && perGoal.has(j.goalId));
+  if (goalId) hasil = hasil.filter(j => j.goalId === goalId);
+  if (olehId) hasil = hasil.filter(j => j.olehId === olehId);
+  if (hanyaAngka) hasil = hasil.filter(j => fieldJejakAngka(j.field));
+
+  const k = String(kata || '').trim().toLowerCase();
+  if (k) {
+    hasil = hasil.filter(j => {
+      const g = perGoal.get(j.goalId);
+      return [g && g.description, j.olehNama, labelFieldJejak(j.field)]
+        .filter(Boolean).join(' ').toLowerCase().includes(k);
+    });
+  }
+
+  // TERBARU DI ATAS. Urutan kedua memakai id supaya dua perubahan pada detik
+  // yang sama tidak bertukar tempat antar-render.
+  hasil = hasil.slice().sort((x, y) => {
+    const w = String(y.waktu || '').localeCompare(String(x.waktu || ''));
+    return w !== 0 ? w : String(y.id || '').localeCompare(String(x.id || ''));
+  });
+
+  const total = hasil.length;
+  const dipotong = total > batas;
+  return {
+    hasil: dipotong ? hasil.slice(0, batas) : hasil,
+    total,
+    dipotong,
+    // Siapa saja yang pernah mengubah — untuk mengisi filter tanpa menebak.
+    pengubah: [...new Map(
+      (jejak || [])
+        .filter(j => j && perGoal.has(j.goalId) && j.olehId)
+        .map(j => [j.olehId, { id: j.olehId, nama: j.olehNama || namaOrang(j.olehId, allUsers) }])
+    ).values()].sort((a, b) => String(a.nama).localeCompare(String(b.nama))),
+  };
+}
+
+/** Nama orang dari daftar user; jatuh ke id kalau akunnya sudah dihapus. */
+function namaOrang(id, allUsers) {
+  const u = (allUsers || []).find(x => x && x.id === id);
+  return (u && u.name) || 'Akun terhapus';
+}
+
+/**
+ * RINGKASAN pergerakan angka pada sekumpulan jejak — "naik berapa kali, turun
+ * berapa kali". Penting karena target yang DITURUNKAN diam-diam adalah salah
+ * satu hal yang paling ingin diketahui dari sebuah jejak audit.
+ */
+/**
+ * Arah satu baris jejak: 'naik' | 'turun' | 'tetap' | '' (bukan perubahan angka).
+ *
+ * SATU tempat, dipakai ringkasan di atas DAN penanda di layar — kalau dua-duanya
+ * punya rumus sendiri, angka ringkasan bisa berkata "1 turun" sementara barisnya
+ * tidak bertanda apa pun, dan tidak ada yang tahu mana yang benar.
+ *
+ * `Number(null)` itu 0, dan itu jebakan: baris yang nilai lamanya memang TIDAK
+ * ADA akan terbaca "naik dari 0" — klaim yang tidak didukung datanya.
+ */
+export function arahJejak(j) {
+  if (!j || !fieldJejakAngka(j.field)) return '';
+  const angka = (v) => (v === null || v === undefined || v === '') ? NaN : Number(v);
+  const a = angka(j.dari), b = angka(j.ke);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 'tetap';
+  return b > a ? 'naik' : b < a ? 'turun' : 'tetap';
+}
+
+export function ringkasJejakAngka(barisJejak) {
+  let naik = 0, turun = 0, tetap = 0;
+  for (const j of barisJejak || []) {
+    const arah = arahJejak(j);
+    if (arah === 'naik') naik += 1;
+    else if (arah === 'turun') turun += 1;
+    else if (arah === 'tetap') tetap += 1;
+  }
+  return { naik, turun, tetap, total: naik + turun + tetap };
+}
+
+/**
  * PENCARIAN GOAL sebagai DAFTAR DATAR (bukan pohon).
  *
  * Pelengkap `saringPohon`, bukan penggantinya. Dua bentuk dibutuhkan karena dua

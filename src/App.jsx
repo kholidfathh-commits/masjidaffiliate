@@ -1719,6 +1719,7 @@ export default function App() {
             {view === 'grd-lead' && <GrdLeadView user={currentUser} allUsers={allUsers} />}
             {view === 'grd-skor' && <GrdScoreboardView user={currentUser} allUsers={allUsers} />}
             {view === 'grd-akses' && <GrdAksesView user={currentUser} allUsers={allUsers} />}
+            {view === 'grd-jejak' && <GrdJejakView user={currentUser} allUsers={allUsers} />}
             {view === 'keuangan' && <KeuanganView user={currentUser} allUsers={allUsers} setView={setView} />}
             {view === 'aset' && <AsetView user={currentUser} />}
             {view === 'sampel' && <SampelView user={currentUser} allUsers={allUsers}
@@ -2395,6 +2396,7 @@ function menuUntuk(user) {
         { id: 'grd-kelola', label: 'Kelola Goal', icon: Target, show: true },
         { id: 'grd-lead', label: 'Lead Measure', icon: ClipboardCheck, show: true },
         { id: 'grd-skor', label: 'Scoreboard', icon: TrendingUp, show: true },
+        { id: 'grd-jejak', label: 'Jejak Perubahan', icon: History, show: true },
         { id: 'grd-akses', label: 'Kontrol Akses', icon: Eye, show: isPengelola(user) }
       ]
     },
@@ -20193,6 +20195,147 @@ function GrdSimpulRantai({ simpul, user, allUsers, leads, onBuka, onUbah, onTuru
  * wewenang SEBELUM menyentuh penyimpanan — tombol yang lolos dari layar tetap
  * tidak bisa menembusnya.
  */
+/**
+ * HALAMAN JEJAK PERUBAHAN ANGKA.
+ *
+ * Detail goal sudah punya "Riwayat Perubahan" — tapi itu menjawab "apa yang
+ * terjadi pada goal INI". Halaman ini menjawab pertanyaan yang tidak bisa
+ * dijawab dengan membuka goal satu per satu: "angka apa saja yang berubah
+ * akhir-akhir ini, oleh siapa, dari berapa ke berapa?".
+ *
+ * Yang paling dicari di jejak audit biasanya bukan kenaikan, tapi TARGET YANG
+ * DITURUNKAN diam-diam. Karena itu naik/turun dihitung terpisah dan ditaruh di
+ * atas, bukan disembunyikan di dalam daftar.
+ *
+ * Gerbangnya sama dengan halaman GRD lain: muatKonteksGrd menyaring jejak
+ * mengikuti goal yang boleh dilihat, jadi cabang lain tidak bocor lewat sini.
+ */
+function GrdJejakView({ user, allUsers }) {
+  const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
+  const [goals, setGoals] = useState([]);
+  const [jejak, setJejak] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [oleh, setOleh] = useState('');
+  const [q, setQ] = useState('');
+  const [hanyaAngka, setHanyaAngka] = useState(true);
+  const [semuaPeriode, setSemuaPeriode] = useState(false);
+
+  const muat = async () => {
+    try {
+      const k = await GrdSvc.muatKonteksGrd({ user, allUsers, butuh: ['goal', 'jejak'] });
+      setGoals(k.goalTerlihat); setJejak(k.jejak);
+    } catch (e) {
+      console.warn('Muat jejak gagal (pertahankan data lama):', e?.message || e);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { muat(); const iv = setInterval(pollWhenVisible(muat), 60000); return () => clearInterval(iv); }, []);
+
+  const hasil = useMemo(() => Grd.jejakLintasGoal(jejak, goals, allUsers, {
+    periode: semuaPeriode ? '' : periode, olehId: oleh, hanyaAngka, kata: q,
+  }), [jejak, goals, allUsers, periode, semuaPeriode, oleh, hanyaAngka, q]);
+
+  const ringkas = useMemo(() => Grd.ringkasJejakAngka(hasil.hasil), [hasil]);
+  const judulGoal = useMemo(() => new Map(goals.map(g => [g.id, g])), [goals]);
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat jejak perubahan…</div>;
+
+  return (
+    <div className="max-w-5xl">
+      <PageHeader title="Jejak Perubahan Angka"
+        subtitle={semuaPeriode
+          ? 'Siapa mengubah angka apa, kapan, dari berapa ke berapa — semua periode'
+          : `Siapa mengubah angka apa, kapan, dari berapa ke berapa — ${Grd.labelPeriode(periode)}`} />
+
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        {!semuaPeriode && (
+          <GrdPemilihPeriode jenis={jenis} periode={periode} onJenis={gantiJenis} onPeriode={setPeriode} />
+        )}
+        <button onClick={() => setSemuaPeriode(v => !v)} aria-pressed={semuaPeriode}
+          className={`h-9 px-3 rounded-lg border text-sm font-semibold transition ${semuaPeriode
+            ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+          Semua periode
+        </button>
+
+        <div className="relative flex-1 min-w-[12rem]">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Cari goal, nama pengubah, atau jenis angka…"
+            className="w-full h-9 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400" />
+        </div>
+
+        <select value={oleh} onChange={e => setOleh(e.target.value)} aria-label="Diubah oleh"
+          className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700">
+          <option value="">Siapa saja</option>
+          {hasil.pengubah.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
+        </select>
+
+        <button onClick={() => setHanyaAngka(v => !v)} aria-pressed={hanyaAngka}
+          title="Perubahan judul/pemilik/periode ikut ditampilkan atau tidak"
+          className={`h-9 px-3 rounded-lg border text-sm font-semibold transition ${hanyaAngka
+            ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+          {hanyaAngka ? 'Hanya angka' : 'Semua perubahan'}
+        </button>
+      </div>
+
+      {/* Naik/turun dipisah: target yang DITURUNKAN diam-diam itu justru yang
+          paling sering dicari orang saat membuka jejak audit. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <MiniStat label="Perubahan" value={hasil.total} color="blue" />
+        <MiniStat label="Angka Naik" value={ringkas.naik} />
+        <MiniStat label="Angka Turun" value={ringkas.turun} color="amber" />
+        <MiniStat label="Pengubah" value={hasil.pengubah.length} color="blue" />
+      </div>
+
+      {hasil.dipotong && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          Menampilkan {hasil.hasil.length} perubahan terbaru dari {hasil.total}. Persempit dengan
+          pencarian, periode, atau nama pengubah untuk melihat sisanya — jejak tidak pernah dihapus,
+          jadi jumlahnya hanya bertambah.
+        </div>
+      )}
+
+      {hasil.hasil.length === 0 ? (
+        <EmptyState icon={History} text={
+          jejak.length === 0
+            ? 'Belum ada perubahan angka yang tercatat.'
+            : 'Tidak ada perubahan yang cocok dengan saringan ini. Coba "Semua periode" atau kosongkan pencarian.'
+        } />
+      ) : (
+        <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
+          {hasil.hasil.map(j => {
+            const g = judulGoal.get(j.goalId);
+            const arah = Grd.arahJejak(j);   // rumus yang sama dengan ringkasan di atas
+            return (
+              <div key={j.id} className="flex items-start justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-800 break-words">
+                    {g ? g.description : 'Goal sudah dihapus'}
+                    {g && <span className="text-slate-400 font-normal"> · {Grd.labelPeriodeSingkat(g.periode)}</span>}
+                  </div>
+                  <div className="text-[12px] text-slate-600 mt-0.5">
+                    <span className="font-semibold">{Grd.labelFieldJejak(j.field)}</span>
+                    {j.field !== '_dibuat' && (
+                      <>
+                        {' '}<span className="line-through text-slate-400">{grdNilaiJejak(j.dari, j.field, allUsers)}</span>
+                        {' → '}
+                        <span className="font-semibold text-slate-800">{grdNilaiJejak(j.ke, j.field, allUsers)}</span>
+                        {arah === 'turun' && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">TURUN</span>}
+                        {arah === 'naik' && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">NAIK</span>}
+                      </>
+                    )}
+                  </div>
+                  <div className="text-[12px] text-slate-400 mt-0.5">oleh {j.olehNama || 'Tidak diketahui'}</div>
+                </div>
+                <span className="text-[12px] text-slate-400 flex-shrink-0 tabular-nums">{grdWaktuJejak(j.waktu)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GrdKelolaView({ user, allUsers, setView }) {
   const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
   const [q, setQ] = useState('');

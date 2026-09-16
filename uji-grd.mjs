@@ -4533,6 +4533,115 @@ cek('86j. Tiket tanpa kaitan tetap sah (kaitan boleh kosong selamanya)',
   Tiket.urutkanTiket(tanpaKaitan).length === 3);
 
 // ============================================================================
+judul('87. Jejak lintas goal — bahan halaman Jejak Perubahan Angka');
+// ============================================================================
+const gJj = [
+  goalDari('u-staf1', { id: 'jg1', periode: '2026-09', description: 'Konten TAP' }),
+  goalDari('u-staf2', { id: 'jg2', periode: '2026-09', description: 'Live TAP' }),
+  goalDari('u-wakil', { id: 'jg3', periode: '2026-08', description: 'Goal bulan lalu' }),
+];
+const jj = (extra) => ({
+  id: extra.id, goalId: extra.goalId, field: extra.field,
+  dari: extra.dari, ke: extra.ke,
+  olehId: extra.olehId || 'u-leader', olehNama: extra.olehNama || 'Leader TAP',
+  waktu: extra.waktu,
+});
+const jjSemua = [
+  jj({ id: 'j1', goalId: 'jg1', field: 'target', dari: 100, ke: 80, waktu: '2026-09-10T03:00:00Z' }),
+  jj({ id: 'j2', goalId: 'jg1', field: 'actual', dari: 10, ke: 30, waktu: '2026-09-12T03:00:00Z' }),
+  jj({ id: 'j3', goalId: 'jg2', field: 'description', dari: 'Live', ke: 'Live TAP', waktu: '2026-09-11T03:00:00Z', olehId: 'u-owner', olehNama: 'Owner' }),
+  jj({ id: 'j4', goalId: 'jg3', field: 'target', dari: 50, ke: 70, waktu: '2026-08-20T03:00:00Z' }),
+  jj({ id: 'j5', goalId: 'goal-sudah-dihapus', field: 'target', dari: 1, ke: 2, waktu: '2026-09-13T03:00:00Z' }),
+];
+
+const jl1 = G.jejakLintasGoal(jjSemua, gJj, tim, { periode: '2026-09' });
+cek('87a. Hanya jejak milik goal yang dioper pemanggil (gerbangnya di situ)',
+  !jl1.hasil.some(j => j.goalId === 'goal-sudah-dihapus'), jl1.hasil.map(j => j.id));
+cek('87b. Periode menyaring goalnya, bukan tanggal jejaknya',
+  !jl1.hasil.some(j => j.goalId === 'jg3'), jl1.hasil.map(j => j.id));
+cek('87c. Bawaannya HANYA perubahan angka (nama halamannya memang itu)',
+  !jl1.hasil.some(j => j.field === 'description'), jl1.hasil.map(j => j.field));
+cek('87d. Terbaru di atas', jl1.hasil.map(j => j.id).join() === 'j2,j1', jl1.hasil.map(j => j.id));
+
+const jl2 = G.jejakLintasGoal(jjSemua, gJj, tim, { periode: '2026-09', hanyaAngka: false });
+cek('87e. Bisa dibuka ke semua jenis perubahan',
+  jl2.hasil.some(j => j.field === 'description'), jl2.hasil.map(j => j.field));
+
+const jl3 = G.jejakLintasGoal(jjSemua, gJj, tim, { hanyaAngka: false });
+cek('87f. Tanpa periode → semua periode ikut', jl3.hasil.some(j => j.goalId === 'jg3'));
+
+const jl4 = G.jejakLintasGoal(jjSemua, gJj, tim, { periode: '2026-09', olehId: 'u-owner', hanyaAngka: false });
+cek('87g. Saring per pengubah', jl4.hasil.length === 1 && jl4.hasil[0].id === 'j3');
+
+const jl5 = G.jejakLintasGoal(jjSemua, gJj, tim, { goalId: 'jg1', periode: '2026-09' });
+cek('87h. Saring per goal', jl5.hasil.every(j => j.goalId === 'jg1') && jl5.hasil.length === 2);
+
+const jl6 = G.jejakLintasGoal(jjSemua, gJj, tim, { hanyaAngka: false, kata: 'live' });
+cek('87i. Cari lewat judul goal', jl6.hasil.map(j => j.id).join() === 'j3', jl6.hasil.map(j => j.id));
+const jl7 = G.jejakLintasGoal(jjSemua, gJj, tim, { hanyaAngka: false, kata: 'owner' });
+cek('87j. Cari lewat nama pengubah', jl7.hasil.map(j => j.id).join() === 'j3');
+
+cek('87k. Daftar pengubah terisi dari data, bukan tebakan',
+  jl3.pengubah.map(p => p.nama).join() === 'Leader TAP,Owner', jl3.pengubah);
+cek('87l. Pengubah tidak dobel walau mengubah berkali-kali',
+  jl3.pengubah.filter(p => p.id === 'u-leader').length === 1);
+
+const banyak = Array.from({ length: 12 }, (_, i) => jj({
+  id: `b${i}`, goalId: 'jg1', field: 'target', dari: i, ke: i + 1,
+  waktu: `2026-09-${String(i + 1).padStart(2, '0')}T03:00:00Z`,
+}));
+const jl8 = G.jejakLintasGoal(banyak, gJj, tim, { periode: '2026-09', batas: 5 });
+cek('87m. Dipotong kalau kebanyakan — jejak tidak pernah dihapus, jumlahnya hanya bertambah',
+  jl8.hasil.length === 5 && jl8.total === 12 && jl8.dipotong === true, { n: jl8.hasil.length, total: jl8.total });
+cek('87n. Yang ditampilkan yang TERBARU, bukan yang terlama',
+  jl8.hasil[0].id === 'b11', jl8.hasil.map(j => j.id));
+cek('87o. Tidak dipotong kalau masih muat',
+  G.jejakLintasGoal(banyak, gJj, tim, { periode: '2026-09' }).dipotong === false);
+cek('87p. Data kosong/rusak aman',
+  G.jejakLintasGoal(null, null, null).hasil.length === 0
+  && G.jejakLintasGoal([null, {}], gJj, tim).hasil.length === 0);
+
+const rk87 = G.ringkasJejakAngka(jl3.hasil);
+cek('87q. Naik & turun dihitung terpisah — target yang DITURUNKAN itu yang dicari orang',
+  rk87.naik === 2 && rk87.turun === 1, rk87);
+cek('87r. Perubahan bukan-angka tidak ikut dihitung naik/turun',
+  G.ringkasJejakAngka([jj({ id: 'x', goalId: 'jg1', field: 'description', dari: 'a', ke: 'b', waktu: '2026-09-01T00:00:00Z' })]).total === 0);
+cek('87s. Nilai yang tidak terbaca dihitung "tetap", bukan bikin NaN',
+  G.ringkasJejakAngka([jj({ id: 'y', goalId: 'jg1', field: 'target', dari: null, ke: 5, waktu: '2026-09-01T00:00:00Z' })]).tetap === 1);
+
+// --- halaman ---
+const iJv = src.indexOf('function GrdJejakView(');
+cek('87t. Halaman Jejak Perubahan Angka ada', iJv > 0);
+const badanJv = src.slice(iJv, src.indexOf('function GrdKelolaView('));
+cek('87u. Memuat lewat satu pintu & hanya yang dibutuhkan',
+  /butuh: \['goal', 'jejak'\]/.test(badanJv));
+cek('87v. Memakai goalTerlihat (yang sudah digerbangi), bukan seluruh goal',
+  /setGoals\(k\.goalTerlihat\)/.test(badanJv));
+cek('87w. Gagal muat tidak mengosongkan layar', /pertahankan data lama/.test(badanJv));
+cek('87x. Naik & turun ditaruh di atas, bukan disembunyikan di dalam daftar',
+  /label="Angka Turun"/.test(badanJv) && /label="Angka Naik"/.test(badanJv));
+cek('87y. Perubahan yang MENURUNKAN angka ditandai jelas', /TURUN</.test(badanJv));
+cek('87y1. Penanda baris memakai rumus yang SAMA dengan ringkasan di atas',
+  /Grd\.arahJejak\(j\)/.test(badanJv) && !/Number\(j\.dari\)/.test(badanJv));
+cek('87y2. arahJejak: null bukan nol (tidak boleh terbaca "naik dari 0")',
+  G.arahJejak({ field: 'target', dari: null, ke: 5 }) === 'tetap');
+cek('87y3. arahJejak menolak field bukan-angka',
+  G.arahJejak({ field: 'description', dari: 'a', ke: 'b' }) === '');
+cek('87y4. arahJejak membaca naik & turun dengan benar',
+  G.arahJejak({ field: 'target', dari: 10, ke: 20 }) === 'naik'
+  && G.arahJejak({ field: 'target', dari: 20, ke: 10 }) === 'turun'
+  && G.arahJejak({ field: 'target', dari: 10, ke: 10 }) === 'tetap');
+cek('87y5. Nol yang SUNGGUHAN tetap terbaca sebagai angka',
+  G.arahJejak({ field: 'actual', dari: 0, ke: 5 }) === 'naik'
+  && G.arahJejak({ field: 'actual', dari: 5, ke: 0 }) === 'turun');
+cek('87z. Goal yang sudah dihapus tetap terbaca barisnya',
+  /Goal sudah dihapus/.test(badanJv));
+cek('87aa. Rute & menu terdaftar',
+  /view === 'grd-jejak' && <GrdJejakView/.test(src)
+  && /id: 'grd-jejak', label: 'Jejak Perubahan'/.test(src));
+cek('87ab. Polling hanya saat tab terlihat (hemat egress)', /pollWhenVisible\(muat\)/.test(badanJv));
+
+// ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
 // ada aturan yang terlanggar — bukan regexnya yang perlu dilonggarkan.
