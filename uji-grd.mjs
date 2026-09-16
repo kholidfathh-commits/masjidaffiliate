@@ -22,6 +22,7 @@ import { goalContoh } from './src/grd/contoh.js';
 import * as Svc from './src/grd/layanan.js';
 import * as H from './src/peran/hierarki.js';
 import * as Abs from './src/absensi/logika.js';
+import * as Tiket from './src/tiket/urutan.js';
 import { storageMock, rpcMock, lepasMockGrd } from './src/grd/mock.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -4486,6 +4487,50 @@ cek('85l. GrdDetailGoal tetap tanpa hook setelah early return', (() => {
   const i = b.indexOf('if (!g) return null;');
   return i > 0 && !/use(State|Effect|Memo|Callback|Ref)\s*\(/.test(b.slice(i));
 })());
+
+// ============================================================================
+judul('86. Tiket TIDAK berubah cara kerjanya (syarat keras PRD butir d)');
+// ----------------------------------------------------------------------------
+// Kaitan lead measure ditambahkan ke tiket, dan PRD melarang tiket berubah
+// cara kerjanya. Bagian ini yang menjaga larangan itu: kalau suatu hari ada
+// yang menyaring / mengurutkan / mewajibkan tiket berdasarkan kaitan GRD,
+// blok ini gagal — dan memang seharusnya gagal.
+// ============================================================================
+const iTv = src.indexOf('function TasksView(');
+const jTv = src.indexOf('function GrdKaitanLeadTiket(');
+cek('86a. Halaman daftar tiket ada', iTv > 0 && jTv > iTv);
+const badanTv = src.slice(iTv, jTv);
+
+cek('86b. Daftar/filter/urutan tiket TIDAK menyentuh kaitan GRD sama sekali',
+  !/leadId/.test(badanTv), (badanTv.match(/.{0,60}leadId.{0,60}/g) || []).slice(0, 3));
+cek('86c. Tidak ada panel GRD yang menyelinap ke halaman daftar',
+  !/<GrdPilihLeadTiket/.test(badanTv) && !/GrdSvc\./.test(badanTv));
+cek('86d. Urutan tiket tetap dari modul src/tiket/urutan.js, bukan aturan baru',
+  /Tiket\.urutkanTiket\(/.test(badanTv) && /Tiket\.URUT_DEFAULT/.test(src));
+cek('86e. Aturan siapa boleh melihat tiket tidak diubah',
+  /canSeeTask: \(viewer, task\) => \{[\s\S]{0,260}task\.assigneeId === viewer\.id \|\| task\.createdById === viewer\.id;/.test(src));
+cek('86f. Syarat simpan tiket tetap judul + PIC (kaitan tidak pernah jadi wajib)',
+  /disabled=\{!form\.title\.trim\(\) \|\| !form\.assigneeId\}/.test(src));
+cek('86g. loadTasks tidak ikut menarik data GRD', (() => {
+  const i = src.indexOf('async function loadTasks(');
+  return !/Grd(Svc)?\./.test(src.slice(i, src.indexOf('\n}', i)));
+})());
+cek('86h. Kaitan cuma FIELD di dalam record tiket — tidak menambah kunci penyimpanan baru',
+  !/['"`]tiket:lead|['"`]grd:tiket|leadId.*REC_PREFIX/.test(src));
+
+// Perilaku: urutan tiket harus SAMA persis dengan atau tanpa kaitan.
+const tkA = { id: 'a', title: 'A', createdAt: '2026-09-01T02:00:00Z', priority: 'low', status: 'todo' };
+const tkB = { id: 'b', title: 'B', createdAt: '2026-09-03T02:00:00Z', priority: 'high', status: 'todo' };
+const tkC = { id: 'c', title: 'C', createdAt: '2026-09-02T02:00:00Z', priority: 'medium', status: 'todo' };
+const tanpaKaitan = [tkA, tkB, tkC];
+const denganKaitan = [{ ...tkA, leadId: 'l1' }, tkB, { ...tkC, leadId: 'l2' }];
+for (const mode of Tiket.URUT_TIKET.map(u => u.id)) {
+  const a = Tiket.urutkanTiket(tanpaKaitan, mode).map(t => t.id).join();
+  const b = Tiket.urutkanTiket(denganKaitan, mode).map(t => t.id).join();
+  cek(`86i-${mode}. Urutan "${Tiket.labelUrut(mode)}" tidak berubah oleh kaitan GRD`, a === b, { a, b });
+}
+cek('86j. Tiket tanpa kaitan tetap sah (kaitan boleh kosong selamanya)',
+  Tiket.urutkanTiket(tanpaKaitan).length === 3);
 
 // ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
