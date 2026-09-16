@@ -88,7 +88,8 @@ import * as Qr from './sampel/qr.js';
 // contoh.js = data TIRUAN sementara supaya halaman bisa dinilai sebelum
 // penyimpanannya dikerjakan; hapus import itu begitu kv_store sudah dipakai.
 import * as Grd from './grd/data.js';
-import { goalContoh } from './grd/contoh.js';
+import * as GrdSvc from './grd/layanan.js';
+import { initGrd } from './grd/layanan.js';
 
 // Halaman LMS dimuat LAZY: anggota yang tidak pernah membuka menu Pembelajaran
 // tidak ikut mengunduh kodenya (bundle utama app sudah ~973 kB).
@@ -710,6 +711,33 @@ async function loadSampleStats() {
   return await storage.listByPrefix(Sampel.STAT_REC_PREFIX);
 }
 
+// ====== GRD (Goal Roll Down) ======
+// Per-record: 1 baris = 1 goal (`grdgoal:rec:<id>`) dan 1 baris = 1 catatan jejak
+// (`grdjejak:rec:<id>`). Dipilih begini supaya dua orang yang menyimpan goal
+// hampir bersamaan tidak saling menimpa — pelajaran yang sama dari modul
+// tiket/absensi/catatan. `listByPrefix` memakai LIKE (aturan wajib no.5).
+async function loadGoals() {
+  const recs = await storage.listByPrefix(Grd.GOAL_REC_PREFIX); // throw saat koneksi gagal → pemanggil pertahankan state lama
+  return recs.map(Grd.normalisasiGoal).filter(Boolean);
+}
+async function loadJejakGrd() {
+  return await storage.listByPrefix(Grd.JEJAK_REC_PREFIX);
+}
+
+// ====== GRD: suntik dependensi app ke modul layanan ======
+// Sama alasannya dengan initLms di bawah: src/grd/layanan.js tidak boleh
+// meng-import App.jsx, jadi `storage` dioper dari sini. `log` dibungkus arrow
+// karena logActivity adalah const yang baru dideklarasikan jauh di bawah —
+// kalau dioper langsung, hasilnya ReferenceError TDZ dan app blank.
+initGrd({
+  storage,
+  log: (text, userName) => logActivity(text, userName),
+  // Jalur RPC OPSIONAL: dipakai otomatis kalau fungsi SQL-nya sudah dipasang
+  // (supabase-grd-rpc.sql), kalau belum → tulis langsung ke kv_store. Sama
+  // polanya dengan foto → Storage: setup yang belum dijalankan tidak merusak app.
+  rpc: supabase ? (nama, args) => supabase.rpc(nama, args) : null,
+});
+
 // ====== LMS: suntik dependensi app ke modul pembelajaran ======
 // Dipanggil SEKALI di sini, tepat sebelum registry di bawah, karena loader LMS butuh
 // `storage`. Perhatikan `log`: logActivity adalah const yang baru dideklarasikan jauh
@@ -733,6 +761,8 @@ const PER_RECORD_LOADERS = {
   [Catatan.CATATAN_BACKUP_KEY]: loadNotes, [Catatan.FAVORIT_BACKUP_KEY]: loadNoteFavorites,
   // Manajemen Sampel
   [Sampel.SAMPEL_BACKUP_KEY]: loadSamples, [Sampel.PAKAI_BACKUP_KEY]: loadSampleUsages, [Sampel.STAT_BACKUP_KEY]: loadSampleStats,
+  // GRD (Goal Roll Down)
+  [Grd.GOAL_BACKUP_KEY]: loadGoals, [Grd.JEJAK_BACKUP_KEY]: loadJejakGrd,
   // LMS (Pembelajaran)
   'lms:paths:all': loadLmsPaths, 'lms:courses:all': loadLmsCourses, 'lms:lesson-bodies:all': loadLmsBodies,
   'lms:enrollments:all': loadLmsEnrollments, 'lms:progress:all': loadLmsProgress, 'lms:attempts:all': loadLmsAttempts,
@@ -746,6 +776,8 @@ const PER_RECORD_PREFIX = {
   [Catatan.CATATAN_BACKUP_KEY]: Catatan.CATATAN_REC_PREFIX, [Catatan.FAVORIT_BACKUP_KEY]: Catatan.FAVORIT_REC_PREFIX,
   // Manajemen Sampel
   [Sampel.SAMPEL_BACKUP_KEY]: Sampel.SAMPEL_REC_PREFIX, [Sampel.PAKAI_BACKUP_KEY]: Sampel.PAKAI_REC_PREFIX, [Sampel.STAT_BACKUP_KEY]: Sampel.STAT_REC_PREFIX,
+  // GRD (Goal Roll Down)
+  [Grd.GOAL_BACKUP_KEY]: Grd.GOAL_REC_PREFIX, [Grd.JEJAK_BACKUP_KEY]: Grd.JEJAK_REC_PREFIX,
   // LMS (Pembelajaran)
   'lms:paths:all': LMS_PATH_PREFIX, 'lms:courses:all': LMS_COURSE_PREFIX, 'lms:lesson-bodies:all': LMS_BODY_PREFIX,
   'lms:enrollments:all': LMS_ENROLL_PREFIX, 'lms:progress:all': LMS_PROGRESS_PREFIX, 'lms:attempts:all': LMS_ATTEMPT_PREFIX,
@@ -1033,6 +1065,8 @@ const BACKUP_KEYS = [
   Catatan.CATATAN_BACKUP_KEY, Catatan.FAVORIT_BACKUP_KEY, // Catatan Kerja + penanda favorit per user
   // Manajemen Sampel: master, log pemakaian (SUMBER KEBENARAN, tak tergantikan), cache ringkasan
   Sampel.SAMPEL_BACKUP_KEY, Sampel.PAKAI_BACKUP_KEY, Sampel.STAT_BACKUP_KEY,
+  // GRD: goal + jejak perubahan angka (jejak = bukti audit, tak tergantikan)
+  Grd.GOAL_BACKUP_KEY, Grd.JEJAK_BACKUP_KEY,
   'img:store', // brankas foto (avatar/bukti/lampiran) — ikut backup agar foto tak hilang saat restore
   ...LMS_BACKUP_KEYS // LMS: jalur, kursus, isi materi, enrollment, progres, kuis, tugas, validasi, modul bacaan
 ];
@@ -18582,9 +18616,9 @@ function CatatanDetailModal({ n, user, favorit, onEdit, onPin, onFavorit, onVisi
 // src/grd/data.js → src/peran/hierarki.js), bukan 5 level hardcode — jadi
 // promosi jabatan cukup mengubah data anggota, susunan pohon ikut sendiri.
 //
-// SEMENTARA: sumber datanya masih goalContoh() (data tiruan yang deterministik).
-// Penyimpanan sungguhan (`grdgoal:rec:<id>` di kv_store) menyusul; saat itu
-// cukup ganti `goals` di bawah dan copot import contoh.js.
+// Sumber datanya kv_store (`grdgoal:rec:<id>`), diakses LEWAT src/grd/layanan.js —
+// halaman ini tidak pernah memanggil `storage` langsung. Itu yang membuat kontrol
+// akses bisa naik ke Supabase RPC + RLS tanpa mengubah satu pun komponen di sini.
 
 /**
  * State periode yang dipakai bersama halaman-halaman GRD.
@@ -18637,19 +18671,6 @@ function GrdPemilihPeriode({ jenis, periode, onJenis, onPeriode }) {
         </button>
       )}
     </>
-  );
-}
-
-/** Banner tetap: halaman GRD masih berjalan di atas data tiruan. */
-function GrdBannerContoh() {
-  return (
-    <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2.5">
-      <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-      <div className="text-[12px] text-amber-800 leading-relaxed">
-        <span className="font-bold">Masih data contoh.</span> Angka goal di halaman ini belum tersimpan —
-        dipakai sementara untuk menguji tampilan. Susunan orang & atasannya sudah memakai data tim yang sungguhan.
-      </div>
-    </div>
   );
 }
 
@@ -18962,8 +18983,17 @@ function GrdSimpul({ simpul, user, allUsers, terlipat, onToggle, onBukaGoal }) {
 function GrdTreeView({ user, allUsers }) {
   const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
 
-  // SEMENTARA — data tiruan supaya halaman bisa dinilai sebelum penyimpanan siap.
-  const goals = useMemo(() => goalContoh(allUsers, periode), [allUsers, periode]);
+  // Data SUNGGUHAN dari kv_store lewat src/grd/layanan.js. Kegagalan koneksi
+  // tidak mengosongkan layar (pola sama dengan AsetView/CatatanView).
+  const [goals, setGoals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const muat = async () => {
+    try { setGoals(await GrdSvc.ambilGoal()); }
+    catch (e) { console.warn('Muat goal gagal (pertahankan data lama):', e?.message || e); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { muat(); const iv = setInterval(pollWhenVisible(muat), 60000); return () => clearInterval(iv); }, []);
+
   const pohonPenuh = useMemo(() => Grd.bangunPohonGoal({ users: allUsers, goals, periode }), [allUsers, goals, periode]);
 
   const [q, setQ] = useState('');
@@ -18996,6 +19026,8 @@ function GrdTreeView({ user, allUsers }) {
   });
   const lipatSemua = () => setUbahan(new Set(Grd.idCabang(pohon)));
   const bukaSemua = () => setUbahan(new Set());
+
+  if (loading) return <div className="text-slate-400 text-sm">Memuat pohon goal…</div>;
 
   return (
     <div className="max-w-5xl">
@@ -19040,8 +19072,6 @@ function GrdTreeView({ user, allUsers }) {
           </button>
         )}
       </div>
-
-      <GrdBannerContoh />
 
       {menggantung.length > 0 && (
         <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-2.5">
@@ -19180,6 +19210,12 @@ function GrdFormGoal({ goal, user, allUsers, periodeAktif, jenisAktif, onSimpan,
   // Pratinjau capaian ikut bergerak saat angka diketik — memberi tahu lebih awal
   // kalau base/target tertukar, sebelum goalnya sempat tersimpan.
   const pratinjau = Grd.normalisasiGoal({ ...form, actual: form.actual === '' ? form.base : form.actual });
+  // Form yang masih kosong TIDAK boleh menampilkan angka capaian. Base & target
+  // yang sama-sama kosong terbaca sebagai 0 dan 0, dan "sudah sampai target"
+  // pada jarak nol itu memang 100% — benar secara hitungan, tapi menyesatkan
+  // sebagai pratinjau: goal baru terlihat sudah tercapai sebelum diisi.
+  const pratinjauSiap = form.base !== '' && form.target !== ''
+    && Number(form.base) !== Number(form.target);
 
   const simpan = () => {
     const calonGoal = {
@@ -19263,13 +19299,18 @@ function GrdFormGoal({ goal, user, allUsers, periodeAktif, jenisAktif, onSimpan,
         <div className="flex items-center justify-between text-xs">
           <span className="font-semibold text-slate-600">Pratinjau capaian</span>
           <span className="font-display font-bold text-slate-800 tabular-nums">
-            {Grd.persenCapaian(pratinjau)}%
+            {pratinjauSiap ? `${Grd.persenCapaian(pratinjau)}%` : '—'}
           </span>
         </div>
         <div className="mt-2 h-1.5 rounded-full bg-slate-200 overflow-hidden">
-          <div className={`h-full rounded-full ${Grd.gayaStatus(Grd.statusCapaian(pratinjau)).bar}`}
-            style={{ width: `${Grd.persenBar(pratinjau)}%` }} />
+          <div className={`h-full rounded-full ${pratinjauSiap ? Grd.gayaStatus(Grd.statusCapaian(pratinjau)).bar : 'bg-transparent'}`}
+            style={{ width: `${pratinjauSiap ? Grd.persenBar(pratinjau) : 0}%` }} />
         </div>
+        {!pratinjauSiap && (
+          <div className="text-[11px] text-slate-400 mt-1.5">
+            Isi base dan target dulu — keduanya harus berbeda.
+          </div>
+        )}
       </div>
 
       {pesan && (
@@ -19377,7 +19418,7 @@ function GrdTurunkanModal({ goal, allUsers, goalAda, onTurunkan, onClose }) {
           Batal
         </button>
         {rencana.length > 0 && (
-          <button onClick={() => onTurunkan(rencana)}
+          <button onClick={() => onTurunkan({ ...g, _bagiRata: bagiRata })}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">
             Turunkan ke {rencana.length} orang
           </button>
@@ -19524,8 +19565,9 @@ function GrdSimpulRantai({ simpul, allUsers, onBuka, onUbah, onTurunkan, onHapus
  * bawahannya. Sengaja tidak menampilkan goal yang tidak berwenang ia ubah,
  * supaya halaman ini tidak pernah memunculkan tombol yang nanti ditolak.
  *
- * SEMENTARA: sumbernya masih goalContoh(). Form tambah/ubah/hapus dan tombol
- * "turunkan ke bawahan" menyusul di task berikutnya.
+ * Semua tulis (simpan, hapus, turunkan) lewat src/grd/layanan.js, yang memeriksa
+ * wewenang SEBELUM menyentuh penyimpanan — tombol yang lolos dari layar tetap
+ * tidak bisa menembusnya.
  */
 function GrdKelolaView({ user, allUsers }) {
   const { jenis, periode, setPeriode, gantiJenis } = useGrdPeriode();
@@ -19535,50 +19577,56 @@ function GrdKelolaView({ user, allUsers }) {
   const [formBuka, setFormBuka] = useState(false);
   const [draf, setDraf] = useState(null);
 
-  // SEMENTARA — perubahan form disimpan di memori halaman saja (hilang saat
-  // refresh), supaya form benar-benar bisa dicoba sebelum penyimpanan ke
-  // kv_store dikerjakan. Begitu penyimpanan siap, ketiga state ini diganti
-  // pemanggilan storage dan sisa halaman tidak perlu berubah.
-  const [goalBaru, setGoalBaru] = useState([]);
-  const [goalDiubah, setGoalDiubah] = useState({});
-  const [goalDihapus, setGoalDihapus] = useState(() => new Set());
-
-  const goals = useMemo(() => {
-    const dasar = goalContoh(allUsers, periode).map(g => goalDiubah[g.id] || g);
-    const tambahan = goalBaru.map(g => goalDiubah[g.id] || g);
-    return [...dasar, ...tambahan].filter(g => !goalDihapus.has(g.id));
-  }, [allUsers, periode, goalBaru, goalDiubah, goalDihapus]);
-
-  // Jejak perubahan angka — untuk sekarang ikut tinggal di memori halaman.
+  // Data SUNGGUHAN dari kv_store, lewat satu pintu src/grd/layanan.js.
+  const [goals, setGoals] = useState([]);
   const [jejak, setJejak] = useState([]);
-  const catat = (lama, baru) => setJejak(j => [...j, ...Grd.catatPerubahan(lama, baru, user)]);
+  const [loading, setLoading] = useState(true);
 
-  const simpanGoal = (g) => {
-    if (draf) {
-      setGoalDiubah(m => ({ ...m, [g.id]: g }));
-      catat(draf, g);
-    } else {
-      const baru = { ...g, id: g.id || uid(), _contoh: true };
-      setGoalBaru(list => [...list, baru]);
-      catat(null, baru);
-    }
-    setFormBuka(false); setDraf(null);
+  // Pola yang sama dengan AsetView/CatatanView: kegagalan koneksi TIDAK
+  // mengosongkan layar — data lama dipertahankan supaya pengguna tidak mengira
+  // goalnya hilang, dan polling hanya jalan saat tab terlihat (hemat egress).
+  const muat = async () => {
+    try {
+      const [g, j] = await Promise.all([GrdSvc.ambilGoal(), GrdSvc.ambilJejak()]);
+      setGoals(g); setJejak(j);
+    } catch (e) {
+      console.warn('Muat GRD gagal (pertahankan data lama):', e?.message || e);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { muat(); const iv = setInterval(pollWhenVisible(muat), 60000); return () => clearInterval(iv); }, []);
+
+  // Semua tulis lewat layanan: hak akses & validasi diperiksa DI SANA, bukan di
+  // sini — jadi tombol yang lolos dari layar tetap tidak bisa menembusnya.
+  const simpanGoal = async (g) => {
+    try {
+      await GrdSvc.simpanGoal(g, { user, allUsers, goalLama: draf });
+      setFormBuka(false); setDraf(null);
+      await muat();
+    } catch (e) { alert('⚠️ ' + (e?.message || e)); }
   };
   const bukaBaru = () => { setDraf(null); setFormBuka(true); };
   const bukaUbah = (g) => { setDraf(g); setFormBuka(true); };
 
   const [hapus, setHapus] = useState(null);
-  const jalankanHapus = (g) => {
-    setGoalDihapus(set => new Set([...set, g.id]));
-    setHapus(null); setDetail(null);
+  const jalankanHapus = async (g) => {
+    try {
+      await GrdSvc.hapusGoal(g, { user, allUsers });
+      setHapus(null); setDetail(null);
+      await muat();
+    } catch (e) { alert('⚠️ ' + (e?.message || e)); }
   };
 
   const [turunkan, setTurunkan] = useState(null);
-  const jalankanTurunkan = (rencana) => {
-    const dibuat = rencana.map(r => ({ ...r, id: uid(), _contoh: true }));
-    setGoalBaru(list => [...list, ...dibuat]);
-    dibuat.forEach(g => catat(null, g));
-    setTurunkan(null);
+  const jalankanTurunkan = async (g) => {
+    try {
+      // Rencananya disusun ULANG di layanan dari goal induk — bukan dikirim dari
+      // layar — supaya isian yang sudah usang di modal tidak bisa lolos menembus
+      // pemeriksaan wewenang.
+      const dibuat = await GrdSvc.turunkanGoal(g, { user, allUsers, bagiRata: g._bagiRata, goalAda: goals });
+      setTurunkan(null);
+      await muat();
+      if (dibuat.length === 0) alert('Semua bawahan sudah punya goal turunan dari goal ini.');
+    } catch (e) { alert('⚠️ ' + (e?.message || e)); }
   };
   // Tombol turunkan hanya muncul kalau pemilik goal memang punya bawahan langsung.
   const bolehTurunkan = (g) => Grd.bawahanUntukTurunan(g, allUsers).length > 0;
@@ -19615,6 +19663,8 @@ function GrdKelolaView({ user, allUsers }) {
     rantai: { label: 'Rantai', sub: 'Goal induk di atas, turunannya di bawah' },
   };
 
+  if (loading) return <div className="text-slate-400 text-sm">Memuat goal…</div>;
+
   return (
     <div className="max-w-5xl">
       <PageHeader title="Kelola Goal"
@@ -19625,8 +19675,6 @@ function GrdKelolaView({ user, allUsers }) {
             <Plus className="w-4 h-4" /> Goal Baru
           </button>
         } />
-
-      <GrdBannerContoh />
 
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <GrdPemilihPeriode jenis={jenis} periode={periode} onJenis={gantiJenis} onPeriode={setPeriode} />
@@ -19673,7 +19721,7 @@ function GrdKelolaView({ user, allUsers }) {
           </div>
           <div className="text-sm text-slate-500 mt-1">
             {bisaDikelola.length === 0
-              ? 'Goal untuk periode ini belum dibuat. Form pembuatan goal menyusul.'
+              ? 'Tekan "Goal Baru" untuk membuat goal pertama periode ini — ada template siap pakai.'
               : 'Coba kata lain, atau ubah saringan.'}
           </div>
         </div>
@@ -19701,10 +19749,6 @@ function GrdKelolaView({ user, allUsers }) {
         </div>
       )}
 
-      <div className="mt-5 text-[11px] text-slate-500">
-        Perubahan dari form masih tersimpan di halaman ini saja dan hilang saat halaman dimuat ulang.
-        Template per peran dan tombol &ldquo;turunkan ke bawahan&rdquo; menyusul di langkah berikutnya.
-      </div>
 
       {formBuka && (
         <GrdFormGoal goal={draf} user={user} allUsers={allUsers}
