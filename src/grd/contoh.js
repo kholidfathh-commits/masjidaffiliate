@@ -1,14 +1,17 @@
 // ============================================================================
-// GRD — DATA TIRUAN (stub) untuk Pohon Roll Down.
+// GRD — PENGHASIL DATA CONTOH (dipakai PENGUJIAN, bukan aplikasi).
 // ----------------------------------------------------------------------------
-// SEMENTARA. Dipakai supaya halaman Pohon Roll Down bisa dibuka & diklik-klik
-// sebelum penyimpanannya (`grdgoal:rec:<id>` di kv_store) dikerjakan. Begitu
-// modul penyimpanan siap, halaman tinggal mengganti sumber datanya dan file ini
-// boleh dihapus — tidak ada modul lain yang bergantung padanya.
+// Awalnya file ini menjadi sumber data sementara halaman GRD supaya tampilannya
+// bisa dinilai sebelum penyimpanan siap. Sejak halaman beralih ke kv_store
+// (lewat src/grd/layanan.js), App.jsx TIDAK lagi meng-importnya — jadi ia tidak
+// ikut masuk bundle produksi sama sekali.
+//
+// Yang tersisa adalah kegunaan keduanya: menghasilkan tim berisi goal yang
+// masuk akal untuk uji-grd.mjs, tanpa menulis puluhan objek contoh dengan tangan.
+// Jangan dipakai lagi dari kode aplikasi.
 //
 // SIFAT WAJIB: DETERMINISTIK. Angkanya diturunkan dari id pengguna, bukan
-// Math.random — kalau acak, angka di kartu akan berubah sendiri tiap render dan
-// mustahil dinilai saat pengecekan tampilan.
+// Math.random — hasil uji harus sama persis tiap kali dijalankan.
 //
 // Sama seperti modul GRD lainnya: TIDAK BOLEH meng-import App.jsx.
 // ============================================================================

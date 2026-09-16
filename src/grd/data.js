@@ -150,6 +150,31 @@ export function daftarPeriode(jenis = JENIS_PERIODE_DEFAULT, acuan = '', mundur 
 }
 
 /**
+ * Periode yang BENAR-BENAR punya goal, terbaru di atas.
+ *
+ * Gunanya: dropdown periode bawaan hanya menebak (6 bulan ke belakang, 2 ke
+ * depan). Kalau tim mengisi goal untuk periode di luar rentang tebakan itu,
+ * periodenya tidak akan pernah bisa dipilih. Daftar ini digabungkan dengan
+ * tebakan supaya tidak ada periode berisi yang tersembunyi.
+ */
+export function periodeTersedia(goals) {
+  const set = new Set();
+  for (const g of (goals || []).map(normalisasiGoal)) {
+    if (g && g.periode) set.add(g.periode);
+  }
+  return [...set].sort().reverse();
+}
+
+/** Tebakan dropdown + periode yang benar-benar terpakai, tanpa duplikat. */
+export function pilihanPeriodeLengkap(jenis, acuan, goals) {
+  const gabung = new Set(daftarPeriode(jenis, acuan));
+  for (const p of periodeTersedia(goals)) {
+    if (jenisPeriode(p) === jenis) gabung.add(p);
+  }
+  return [...gabung].sort().reverse();
+}
+
+/**
  * Pindah jenis periode TANPA melompat ke hari ini: September 2026 ⇄ Kuartal 3
  * 2026. Kalau tidak begini, pengguna yang sedang menelaah periode lama akan
  * terlempar ke periode berjalan hanya karena menekan tombol Kuartalan.
@@ -535,6 +560,49 @@ export function riwayatGoal(jejak, goalId) {
 /** Hanya perubahan ANGKA (base/target/actual) — inti "jejak perubahan angka". */
 export function riwayatAngka(jejak, goalId) {
   return riwayatGoal(jejak, goalId).filter(j => fieldJejakAngka(j.field));
+}
+
+/**
+ * PENCARIAN GOAL sebagai DAFTAR DATAR (bukan pohon).
+ *
+ * Pelengkap `saringPohon`, bukan penggantinya. Dua bentuk dibutuhkan karena dua
+ * pertanyaan yang berbeda:
+ *   · saringPohon  — "di mana orang ini di dalam struktur?" (jalur ke atas dijaga)
+ *   · cariGoalDatar — "goal apa saja yang menyebut kata ini?" (semua sejajar)
+ * Halaman Kelola Goal memakai yang kedua; di sana struktur justru mengganggu.
+ *
+ * Urutannya deterministik: periode terbaru dulu, lalu yang capaiannya paling
+ * tertinggal, lalu abjad — jadi hasil pencarian tidak pernah berubah urutan
+ * antar-render untuk data yang sama.
+ */
+export function cariGoalDatar(goals, allUsers, { kata = '', divisi = 'all', periode = '', ownerId = '' } = {}) {
+  const k = String(kata || '').trim().toLowerCase();
+  let hasil = (goals || []).map(normalisasiGoal).filter(Boolean);
+
+  if (periode) hasil = goalPeriode(hasil, periode);
+  if (ownerId) hasil = hasil.filter(g => g.ownerId === ownerId);
+
+  if (divisi && divisi !== 'all') {
+    hasil = hasil.filter(g => {
+      const u = pemilikGoal(g, allUsers);
+      return !!u && u.division === divisi;
+    });
+  }
+
+  if (k) {
+    hasil = hasil.filter(g => {
+      const u = pemilikGoal(g, allUsers);
+      return [g.description, g.uom, u && u.name, u && u.jobTitle, u && u.division]
+        .filter(Boolean).join(' ').toLowerCase().includes(k);
+    });
+  }
+
+  return hasil.sort((a, b) => {
+    if (a.periode !== b.periode) return b.periode.localeCompare(a.periode);
+    const beda = persenCapaian(a) - persenCapaian(b);
+    if (beda !== 0) return beda;
+    return a.description.localeCompare(b.description);
+  });
 }
 
 // ============================================================================
