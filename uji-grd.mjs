@@ -4382,13 +4382,67 @@ cek('83m. Laporan Mingguan ikut di daftar yang sama',
   /id: 'reports'[^}]*show: isPengelola\(user\)/.test(daftarMenu));
 
 // ============================================================================
+judul('84. Kaitan lead measure pada tiket (PRD butir d) — panel pemilih');
+// ----------------------------------------------------------------------------
+// Syarat PRD paling keras di butir ini: "tanpa mengubah cara kerja tiket".
+// Jadi yang dijaga di sini bukan cuma "panelnya ada", tapi bahwa panel itu
+// TIDAK BISA menghalangi orang membuat/menyimpan tiket.
+// ============================================================================
+const iPnl = src.indexOf('function GrdPilihLeadTiket(');
+const jPnl = src.indexOf('function TaskForm(');
+cek('84a. Panel pemilih lead measure ada', iPnl > 0 && jPnl > iPnl);
+const badanPnl = src.slice(iPnl, jPnl);
+
+cek('84b. Hanya menawarkan lead measure yang SUDAH AKTIF (usulan belum jadi komitmen)',
+  /l\.status === 'aktif'/.test(badanPnl));
+cek('84c. Dan hanya milik PIC tiket itu (lead orang lain tak bisa disumbang tiket ini)',
+  /l\.ownerId === pemilikId/.test(badanPnl));
+cek('84d. Selalu ada jalan keluar "tidak dikaitkan"',
+  /<option value="">— Tidak dikaitkan —<\/option>/.test(badanPnl));
+cek('84e. Gagal muat GRD → panel menghilang, tiket tetap bisa dibuat',
+  /catch[\s\S]{0,200}panel disembunyikan/.test(badanPnl));
+cek('84f. PIC tanpa lead aktif → panel tidak muncul sama sekali (bukan dropdown kosong)',
+  /if \(pilihan\.length === 0 && !value\) return null;/.test(badanPnl));
+cek('84g. Kaitan LAMA yang kini tidak aktif tetap ditampilkan, tidak dibuang diam-diam',
+  /diLuarPilihan/.test(badanPnl) && /kaitan lama/.test(badanPnl));
+cek('84h. Datanya lewat pintu layanan GRD, bukan baca storage langsung',
+  /GrdSvc\.muatKonteksGrd\(/.test(badanPnl) && !/storage\.(get|set)/.test(badanPnl));
+cek('84i. Hanya meminta goal & lead — tidak ikut menarik skor/jejak (hemat egress)',
+  /butuh: \['goal', 'lead'\]/.test(badanPnl));
+
+const iFrm = src.indexOf('function TaskForm(');
+const badanFrm = src.slice(iFrm, src.indexOf('function GrdPilihLeadTiket(') > iFrm
+  ? src.indexOf('function GrdPilihLeadTiket(') : src.indexOf('// ============ REPORTS ============'));
+cek('84j. Tiket punya field leadId, dan kosong secara bawaan',
+  /leadId: task\?\.leadId \|\| ''/.test(badanFrm));
+cek('84k. Syarat simpan tiket TIDAK berubah (tetap judul + PIC saja)',
+  /disabled=\{!form\.title\.trim\(\) \|\| !form\.assigneeId\}/.test(badanFrm));
+cek('84l. Panel dipasang di form tiket', /<GrdPilihLeadTiket/.test(badanFrm));
+cek('84m. leadId ikut tersimpan saat tiket BARU maupun DIEDIT (dua-duanya sebar `data`)',
+  /rec = \{\s*\.\.\.editing, \.\.\.data,/.test(src) && /rec = \{\s*id: uid\(\), \.\.\.data,/.test(src));
+
+// ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
 // ada aturan yang terlanggar — bukan regexnya yang perlu dilonggarkan.
 // ============================================================================
 cek('18a. Loader goal per-record ada', /async function loadGoals\(/.test(src));
 cek('18a-5. Semua halaman GRD memuat lewat SATU pintu (muatKonteksGrd)',
-  (src.match(/GrdSvc\.muatKonteksGrd\(/g) || []).length === 4);
+  (src.match(/GrdSvc\.muatKonteksGrd\(/g) || []).length >= 5,
+  (src.match(/GrdSvc\.muatKonteksGrd\(/g) || []).length);
+// Dulu jumlahnya dipatok persis (=4). Angka pasti bukan penjaga yang baik: ia
+// gagal setiap kali ada halaman baru yang justru MEMATUHI aturannya. Yang
+// benar-benar perlu dijaga ada di bawah ini — tiap pemanggil menyebut sendiri
+// apa yang ia butuhkan, supaya tidak ada yang diam-diam menarik semuanya.
+cek('18a-5b. Tiap pemanggil menyebut `butuh` sendiri (tidak menumpang bawaan)', (() => {
+  let i = 0, kurang = [];
+  while ((i = src.indexOf('GrdSvc.muatKonteksGrd(', i)) !== -1) {
+    const cuplik = src.slice(i, i + 260);
+    if (!/butuh:\s*\[/.test(cuplik)) kurang.push(cuplik.slice(0, 90));
+    i += 1;
+  }
+  return kurang.length === 0;
+})());
 cek('18a-6. Tidak ada halaman yang merangkai pemanggilan bacanya sendiri lagi',
   !/Promise\.all\(\[GrdSvc\.ambilGoal/.test(src));
 cek('18a-2. SATU JALUR: App.jsx tidak menyentuh penyimpanan GRD di luar layanan', (() => {

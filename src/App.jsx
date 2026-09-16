@@ -6328,7 +6328,7 @@ function TasksView({ user, allUsers }) {
         )}
       </div>
 
-      {showForm && <TaskForm task={editing} user={user} assignableUsers={assignableUsers}
+      {showForm && <TaskForm task={editing} user={user} allUsers={allUsers} assignableUsers={assignableUsers}
         onSave={handleSave} onClose={() => { setShowForm(false); setEditing(null); }} />}
       {viewing && <TaskDetailModal task={viewing} user={user} allUsers={allUsers}
         onEdit={() => { setEditing(viewing); setShowForm(true); setViewing(null); }}
@@ -6579,7 +6579,79 @@ function SearchableSelect({ value, onChange, options, placeholder = 'Ketik untuk
 // Sengaja terpisah dari `task`: `task` berarti sedang MENGEDIT tiket yang sudah ada
 // (judul modal jadi "Edit Tiket" dan pemberi tugasnya dipertahankan), sedangkan
 // prefill hanya mengisi kolom untuk tiket yang belum pernah tersimpan.
-function TaskForm({ task, prefill, user, assignableUsers, onSave, onClose }) {
+/**
+ * PANEL PILIH LEAD MEASURE UNTUK TIKET (opsional).
+ *
+ * Gunanya menjawab "pekerjaan ini menyumbang ke komitmen mingguan yang mana?".
+ * Karena itu yang ditawarkan HANYA lead measure AKTIF milik PIC-nya — lead orang
+ * lain tidak bisa disumbang oleh tiket ini, dan lead yang belum disetujui belum
+ * jadi komitmen apa pun.
+ *
+ * ATURAN KERAS (PRD butir d): tiket tidak boleh berubah cara kerjanya. Karena itu
+ * panel ini SELALU opsional, tidak pernah menghalangi simpan, dan kalau modul GRD
+ * kosong / gagal dimuat ia menghilang begitu saja — bukan menampilkan error yang
+ * membuat orang mengira tiketnya rusak.
+ */
+function GrdPilihLeadTiket({ user, allUsers, pemilikId, value, onChange }) {
+  const [leads, setLeads] = useState([]);
+  const [goals, setGoals] = useState([]);
+  const [siap, setSiap] = useState(false);
+
+  useEffect(() => {
+    let batal = false;
+    (async () => {
+      try {
+        const k = await GrdSvc.muatKonteksGrd({ user, allUsers, butuh: ['goal', 'lead'] });
+        if (!batal) { setLeads(k.leads); setGoals(k.goalTerlihat); }
+      } catch (e) {
+        // Diam-diam mundur: tiket harus tetap bisa dibuat walau GRD tak terbaca.
+        console.warn('Muat lead measure untuk tiket gagal (panel disembunyikan):', e?.message || e);
+      } finally { if (!batal) setSiap(true); }
+    })();
+    return () => { batal = true; };
+  }, []);
+
+  const pilihan = useMemo(() => {
+    const judulGoal = new Map(goals.map(g => [g.id, g.description]));
+    return leads
+      .filter(l => l.status === 'aktif' && l.ownerId === pemilikId)
+      .map(l => ({
+        value: l.id,
+        label: `${l.description} (${l.targetMingguan} ${l.uom}/minggu)`
+          + (judulGoal.has(l.goalId) ? ` — ${judulGoal.get(l.goalId)}` : ''),
+      }));
+  }, [leads, goals, pemilikId]);
+
+  // Tiket lama boleh menunjuk lead yang kini tidak aktif / bukan milik PIC baru.
+  // Kaitannya TIDAK dibuang diam-diam — itu keputusan orang, bukan sampah data.
+  const leadTerpilih = value ? leads.find(l => l.id === value) : null;
+  const diLuarPilihan = !!leadTerpilih && !pilihan.some(o => o.value === value);
+
+  if (!siap) return null;
+  if (pilihan.length === 0 && !value) return null;
+
+  return (
+    <Field label="Lead Measure Terkait (opsional)">
+      <select value={value || ''} onChange={e => onChange(e.target.value)}
+        className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white">
+        <option value="">— Tidak dikaitkan —</option>
+        {diLuarPilihan && (
+          <option value={value}>
+            {leadTerpilih.description} (kaitan lama — sudah tidak aktif / bukan milik PIC ini)
+          </option>
+        )}
+        {pilihan.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      <p className="text-xs text-slate-500 mt-1">
+        {pilihan.length === 0
+          ? 'PIC ini belum punya lead measure aktif — kaitannya boleh dikosongkan.'
+          : 'Boleh dikosongkan. Tiket tetap bekerja seperti biasa tanpa kaitan ini.'}
+      </p>
+    </Field>
+  );
+}
+
+function TaskForm({ task, prefill, user, allUsers = [], assignableUsers, onSave, onClose }) {
   // Saat mengedit tiket lama, PIC-nya bisa saja di luar wewenang penugasan sekarang
   // (aturan diperketat setelah tiket itu dibuat). Kalau tidak dimasukkan ke daftar
   // opsi, SearchableSelect menampilkan kolom KOSONG padahal PIC-nya ada — dan
@@ -6597,7 +6669,8 @@ function TaskForm({ task, prefill, user, assignableUsers, onSave, onClose }) {
     assigneeId: task?.assigneeId || (assignableUsers[0]?.id || ''),
     deadline: task?.deadline || '',
     priority: task?.priority || 'medium',
-    status: task?.status || 'todo'
+    status: task?.status || 'todo',
+    leadId: task?.leadId || ''      // kaitan GRD — opsional, tidak pernah wajib
   });
   return (
     <Modal title={task ? 'Edit Tiket' : 'Tiket Baru'} onClose={onClose}>
@@ -6641,6 +6714,8 @@ function TaskForm({ task, prefill, user, assignableUsers, onSave, onClose }) {
             </select>
           </Field>
         </div>
+        <GrdPilihLeadTiket user={user} allUsers={allUsers} pemilikId={form.assigneeId}
+          value={form.leadId} onChange={(v) => setForm({ ...form, leadId: v })} />
         <FormActions onCancel={onClose} onSave={() => onSave(form)} disabled={!form.title.trim() || !form.assigneeId} />
       </div>
     </Modal>
@@ -18407,7 +18482,7 @@ function CatatanView({ user, allUsers }) {
           onClose={() => setViewing(null)} />
       )}
       {konversi && (
-        <TaskForm task={null} user={user} assignableUsers={penerima}
+        <TaskForm task={null} user={user} allUsers={allUsers} assignableUsers={penerima}
           prefill={{ title: konversi.title, description: Catatan.isiPolos(konversi.content) }}
           onSave={buatTiketDariCatatan} onClose={() => setKonversi(null)} />
       )}
