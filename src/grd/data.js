@@ -759,13 +759,21 @@ function urutkanOrang(a, b) {
  * B atasan A) TIDAK membuat halaman menggantung — orang yang tersisa karena
  * lingkaran diangkat jadi akar tambahan supaya tidak ada yang hilang dari pohon.
  */
-export function bangunPohonGoal({ users = [], goals = [], periode = '', batasKedalaman = 10 } = {}) {
+export function bangunPohonGoal({ users = [], goals = [], periode = '', batasKedalaman = 10, bolehLihat = null } = {}) {
   const daftar = (users || []).filter(u => u && u.id);
   const adaId = new Set(daftar.map(u => u.id));
 
+  // `bolehLihat` opsional: goal yang tidak lolos TIDAK dibuang diam-diam, tapi
+  // DIHITUNG sebagai `tersembunyi` pada simpulnya. Tanpa itu, orang yang goalnya
+  // disembunyikan akan tampil seolah "belum punya goal" — keliru dan menyesatkan.
   const perPemilik = new Map();
+  const disembunyikan = new Map();
   for (const g of goalPeriode(goals, periode)) {
     if (!g.ownerId) continue;
+    if (bolehLihat && !bolehLihat(g)) {
+      disembunyikan.set(g.ownerId, (disembunyikan.get(g.ownerId) || 0) + 1);
+      continue;
+    }
     if (!perPemilik.has(g.ownerId)) perPemilik.set(g.ownerId, []);
     perPemilik.get(g.ownerId).push(g);
   }
@@ -786,7 +794,12 @@ export function bangunPohonGoal({ users = [], goals = [], periode = '', batasKed
     const anak = level >= batasKedalaman ? []
       : (anakDari.get(u.id) || []).filter(a => !sudah.has(a.id)).sort(urutkanOrang)
           .map(a => bangun(a, level + 1));
-    return { user: u, level, goals: perPemilik.get(u.id) || [], anak, menggantung: !atasanSah(u, daftar) };
+    return {
+      user: u, level, anak,
+      goals: perPemilik.get(u.id) || [],
+      tersembunyi: disembunyikan.get(u.id) || 0,
+      menggantung: !atasanSah(u, daftar),
+    };
   };
 
   const hasil = akar.sort(urutkanOrang).map(u => bangun(u, 0));
@@ -992,9 +1005,14 @@ export function hitungOrangCabang(simpul) {
 /** Boleh mengubah/menghapus goal ini? Pemilik sendiri, atau atasannya (berjenjang). */
 export function bisaUbahGoal(user, goal, allUsers) {
   if (!user || !goal) return false;
-  if (isManajemen(user)) return true;
+  // Pemilik diperiksa SEBELUM pintasan Owner/Manajer — bukan sesudahnya.
+  // Goal tanpa pemilik adalah data rusak: `validasiGoal` menolak menyimpannya,
+  // jadi mengizinkan siapa pun mengubahnya tidak ada gunanya. Urutan ini juga
+  // menjaga jawabannya SAMA PERSIS dengan `alasanUbahGoal` yang dipakai halaman
+  // Kontrol Akses — kalau berbeda, layar dan layanan saling membantah.
   const g = normalisasiGoal(goal);
   if (!g || !g.ownerId) return false;
+  if (isManajemen(user)) return true;
   if (g.ownerId === user.id) return true;
   return idBawahanTransitif(user.id, allUsers).has(g.ownerId);
 }
@@ -1015,6 +1033,136 @@ export function goalYangBisaDikelola(user, goals, allUsers) {
 export function calonPemilikGoal(user, allUsers) {
   if (!user) return [];
   return (allUsers || []).filter(u => u && u.id && bisaBuatGoalUntuk(user, u.id, allUsers));
+}
+
+/**
+ * Rantai ATASAN ke atas: atasan langsung, atasannya, dan seterusnya.
+ * Aman terhadap data melingkar (dibatasi kedalaman + set "sudah dikunjungi").
+ */
+export function idAtasanKeAtas(userId, allUsers, batasKedalaman = 10) {
+  const hasil = new Set();
+  if (!userId) return hasil;
+  const cari = (id) => (allUsers || []).find(u => u && u.id === id);
+  let kini = cari(userId);
+  for (let d = 0; d < batasKedalaman && kini; d++) {
+    const pid = atasanId(kini);
+    if (!pid || hasil.has(pid) || pid === userId) break;
+    hasil.add(pid);
+    kini = cari(pid);
+  }
+  return hasil;
+}
+
+/**
+ * Boleh MELIHAT isi goal ini?
+ *
+ * Aturannya sengaja BUKAN "hanya goal sendiri". Roll down baru bermakna kalau
+ * orang bisa melihat ke ATAS — tanpa itu, staf melihat targetnya sendiri tanpa
+ * pernah tahu itu turunan dari goal siapa, dan "roll down" tinggal nama.
+ *
+ * Jadi yang terlihat: goal sendiri + goal seluruh bawahan (untuk mengawasi)
+ * + goal seluruh atasan ke atas (untuk memahami asal-usul targetnya).
+ * Yang TIDAK terlihat: goal orang di cabang lain yang sejajar — itu bukan
+ * urusannya, dan menyembunyikannya tidak merusak makna roll down.
+ *
+ * Catatan: STRUKTUR pohon (siapa atasan siapa) tetap terlihat semua orang.
+ * Yang disembunyikan isi goalnya, bukan keberadaan orangnya.
+ */
+export function bisaLihatGoal(user, goal, allUsers) {
+  if (!user) return false;
+  // Pemilik diperiksa lebih dulu — alasannya sama dengan bisaUbahGoal di atas.
+  const g = normalisasiGoal(goal);
+  if (!g || !g.ownerId) return false;
+  if (isManajemen(user)) return true;
+  if (g.ownerId === user.id) return true;
+  if (idBawahanTransitif(user.id, allUsers).has(g.ownerId)) return true;
+  return idAtasanKeAtas(user.id, allUsers).has(g.ownerId);
+}
+
+/** Penjelasan untuk halaman Kontrol Akses — bentuk sama dengan alasanUbahGoal. */
+export function alasanLihatGoal(user, goal, allUsers) {
+  if (!user) return { boleh: false, alasan: 'Tidak ada pengguna.' };
+  const g = normalisasiGoal(goal);
+  if (!g || !g.ownerId) return { boleh: false, alasan: 'Goal tidak punya pemilik.' };
+  if (isManajemen(user)) return { boleh: true, alasan: 'Owner/Manajer melihat seluruh organisasi.' };
+  if (g.ownerId === user.id) return { boleh: true, alasan: 'Goal miliknya sendiri.' };
+  if (idBawahanTransitif(user.id, allUsers).has(g.ownerId)) {
+    return { boleh: true, alasan: 'Pemiliknya bawahannya.' };
+  }
+  if (idAtasanKeAtas(user.id, allUsers).has(g.ownerId)) {
+    return { boleh: true, alasan: 'Pemiliknya atasannya — supaya jelas goalnya turunan dari mana.' };
+  }
+  return { boleh: false, alasan: 'Pemiliknya di cabang lain yang sejajar.' };
+}
+
+/** Goal yang boleh dilihat `user` saja. */
+export function goalYangBisaDilihat(user, goals, allUsers) {
+  return (goals || []).map(normalisasiGoal).filter(Boolean)
+    .filter(g => bisaLihatGoal(user, g, allUsers));
+}
+
+/**
+ * KENAPA seseorang boleh / tidak boleh mengubah sebuah goal.
+ *
+ * Bukan sekadar true/false: halaman Kontrol Akses harus bisa MENJELASKAN
+ * jawabannya, supaya pengelola bisa memeriksa aturan tanpa membaca kode dan
+ * tanpa menebak. Alasan yang sama juga dipakai pesan penolakan di layanan.
+ */
+export function alasanUbahGoal(user, goal, allUsers) {
+  if (!user) return { boleh: false, alasan: 'Tidak ada pengguna.' };
+  const g = normalisasiGoal(goal);
+  if (!g || !g.ownerId) return { boleh: false, alasan: 'Goal tidak punya pemilik.' };
+
+  if (isManajemen(user)) {
+    return { boleh: true, alasan: 'Owner/Manajer berwenang atas seluruh goal.' };
+  }
+  if (g.ownerId === user.id) {
+    return { boleh: true, alasan: 'Goal miliknya sendiri.' };
+  }
+  const bawahan = idBawahanTransitif(user.id, allUsers);
+  if (bawahan.has(g.ownerId)) {
+    const pemilik = pemilikGoal(g, allUsers);
+    const langsung = atasanId(pemilik) === user.id;
+    return {
+      boleh: true,
+      alasan: langsung ? 'Pemiliknya bawahan langsung.' : 'Pemiliknya bawahan berjenjang.',
+    };
+  }
+  return { boleh: false, alasan: 'Pemiliknya bukan dirinya sendiri maupun bawahannya.' };
+}
+
+/**
+ * Ringkasan hak seorang anggota atas data GRD — dipakai baris tabel Kontrol Akses.
+ * `lingkup` menjawab "sejauh mana ia melihat": seluruh organisasi, timnya, atau
+ * hanya dirinya. Nilainya diturunkan dari peran lewat hierarki.js, tidak dihitung
+ * ulang di sini.
+ */
+export function ringkasAksesUser(user, allUsers, goals) {
+  const semua = (goals || []).map(normalisasiGoal).filter(Boolean);
+  const bisaUbah = semua.filter(g => bisaUbahGoal(user, g, allUsers));
+  return {
+    user,
+    lingkup: isManajemen(user) ? 'semua' : isPengawas(user) ? 'tim' : 'diri',
+    totalGoal: semua.length,
+    jumlahBisaUbah: bisaUbah.length,
+    goalSendiri: semua.filter(g => g.ownerId === (user && user.id)).length,
+    jumlahBisaBuatUntuk: calonPemilikGoal(user, allUsers).length,
+    jumlahBawahan: idBawahanTransitif(user && user.id, allUsers).size,
+  };
+}
+
+export const LINGKUP_AKSES = {
+  semua: { label: 'Seluruh organisasi', color: 'bg-violet-100 text-violet-800' },
+  tim:   { label: 'Dirinya + timnya',   color: 'bg-blue-100 text-blue-800' },
+  diri:  { label: 'Dirinya sendiri',    color: 'bg-slate-100 text-slate-700' },
+};
+export const gayaLingkup = (l) => LINGKUP_AKSES[l] || LINGKUP_AKSES.diri;
+
+/** Tabel hak akses seluruh anggota — urut pangkat lalu nama, supaya stabil. */
+export function matriksAkses(allUsers, goals) {
+  return (allUsers || []).filter(u => u && u.id)
+    .map(u => ringkasAksesUser(u, allUsers, goals))
+    .sort((a, b) => urutkanOrang(a.user, b.user));
 }
 
 /** Boleh membuat goal ATAS NAMA orang ini? (dipakai tombol "turunkan ke bawahan"). */

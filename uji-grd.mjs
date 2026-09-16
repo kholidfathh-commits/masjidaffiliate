@@ -973,6 +973,73 @@ cek('17d-35b. rpc disuntik sebagai OPSIONAL (app tetap jalan tanpa fungsi SQL-ny
   const blok = src.slice(i, i + 500);
   return /rpc: supabase \? \(nama, args\) => supabase\.rpc\(nama, args\) : null/.test(blok);
 })());
+cek('17d-44. Pohon menyaring isi goal sesuai kewenangan LIHAT',
+  /bolehLihat: \(g\) => Grd\.bisaLihatGoal\(user, g, allUsers\)/.test(src));
+cek('17d-45. Goal tersembunyi ditandai jelas, tidak disamakan dengan "belum punya goal"',
+  /tidak ditampilkan — di luar kewenangan Anda/.test(src)
+  && /Belum punya goal periode ini/.test(src));
+cek('17d-46. Pemeriksa akses menampilkan hak LIHAT dan UBAH sekaligus',
+  /Grd\.alasanLihatGoal/.test(src) && /Grd\.alasanUbahGoal/.test(src));
+cek('17d-52. Penolakan simpan tampil INLINE di form, bukan lewat alert', (() => {
+  const i = src.indexOf('function useGrdTulis(');
+  const j = src.indexOf('function GrdPemilihPeriode(');
+  const hook = src.slice(i, j);
+  // simpanGoal mengembalikan pesan; form yang menempelkannya.
+  return /return \(e && e\.message\) \|\| 'Gagal menyimpan goal\.'/.test(hook)
+    && !/alert\('⚠️ ' \+ \(e\?\.message \|\| e\)\);\s*\}\s*\};\s*const bukaBaru/.test(hook);
+})());
+cek('17d-53. Form menempelkan pesan penolakan dari layanan', (() => {
+  const i = src.indexOf('function GrdFormGoal(');
+  const j = src.indexOf('function GrdTurunkanModal(');
+  const blok = src.slice(i, j);
+  return /const salahServer = await onSimpan/.test(blok) && /if \(salahServer\) setPesan\(salahServer\)/.test(blok);
+})());
+cek('17d-54. Tombol simpan terkunci selama proses (cegah klik ganda)', (() => {
+  const i = src.indexOf('function GrdFormGoal(');
+  const j = src.indexOf('function GrdTurunkanModal(');
+  const blok = src.slice(i, j);
+  return /disabled=\{menyimpan\}/.test(blok) && /Menyimpan…/.test(blok);
+})());
+cek('17d-47. Tombol ubah di kartu goal hanya muncul untuk yang berwenang', (() => {
+  const i = src.indexOf('function GrdKartuGoal(');
+  const j = src.indexOf('function GrdSimpul(');
+  const blok = src.slice(i, j);
+  return /\{bolehUbah && onUbah && \(/.test(blok);
+})());
+cek('17d-48. Panel detail menyembunyikan aksi dari yang tidak berwenang', (() => {
+  const i = src.indexOf('function GrdDetailGoal(');
+  const j = src.indexOf('function GrdSimpul(');
+  const blok = src.slice(i, j);
+  return /\{bolehUbah \? \(/.test(blok) && /Ubah Goal/.test(blok) && /hanya bisa melihat goal ini/.test(blok);
+})());
+cek('17d-49. Tombol turunkan di panel detail hanya saat pemiliknya punya bawahan', (() => {
+  const i = src.indexOf('function GrdDetailGoal(');
+  const j = src.indexOf('function GrdSimpul(');
+  return /Grd\.bawahanUntukTurunan\(g, allUsers\)\.length > 0/.test(src.slice(i, j));
+})());
+cek('17d-50. Jalur tulis TIDAK disalin per halaman (satu hook bersama)', (() => {
+  return /function useGrdTulis\(/.test(src)
+    && (src.match(/useGrdTulis\(\{/g) || []).length === 3; // definisi + 2 halaman
+})());
+cek('17d-51. Kedua halaman memakai hook yang sama', (() => {
+  const tree = src.indexOf('function GrdTreeView(');
+  const kelola = src.indexOf('function GrdKelolaView(');
+  const akses = src.indexOf('function GrdAksesView(');
+  return /useGrdTulis/.test(src.slice(tree, kelola)) && /useGrdTulis/.test(src.slice(kelola, akses));
+})());
+cek('17d-40. Halaman Kontrol Akses ada + rute + menunya',
+  /function GrdAksesView\(/.test(src) && /view === 'grd-akses'/.test(src) && /id: 'grd-akses'/.test(src));
+cek('17d-41. Menu Kontrol Akses hanya untuk pengelola',
+  /id: 'grd-akses'[^}]*show: isPengelola\(user\)/.test(src));
+cek('17d-42. Halaman menyatakan terbuka batas keamanannya (tidak menjanjikan kunci database)',
+  /belum menjadi kunci di sisi/i.test(src));
+cek('17d-43. Aturan akses TIDAK ditulis ulang di komponen (pakai fungsi murni)', (() => {
+  const i = src.indexOf('function GrdAksesView(');
+  const j = src.indexOf('function PageHeader(');
+  const blok = src.slice(i, j);
+  return /Grd\.matriksAkses/.test(blok) && /Grd\.alasanUbahGoal/.test(blok)
+    && !/idBawahanTransitif/.test(blok);
+})());
 cek('17d-16. Halaman Kelola Goal ada + rute + menunya',
   /function GrdKelolaView\(/.test(src) && /view === 'grd-kelola'/.test(src) && /id: 'grd-kelola'/.test(src));
 cek('17d-17. Kelola Goal hanya menampilkan goal yang boleh diurus',
@@ -1873,6 +1940,229 @@ cek('33e. Jejak keduanya tercatat terpisah', (() => {
 })());
 cek('33f. Jejak tiap goal terpisah prefixnya',
   (await Svc.ambilJejakGoal('br1')).every(j => j.goalId === 'br1'));
+Svc.setJalurGrd('auto');
+
+judul('34. Kontrol akses: jawaban yang bisa DIJELASKAN');
+const goalsAkses = [
+  goalDari('u-owner', { id: 'ak-owner' }),
+  goalDari('u-leader', { id: 'ak-leader' }),
+  goalDari('u-wakil', { id: 'ak-wakil' }),
+  goalDari('u-staf1', { id: 'ak-staf1' }),
+];
+const alasan = (siapa, goalId) =>
+  G.alasanUbahGoal(orang(siapa), goalsAkses.find(g => g.id === goalId), tim);
+
+cek('34a. Owner: alasannya menyebut wewenang menyeluruh',
+  alasan('u-owner', 'ak-staf1').boleh && /seluruh goal/i.test(alasan('u-owner', 'ak-staf1').alasan));
+cek('34b. Pemilik sendiri: alasannya jelas',
+  alasan('u-staf1', 'ak-staf1').boleh && /miliknya sendiri/i.test(alasan('u-staf1', 'ak-staf1').alasan));
+cek('34c. Bawahan LANGSUNG dibedakan dari berjenjang',
+  /bawahan langsung/i.test(alasan('u-wakil', 'ak-staf1').alasan), alasan('u-wakil', 'ak-staf1'));
+cek('34d. Bawahan BERJENJANG disebut berjenjang',
+  /berjenjang/i.test(alasan('u-leader', 'ak-staf1').alasan), alasan('u-leader', 'ak-staf1'));
+cek('34e. Ditolak: alasannya menjelaskan kenapa',
+  !alasan('u-staf1', 'ak-leader').boleh
+  && /bukan dirinya sendiri maupun bawahannya/i.test(alasan('u-staf1', 'ak-leader').alasan));
+cek('34f. Co-Leader terhadap Leader ditolak', !alasan('u-wakil', 'ak-leader').boleh);
+cek('34g. Jawabannya SELALU sama dengan bisaUbahGoal (tidak ada aturan kembar)', (() => {
+  // Termasuk goal RUSAK: dulu `bisaUbahGoal` menjawab true untuk Owner sementara
+  // `alasanUbahGoal` menjawab false — layar dan layanan saling membantah.
+  const semua = [...goalsAkses, goalDari(''), { id: 'z' }, null];
+  for (const u of [...tim, null]) for (const g of semua) {
+    if (G.alasanUbahGoal(u, g, tim).boleh !== G.bisaUbahGoal(u, g, tim)) return false;
+  }
+  return true;
+})());
+cek('34g-2. Goal tanpa pemilik ditolak untuk SEMUA peran, Owner sekalipun',
+  tim.every(u => !G.bisaUbahGoal(u, goalDari(''), tim)));
+cek('34h. Tanpa pengguna → ditolak dengan alasan', (() => {
+  const r = G.alasanUbahGoal(null, goalsAkses[0], tim);
+  return !r.boleh && !!r.alasan;
+})());
+cek('34i. Goal tanpa pemilik → ditolak dengan alasan', (() => {
+  const r = G.alasanUbahGoal(orang('u-owner'), goalDari(''), tim);
+  return !r.boleh && /pemilik/i.test(r.alasan);
+})());
+
+judul('35. Matriks hak akses seluruh anggota');
+const mx = G.matriksAkses(tim, goalsAkses);
+const baris = (id) => mx.find(r => r.user.id === id);
+cek('35a. Satu baris per anggota', mx.length === tim.length);
+cek('35b. Urut pangkat (Owner di atas)', mx[0].user.role === 'owner');
+cek('35c. Owner & Manajer berlingkup seluruh organisasi',
+  baris('u-owner').lingkup === 'semua' && baris('u-manajer').lingkup === 'semua');
+cek('35d. Leader & Co-Leader berlingkup tim',
+  baris('u-leader').lingkup === 'tim' && baris('u-wakil').lingkup === 'tim');
+cek('35e. Staf berlingkup dirinya sendiri', baris('u-staf1').lingkup === 'diri');
+cek('35f. Owner boleh mengubah semua goal',
+  baris('u-owner').jumlahBisaUbah === goalsAkses.length);
+cek('35g. Staf hanya goalnya sendiri', baris('u-staf1').jumlahBisaUbah === 1);
+cek('35h. Leader: goalnya + seluruh bawahannya', baris('u-leader').jumlahBisaUbah === 3,
+  baris('u-leader').jumlahBisaUbah);
+cek('35i. Jumlah bawahan transitif dihitung',
+  baris('u-leader').jumlahBawahan === 3 && baris('u-staf1').jumlahBawahan === 0);
+cek('35j. Goal sendiri dihitung terpisah', baris('u-wakil').goalSendiri === 1);
+cek('35k. jumlahBisaBuatUntuk sama dengan calonPemilikGoal',
+  baris('u-leader').jumlahBisaBuatUntuk === G.calonPemilikGoal(orang('u-leader'), tim).length);
+cek('35l. totalGoal sama untuk semua baris (pembanding yang adil)',
+  mx.every(r => r.totalGoal === goalsAkses.length));
+cek('35m. Urutan stabil antar-panggilan',
+  G.matriksAkses(tim, goalsAkses).map(r => r.user.id).join()
+  === G.matriksAkses(tim, goalsAkses).map(r => r.user.id).join());
+cek('35n. Tanpa goal sama sekali → tidak error, semua nol',
+  G.matriksAkses(tim, []).every(r => r.jumlahBisaUbah === 0 && r.totalGoal === 0));
+cek('35o. Daftar anggota kosong → matriks kosong',
+  G.matriksAkses([], goalsAkses).length === 0 && G.matriksAkses(null, goalsAkses).length === 0);
+cek('35p. Anggota tanpa id dilewati',
+  G.matriksAkses([null, {}, { id: '' }], goalsAkses).length === 0);
+cek('35q. Tiap lingkup punya label & warna', (() => {
+  return ['semua', 'tim', 'diri'].every(l => !!G.gayaLingkup(l).label && !!G.gayaLingkup(l).color);
+})());
+cek('35r. Lingkup tak dikenal jatuh ke "diri" (default paling sempit)',
+  G.gayaLingkup('ngawur') === G.LINGKUP_AKSES.diri);
+
+judul('36. Hak LIHAT goal — jalur ke atas harus tetap terbuka');
+// Tim bercabang: dua cabang sejajar di bawah Owner, supaya "cabang lain" teruji.
+const timCabang = [
+  { id: 'o', name: 'Owner', role: 'owner', leaderId: null },
+  { id: 'm', name: 'Manajer', role: 'manajer', leaderId: null },
+  { id: 'l1', name: 'Leader A', role: 'leader', leaderId: 'o' },
+  { id: 'w1', name: 'Co-Leader A', role: 'wakil', leaderId: 'l1' },
+  { id: 's1', name: 'Staf A', role: 'operasional', leaderId: 'w1' },
+  { id: 'l2', name: 'Leader B', role: 'leader', leaderId: 'o' },
+  { id: 's2', name: 'Staf B', role: 'operasional', leaderId: 'l2' },
+];
+const gc = (ownerId) => ({ id: 'g-' + ownerId, ownerId, periode: '2026-09',
+  description: 'Goal ' + ownerId, base: 0, target: 10, uom: 'x' });
+const lihat = (siapa, punya) =>
+  G.bisaLihatGoal(timCabang.find(u => u.id === siapa), gc(punya), timCabang);
+
+cek('36a. Rantai atasan ke atas terbaca',
+  [...G.idAtasanKeAtas('s1', timCabang)].sort().join() === 'l1,o,w1',
+  [...G.idAtasanKeAtas('s1', timCabang)]);
+cek('36b. Akar tidak punya atasan', G.idAtasanKeAtas('o', timCabang).size === 0);
+cek('36c. Rantai melingkar tidak menggantung', (() => {
+  const l = [{ id: 'a', role: 'operasional', leaderId: 'b' }, { id: 'b', role: 'operasional', leaderId: 'a' }];
+  return G.idAtasanKeAtas('a', l).size <= 2;
+})());
+cek('36d. userId kosong → kosong', G.idAtasanKeAtas('', timCabang).size === 0);
+
+cek('36e. Owner melihat semua', ['o', 'm', 'l1', 'w1', 's1', 'l2', 's2'].every(x => lihat('o', x)));
+cek('36f. Manajer melihat semua', lihat('m', 's2') && lihat('m', 's1'));
+cek('36g. Staf melihat goalnya sendiri', lihat('s1', 's1'));
+cek('36h. Staf melihat goal ATASANNYA (Co-Leader)', lihat('s1', 'w1'));
+cek('36i. Staf melihat goal atasan BERJENJANG (Leader)', lihat('s1', 'l1'));
+cek('36j. Staf melihat goal PERUSAHAAN (Owner) — inti roll down', lihat('s1', 'o'));
+cek('36k. Staf TIDAK melihat goal cabang lain yang sejajar', !lihat('s1', 's2'));
+cek('36l. Staf TIDAK melihat goal Leader cabang lain', !lihat('s1', 'l2'));
+cek('36m. Staf TIDAK melihat goal Manajer (bukan atasannya)', !lihat('s1', 'm'));
+cek('36n. Leader melihat goal bawahannya', lihat('l1', 's1') && lihat('l1', 'w1'));
+cek('36o. Leader TIDAK melihat goal Leader lain', !lihat('l1', 'l2'));
+cek('36p. Co-Leader melihat ke atas DAN ke bawah',
+  lihat('w1', 'l1') && lihat('w1', 'o') && lihat('w1', 's1'));
+cek('36q. Tanpa pengguna → tidak boleh', !G.bisaLihatGoal(null, gc('o'), timCabang));
+cek('36r. Goal tanpa pemilik → TIDAK boleh dilihat siapa pun, Owner sekalipun', (() => {
+  const rusak = { id: 'x', ownerId: '', periode: '2026-09', description: 'a', base: 0, target: 1, uom: 'x' };
+  return timCabang.every(u => !G.bisaLihatGoal(u, rusak, timCabang));
+})());
+
+cek('36s. alasanLihatGoal sejalan dengan bisaLihatGoal (termasuk goal rusak)', (() => {
+  const rusak = [{ ownerId: '' }, { id: 'z' }, null];
+  for (const u of [...timCabang, null]) {
+    for (const p of timCabang) {
+      if (G.alasanLihatGoal(u, gc(p.id), timCabang).boleh !== G.bisaLihatGoal(u, gc(p.id), timCabang)) return false;
+    }
+    for (const r of rusak) {
+      if (G.alasanLihatGoal(u, r, timCabang).boleh !== G.bisaLihatGoal(u, r, timCabang)) return false;
+    }
+  }
+  return true;
+})());
+cek('36t. Alasan melihat goal atasan menyebut asal-usul target',
+  /turunan dari mana/i.test(G.alasanLihatGoal(timCabang[4], gc('o'), timCabang).alasan));
+cek('36u. Alasan ditolak menyebut cabang lain',
+  /cabang lain/i.test(G.alasanLihatGoal(timCabang[4], gc('s2'), timCabang).alasan));
+
+cek('36v. goalYangBisaDilihat menyaring daftar', (() => {
+  const semua = timCabang.map(u => gc(u.id));
+  const utkStaf = G.goalYangBisaDilihat(timCabang[4], semua, timCabang);
+  return utkStaf.map(g => g.ownerId).sort().join() === 'l1,o,s1,w1';
+})());
+
+judul('37. Pohon menghitung goal yang disembunyikan');
+const semuaGc = timCabang.map(u => gc(u.id));
+const pohonStaf = G.bangunPohonGoal({
+  users: timCabang, goals: semuaGc, periode: '2026-09',
+  bolehLihat: (g) => G.bisaLihatGoal(timCabang[4], g, timCabang),
+});
+const simpulStaf = (id) => G.ratakanPohon(pohonStaf).find(s => s.user.id === id);
+cek('37a. Semua ORANG tetap muncul (struktur tidak disembunyikan)',
+  G.ratakanPohon(pohonStaf).length === timCabang.length);
+cek('37b. Goal yang boleh dilihat tetap tampil', simpulStaf('o').goals.length === 1);
+cek('37c. Goal cabang lain TIDAK tampil', simpulStaf('s2').goals.length === 0);
+cek('37d. Tapi DIHITUNG sebagai tersembunyi (bukan "belum punya goal")',
+  simpulStaf('s2').tersembunyi === 1, simpulStaf('s2'));
+cek('37e. Simpul yang goalnya terlihat tidak punya tersembunyi',
+  simpulStaf('o').tersembunyi === 0);
+cek('37f. Orang yang memang tidak punya goal: tersembunyi 0', (() => {
+  const p = G.bangunPohonGoal({
+    users: timCabang, goals: [gc('o')], periode: '2026-09',
+    bolehLihat: () => true,
+  });
+  return G.ratakanPohon(p).find(s => s.user.id === 's2').tersembunyi === 0;
+})());
+cek('37g. Tanpa bolehLihat, tidak ada yang disembunyikan (perilaku lama utuh)', (() => {
+  const p = G.bangunPohonGoal({ users: timCabang, goals: semuaGc, periode: '2026-09' });
+  return G.ratakanPohon(p).every(s => s.tersembunyi === 0);
+})());
+cek('37h. Ringkasan hanya menghitung goal yang terlihat',
+  G.ringkasPohon(pohonStaf).totalGoal === 4, G.ringkasPohon(pohonStaf).totalGoal);
+cek('37i. Owner melihat seluruh goal', (() => {
+  const p = G.bangunPohonGoal({
+    users: timCabang, goals: semuaGc, periode: '2026-09',
+    bolehLihat: (g) => G.bisaLihatGoal(timCabang[0], g, timCabang),
+  });
+  return G.ringkasPohon(p).totalGoal === timCabang.length;
+})());
+
+judul('38. Pesan penolakan harus MENJELASKAN, bukan sekadar menolak');
+const spTolak = storagePalsu(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spTolak });
+const gMilikLeader = { id: 'tk1', ownerId: 'u-leader', periode: '2026-09',
+  description: 'GMV tim', base: 0, target: 900, uom: 'Juta' };
+await Svc.simpanGoal(gMilikLeader, { user: LEADER, allUsers: tim });
+
+const pesanDari = async (fn) => { try { await fn(); return ''; } catch (e) { return e.message; } };
+
+const pesanUbah = await pesanDari(() => Svc.simpanGoal({ ...gMilikLeader, target: 1 },
+  { user: STAF1, allUsers: tim, goalLama: gMilikLeader }));
+cek('38a. Menolak ubah DAN menjelaskan kenapa',
+  /tidak berwenang mengubah/.test(pesanUbah) && /bukan dirinya sendiri maupun bawahannya/.test(pesanUbah), pesanUbah);
+
+const pesanHapus = await pesanDari(() => Svc.hapusGoal(gMilikLeader, { user: STAF1, allUsers: tim }));
+cek('38b. Menolak hapus DAN menjelaskan kenapa',
+  /tidak berwenang menghapus/.test(pesanHapus) && /bukan dirinya sendiri/.test(pesanHapus), pesanHapus);
+
+const pesanTurun = await pesanDari(() => Svc.turunkanGoal(gMilikLeader, { user: STAF1, allUsers: tim }));
+cek('38c. Menolak turunkan DAN menjelaskan kenapa',
+  /tidak berwenang menurunkan/.test(pesanTurun) && /bukan dirinya sendiri/.test(pesanTurun), pesanTurun);
+
+const pesanAtasNama = await pesanDari(() => Svc.simpanGoal(
+  { id: 'tk2', ownerId: 'u-leader', periode: '2026-09', description: 'x', base: 0, target: 5, uom: 'x' },
+  { user: STAF1, allUsers: tim }));
+cek('38d. Menolak membuat atas nama orang lain DAN MENYEBUT NAMANYA',
+  /Leader TAP/.test(pesanAtasNama), pesanAtasNama);
+cek('38e. Menyebutkan siapa yang boleh dibuatkan goal',
+  /diri sendiri dan anggota di bawah Anda/.test(pesanAtasNama), pesanAtasNama);
+
+cek('38f. Alasan di pesan SAMA dengan yang ditampilkan halaman Kontrol Akses', (() => {
+  const dariHalaman = G.alasanUbahGoal(STAF1, gMilikLeader, tim).alasan;
+  return pesanUbah.includes(dariHalaman);
+})());
+cek('38g. Yang berwenang tetap lolos tanpa pesan apa pun',
+  (await pesanDari(() => Svc.simpanGoal({ ...gMilikLeader, target: 950 },
+    { user: OWNER, allUsers: tim, goalLama: gMilikLeader }))) === '');
+cek('38h. Penolakan tidak meninggalkan perubahan',
+  spTolak.baris.get('grdgoal:rec:tk1').target === 950 && !spTolak.baris.has('grdgoal:rec:tk2'));
 Svc.setJalurGrd('auto');
 
 // ============================================================================

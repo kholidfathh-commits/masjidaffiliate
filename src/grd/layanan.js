@@ -342,12 +342,19 @@ export async function simpanGoal(goal, { user, allUsers, goalLama = null } = {})
   // nama orang lain. Keduanya wajib — kalau hanya salah satu, atasan bisa
   // "memindahkan" goal ke orang yang bukan bawahannya lewat form ubah.
   if (goalLama) {
-    if (!Grd.bisaUbahGoal(user, goalLama, allUsers)) {
-      throw new GrdDitolak('Anda tidak berwenang mengubah goal ini.');
+    // Pesannya menyertakan ALASAN dari fungsi yang sama yang dipakai halaman
+    // Kontrol Akses — jadi penolakan di sini tidak pernah bertentangan dengan
+    // penjelasan yang dibaca pengguna di halaman itu.
+    const izin = Grd.alasanUbahGoal(user, goalLama, allUsers);
+    if (!izin.boleh) {
+      throw new GrdDitolak(`Anda tidak berwenang mengubah goal ini. ${izin.alasan}`);
     }
   }
   if (!Grd.bisaBuatGoalUntuk(user, g.ownerId, allUsers)) {
-    throw new GrdDitolak('Anda tidak berwenang membuat goal atas nama orang itu.');
+    const pemilik = Grd.pemilikGoal(g, allUsers);
+    throw new GrdDitolak(pemilik
+      ? `Anda tidak berwenang membuat goal atas nama ${pemilik.name} — hanya untuk diri sendiri dan anggota di bawah Anda.`
+      : 'Anda tidak berwenang membuat goal atas nama orang itu.');
   }
 
   // Jalur server dulu bila tersedia; kalau belum disiapkan, tulis langsung.
@@ -366,8 +373,9 @@ export async function simpanGoal(goal, { user, allUsers, goalLama = null } = {})
 export async function hapusGoal(goal, { user, allUsers } = {}) {
   const g = Grd.normalisasiGoal(goal);
   if (!g || !g.id) throw new GrdDitolak('Data goal tidak terbaca.');
-  if (!Grd.bisaUbahGoal(user, g, allUsers)) {
-    throw new GrdDitolak('Anda tidak berwenang menghapus goal ini.');
+  const izinHapus = Grd.alasanUbahGoal(user, g, allUsers);
+  if (!izinHapus.boleh) {
+    throw new GrdDitolak(`Anda tidak berwenang menghapus goal ini. ${izinHapus.alasan}`);
   }
   const viaRpc = await lewatRpc('grd_hapus_goal', { p_id: g.id });
   if (!viaRpc.pakai) {
@@ -394,8 +402,9 @@ export async function hapusGoal(goal, { user, allUsers } = {}) {
 export async function turunkanGoal(goal, { user, allUsers, bagiRata, goalAda } = {}) {
   const g = Grd.normalisasiGoal(goal);
   if (!g || !g.id) throw new GrdDitolak('Data goal tidak terbaca.');
-  if (!Grd.bisaUbahGoal(user, g, allUsers)) {
-    throw new GrdDitolak('Anda tidak berwenang menurunkan goal ini.');
+  const izinTurun = Grd.alasanUbahGoal(user, g, allUsers);
+  if (!izinTurun.boleh) {
+    throw new GrdDitolak(`Anda tidak berwenang menurunkan goal ini. ${izinTurun.alasan}`);
   }
 
   const ada = goalAda || await ambilGoal();
