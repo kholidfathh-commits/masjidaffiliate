@@ -681,22 +681,32 @@ export const fieldJejakAngka = (f) => !!(FIELD_JEJAK[f] || {}).angka;
  * Goal yang baru dibuat menghasilkan SATU catatan '_dibuat', bukan satu catatan
  * per field (kalau tidak, riwayat goal baru langsung penuh tujuh baris kosong).
  */
+// Pembeda antar-baris jejak yang jatuh pada milidetik yang sama. Cukup berputar
+// di angka besar — yang dibutuhkan hanya "berbeda dari tetangganya", bukan unik
+// selamanya, karena waktunya sudah jadi bagian kunci.
+let _seqJejak = 0;
+const _urutJejak = () => {
+  _seqJejak = (_seqJejak + 1) % 1000000;
+  return String(_seqJejak).padStart(6, '0');
+};
+
 export function catatPerubahan(goalLama, goalBaru, oleh, waktu = new Date().toISOString()) {
   const b = normalisasiGoal(goalBaru);
   if (!b || !b.id) return [];
   const olehId = (oleh && oleh.id) || '';
   const olehNama = (oleh && oleh.name) || 'Tidak diketahui';
-  // BENTUK ID = <goalId>:<field>:<waktu>. Goal di depan supaya riwayat satu goal
-  // bisa ditarik lewat satu prefix (lihat prefixJejakGoal).
+  // BENTUK ID = <goalId>:<field>:<waktu>:<urutan>. Goal di depan supaya riwayat
+  // satu goal bisa ditarik lewat satu prefix (lihat prefixJejakGoal).
   //
-  // BATASNYA, ditulis terus terang: resolusinya milidetik, jadi DUA perubahan
-  // pada FIELD YANG SAMA di milidetik yang sama akan memakai kunci yang sama dan
-  // yang belakangan menimpa yang duluan. Lewat layar itu mustahil — manusia tidak
-  // bisa menyimpan dua kali dalam semilidetik — tapi penulisan programatik (mis.
-  // skrip impor atau percobaan-ulang otomatis) bisa. Kalau suatu hari ada jalur
-  // seperti itu, id ini yang harus ditambah pembeda, bukan gejalanya yang ditambal.
+  // `urutan` ADA KARENA PERNAH MENGHILANGKAN DATA. Tanpa itu, resolusi waktunya
+  // milidetik — dan dua perubahan pada FIELD yang sama di milidetik yang sama
+  // memakai kunci yang sama, jadi yang belakangan menimpa yang duluan. Akibatnya
+  // persis yang paling merusak pada catatan audit: target dinaikkan 100→150 lalu
+  // diturunkan 150→90 dalam sekejap hanya menyisakan SATU baris "150→90", dan
+  // kenaikannya lenyap tanpa bekas. Sempat dianggap mustahil terjadi lewat layar,
+  // sampai sebuah uji melakukannya dan datanya memang hilang.
   const buat = (field, dari, ke) => ({
-    id: `${b.id}:${field}:${waktu}`,
+    id: `${b.id}:${field}:${waktu}:${_urutJejak()}`,
     goalId: b.id, field, dari, ke, olehId, olehNama, waktu,
   });
 
@@ -727,7 +737,7 @@ export function catatPenghapusan(goal, oleh, waktu = new Date().toISOString()) {
   const g = normalisasiGoal(goal);
   if (!g || !g.id) return [];
   return [{
-    id: `${g.id}:_dihapus:${waktu}`,
+    id: `${g.id}:_dihapus:${waktu}:${_urutJejak()}`,
     goalId: g.id,
     field: '_dihapus',
     dari: g.target,

@@ -5137,6 +5137,98 @@ cek('90f. Begitu juga fungsi tulis lead', (() => {
 })());
 
 // ============================================================================
+judul('91. Riwayat angka dari lahir sampai dihapus — satu cerita utuh');
+// ----------------------------------------------------------------------------
+// §87–§90 memeriksa bagian-bagiannya. Yang ini menelusuri SATU goal dari dibuat
+// sampai dihapus, lalu membaca ulang seluruh ceritanya lewat pintu layanan —
+// karena bagian yang masing-masing benar masih bisa salah saat dirangkai.
+// ============================================================================
+const spHd = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spHd });
+const gHd = { id: 'hd1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Konten affiliate', base: 0, target: 100, uom: 'Konten' };
+
+let vHd = await Svc.simpanGoal(gHd, { user: STAF1, allUsers: tim });                       // lahir
+vHd = await Svc.simpanGoal({ ...vHd, target: 150 },
+  { user: LEADER, allUsers: tim, goalLama: vHd });                                          // target dinaikkan
+vHd = await Svc.simpanGoal({ ...vHd, actual: 40 },
+  { user: STAF1, allUsers: tim, goalLama: vHd });                                           // angka terkini diisi
+vHd = await Svc.simpanGoal({ ...vHd, target: 90 },
+  { user: OWNER, allUsers: tim, goalLama: vHd });                                           // target DITURUNKAN
+
+const ceritaSblm = await Svc.ambilJejakGoal('hd1');
+cek('91a. Semua langkah tercatat, tidak ada yang tertelan',
+  ceritaSblm.length === 4, ceritaSblm.map(j => j.field));
+cek('91b. Kelahirannya tercatat', ceritaSblm.some(j => j.field === '_dibuat'));
+cek('91c. Dua perubahan target tercatat terpisah, tidak digabung jadi satu',
+  ceritaSblm.filter(j => j.field === 'target').length === 2,
+  ceritaSblm.filter(j => j.field === 'target').map(j => `${j.dari}->${j.ke}`));
+cek('91d. Perubahan angka terkini tercatat',
+  ceritaSblm.some(j => j.field === 'actual' && j.dari === 0 && j.ke === 40));
+cek('91e. Tiap langkah menyebut orang yang BERBEDA sesuai yang melakukannya', (() => {
+  const t = ceritaSblm.filter(j => j.field === 'target');
+  return t.some(j => j.olehId === 'u-leader') && t.some(j => j.olehId === 'u-owner');
+})(), ceritaSblm.map(j => `${j.field}:${j.olehId}`));
+
+const rkHd = G.ringkasJejakAngka(ceritaSblm);
+cek('91f. Ringkasannya jujur: 2 naik, 1 turun', rkHd.naik === 2 && rkHd.turun === 1, rkHd);
+cek('91g. TARGET YANG DITURUNKAN bisa ditemukan — inti dari jejak audit',
+  ceritaSblm.some(j => j.field === 'target' && G.arahJejak(j) === 'turun'),
+  ceritaSblm.filter(j => j.field === 'target').map(j => G.arahJejak(j)));
+
+// Terbaca juga lewat halaman lintas-goal, dengan gerbang hak lihatnya.
+const goalsHd = await Svc.ambilGoal();
+const lintas = G.jejakLintasGoal(ceritaSblm, goalsHd, tim, { periode: '2026-09' });
+cek('91h. Halaman lintas-goal menampilkan perubahan angkanya',
+  lintas.total === 3, lintas.hasil.map(j => j.field));   // _dibuat bukan perubahan angka
+cek('91i. Terbaru di atas', lintas.hasil[0].field === 'target' && lintas.hasil[0].ke === 90,
+  lintas.hasil.map(j => `${j.field}:${j.ke}`));
+cek('91j. Saring per pengubah menemukan siapa yang menurunkan target',
+  G.jejakLintasGoal(ceritaSblm, goalsHd, tim, { periode: '2026-09', olehId: 'u-owner' })
+    .hasil.every(j => j.olehId === 'u-owner'));
+
+// Lalu goalnya dihapus.
+await Svc.hapusGoal(vHd, { user: OWNER, allUsers: tim });
+const ceritaSsdh = await Svc.ambilJejakGoal('hd1');
+cek('91k. Seluruh cerita SELAMAT setelah goalnya dihapus',
+  ceritaSsdh.length === 5, ceritaSsdh.map(j => j.field));
+cek('91l. Termasuk catatan penghapusannya sendiri',
+  ceritaSsdh.some(j => j.field === '_dihapus' && j.olehId === 'u-owner'));
+cek('91m. Target terakhir sebelum hilang ikut terekam',
+  ceritaSsdh.find(j => j.field === '_dihapus').dari === 90);
+cek('91n. Ceritanya kini yatim — ada, tapi tak muncul di daftar mana pun',
+  G.jejakYatim(ceritaSsdh, await Svc.ambilGoal()).length === 5);
+cek('91o. Dan tidak ada satu pun barisnya yang rusak bentuknya',
+  ceritaSsdh.every(j => !G.jejakRusak(j)),
+  ceritaSsdh.filter(j => G.jejakRusak(j)).map(j => G.fieldHilangJejak(j)));
+// --- kunci jejak tidak boleh saling menimpa di milidetik yang sama ---
+const gSeq = { id: 'sq1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Uji urutan', base: 0, target: 100, uom: 'x' };
+const w = '2026-09-10T03:00:00.000Z';   // waktu DIPAKSA sama persis
+const naik = G.catatPerubahan(gSeq, { ...gSeq, target: 150 }, OWNER, w);
+const turun = G.catatPerubahan({ ...gSeq, target: 150 }, { ...gSeq, target: 90 }, OWNER, w);
+cek('91q. Dua perubahan field SAMA di milidetik SAMA punya kunci berbeda',
+  naik[0].id !== turun[0].id, [naik[0].id, turun[0].id]);
+cek('91r. Jadi keduanya tersimpan, bukan yang satu menimpa yang lain', (() => {
+  const kotak = new Map();
+  for (const j of [...naik, ...turun]) kotak.set(j.id, j);
+  return kotak.size === 2;
+})());
+cek('91s. Kenaikan yang dulu lenyap kini masih terbaca',
+  naik[0].dari === 100 && naik[0].ke === 150 && turun[0].dari === 150 && turun[0].ke === 90);
+cek('91t. Kuncinya tetap berawalan goalId, jadi pembacaan per-prefix tidak rusak',
+  naik[0].id.startsWith('sq1:') && turun[0].id.startsWith('sq1:'));
+cek('91u. Catatan penghapusan memakai bentuk kunci yang sama',
+  G.catatPenghapusan(gSeq, OWNER, w)[0].id.startsWith('sq1:_dihapus:'),
+  G.catatPenghapusan(gSeq, OWNER, w)[0].id);
+cek('91v. Dua penghapusan sewaktu pun tidak bertabrakan',
+  G.catatPenghapusan(gSeq, OWNER, w)[0].id !== G.catatPenghapusan(gSeq, OWNER, w)[0].id);
+
+cek('91p. Dibaca lewat prefix goal itu saja, tidak pernah menarik jejak seluruh tim',
+  spHd.prefixDiminta.includes('grdjejak:rec:hd1:')
+  && !spHd.prefixDiminta.includes('grdjejak:rec:'), spHd.prefixDiminta);
+lepasMockGrd();
+
+// ============================================================================
 judul('18. Penjaga ATURAN WAJIB penyimpanan (no. 3, 4, 5 di CLAUDE.md)');
 // Sama peran dengan uji-sampel.mjs §18: kalau blok ini gagal, biasanya memang
 // ada aturan yang terlanggar — bukan regexnya yang perlu dilonggarkan.
