@@ -4912,6 +4912,50 @@ cek('88s. Jejak itu kini yatim — ada, tapi tak akan muncul di daftar mana pun'
   G.jejakYatim(jjSisa, []).length === jjSisa.length);
 lepasMockGrd();
 
+// --- pencatat jejak: kegagalan tulis tidak boleh ditelan diam-diam ---
+const spJf = storageMock(); Svc.setJalurGrd('kv'); Svc.initGrd({ storage: spJf });
+const gJf = { id: 'jf1', ownerId: 'u-staf1', periode: '2026-09',
+  description: 'Uji jejak gagal', base: 0, target: 10, uom: 'x' };
+await Svc.simpanGoal(gJf, { user: OWNER, allUsers: tim });
+cek('88v. Keadaan awal: goal & jejak pembuatannya sama-sama tersimpan',
+  spJf.jumlah('grdgoal:rec:jf1') === 1 && spJf.jumlah('grdjejak:rec:jf1:') === 1,
+  { goal: spJf.jumlah('grdgoal:rec:jf1'), jejak: spJf.jumlah('grdjejak:rec:jf1:') });
+
+// Sekarang buat HANYA penulisan jejak yang gagal.
+spJf.gagalSetPrefix = 'grdjejak:rec:';
+const jejakSblm = spJf.jumlah('grdjejak:rec:jf1:');
+const hasilJf = await Svc.simpanGoal({ ...gJf, target: 99 },
+  { user: OWNER, allUsers: tim, goalLama: gJf });   // seperti App.jsx: goal lama dioper
+cek('88w. Jejak gagal ditulis TIDAK membatalkan penyimpanan goal',
+  hasilJf.target === 99 && spJf.baris.get('grdgoal:rec:jf1').target === 99,
+  spJf.baris.get('grdgoal:rec:jf1'));
+cek('88x. Dan jejaknya memang tidak bertambah (kegagalannya nyata, bukan kebetulan lolos)',
+  spJf.jumlah('grdjejak:rec:jf1:') === jejakSblm, spJf.jumlah('grdjejak:rec:jf1:'));
+spJf.gagalSetPrefix = '';
+await Svc.simpanGoal({ ...gJf, target: 150 },
+  { user: OWNER, allUsers: tim, goalLama: { ...gJf, target: 99 } });
+cek('88y. Setelah penyimpanan pulih, jejak tercatat lagi',
+  spJf.jumlah('grdjejak:rec:jf1:') > jejakSblm, spJf.jumlah('grdjejak:rec:jf1:'));
+cek('88y1. Yang tercatat memang perubahan targetnya (99 → 150)', (() => {
+  const r = spJf.kunci('grdjejak:rec:jf1:').map(k => spJf.baris.get(k))
+    .find(j => j.field === 'target');
+  return !!r && r.dari === 99 && r.ke === 150;
+})(), spJf.kunci('grdjejak:rec:jf1:'));
+lepasMockGrd();
+
+cek('88z. Pencatat jejak memeriksa NILAI KEMBALIAN set, bukan cuma menangkap error', (() => {
+  const svc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+  const i = svc.indexOf('async function tulisJejak(');
+  const b = svc.slice(i, svc.indexOf('\n}', i));
+  return /const ok = await st\(\)\.set\(/.test(b) && /if \(ok\) ditulis \+= 1;/.test(b);
+})());
+cek('88z1. Kegagalannya dilaporkan, tidak ditelan diam-diam', (() => {
+  const svc = fs.readFileSync(ROOT + '/src/grd/layanan.js', 'utf8');
+  const i = svc.indexOf('async function tulisJejak(');
+  const b = svc.slice(i, svc.indexOf('\n}', i));
+  return /console\.warn\(/.test(b) && /return \{ ditulis, gagal \};/.test(svc.slice(i, i + 2000));
+})());
+
 cek('88t. Halaman Jejak MELAPORKAN yang yatim, tidak membiarkannya hilang diam-diam',
   /Grd\.jejakYatim\(jejak, goals\)/.test(badanJv) && /yatim\.length > 0/.test(badanJv));
 cek('88u. Dan mengatakan kenapa tidak dihapus',

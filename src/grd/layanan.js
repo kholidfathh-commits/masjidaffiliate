@@ -856,10 +856,29 @@ export async function turunkanGoal(goal, { user, allUsers, bagiRata, goalAda } =
 
 /** Tulis catatan jejak. Jejak yang gagal tidak boleh membatalkan simpan goalnya. */
 async function tulisJejak(catatan) {
+  let ditulis = 0;
+  const gagal = [];
   for (const j of catatan || []) {
-    try { await st().set(Grd.JEJAK_REC_PREFIX + j.id, j); }
-    catch (e) { console.warn('Jejak GRD gagal ditulis (goal tetap tersimpan):', e?.message || e); }
+    try {
+      // `set` MENGEMBALIKAN false saat gagal, tidak melempar. Dulu di sini hanya
+      // ada try/catch, jadi kegagalan seperti itu lolos tanpa jejak apa pun —
+      // catatan audit hilang dan tidak ada satu pun tanda bahwa ia pernah ada.
+      const ok = await st().set(Grd.JEJAK_REC_PREFIX + j.id, j);
+      if (ok) ditulis += 1;
+      else gagal.push({ id: j.id, field: j.field, alasan: 'penyimpanan menolak' });
+    } catch (e) {
+      gagal.push({ id: j.id, field: j.field, alasan: (e && e.message) || 'kesalahan tak dikenal' });
+    }
   }
+  if (gagal.length) {
+    // SENGAJA tidak membatalkan penyimpanan goal. Angka yang sudah benar lebih
+    // berharga daripada catatan perubahannya, dan menolak simpan hanya karena
+    // catatannya gagal akan membuat orang tidak bisa memperbaiki angkanya sama
+    // sekali. Tapi kegagalannya dikatakan, tidak ditelan diam-diam.
+    console.warn(`Jejak GRD gagal ditulis untuk ${gagal.length} perubahan (goal tetap tersimpan):`,
+      gagal.map(x => `${x.field}: ${x.alasan}`).join('; '));
+  }
+  return { ditulis, gagal };
 }
 
 /**

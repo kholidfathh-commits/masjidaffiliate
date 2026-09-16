@@ -29,6 +29,10 @@ export function storageMock(awal = {}) {
     baris,
     prefixDiminta: [],
     gagalSet: false,       // true → semua tulis gagal (menguji penanganan kegagalan)
+    // true → HANYA kunci berawalan ini yang gagal ditulis. Dipakai membuktikan
+    // sesuatu yang tidak bisa dibuktikan dengan gagalSet: bahwa goal TETAP
+    // tersimpan walau catatan jejaknya gagal.
+    gagalSetPrefix: '',
     async listByPrefix(prefix) {
       this.prefixDiminta.push(prefix);
       return [...baris.entries()]
@@ -37,7 +41,11 @@ export function storageMock(awal = {}) {
         .map(([, v]) => v);
     },
     async get(k) { return baris.has(k) ? baris.get(k) : null; },
-    async set(k, v) { if (this.gagalSet) return false; baris.set(k, v); return true; },
+    async set(k, v) {
+      if (this.gagalSet) return false;
+      if (this.gagalSetPrefix && String(k).startsWith(this.gagalSetPrefix)) return false;
+      baris.set(k, v); return true;
+    },
     async delete(k) { baris.delete(k); return true; },
 
     // ---- bantuan pemeriksaan ----

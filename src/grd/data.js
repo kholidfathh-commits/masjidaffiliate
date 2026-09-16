@@ -685,6 +685,15 @@ export function catatPerubahan(goalLama, goalBaru, oleh, waktu = new Date().toIS
   if (!b || !b.id) return [];
   const olehId = (oleh && oleh.id) || '';
   const olehNama = (oleh && oleh.name) || 'Tidak diketahui';
+  // BENTUK ID = <goalId>:<field>:<waktu>. Goal di depan supaya riwayat satu goal
+  // bisa ditarik lewat satu prefix (lihat prefixJejakGoal).
+  //
+  // BATASNYA, ditulis terus terang: resolusinya milidetik, jadi DUA perubahan
+  // pada FIELD YANG SAMA di milidetik yang sama akan memakai kunci yang sama dan
+  // yang belakangan menimpa yang duluan. Lewat layar itu mustahil — manusia tidak
+  // bisa menyimpan dua kali dalam semilidetik — tapi penulisan programatik (mis.
+  // skrip impor atau percobaan-ulang otomatis) bisa. Kalau suatu hari ada jalur
+  // seperti itu, id ini yang harus ditambah pembeda, bukan gejalanya yang ditambal.
   const buat = (field, dari, ke) => ({
     id: `${b.id}:${field}:${waktu}`,
     goalId: b.id, field, dari, ke, olehId, olehNama, waktu,
